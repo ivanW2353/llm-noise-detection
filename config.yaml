@@ -1,0 +1,33 @@
+paths:
+  model: /root/autodl-tmp/Qwen2.5-3B-Instruct
+  data_root: /root/autodl-tmp/noisedetect
+  repo_root: /root/noisedetect
+
+noise:
+  ratio: 0.10
+  seed: 42
+  types: [garbled, duplicate, unrelated, keyword]
+
+train:
+  max_len: 1024
+  lr: 0.0002
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  epochs: 5
+  micro_batch: 1
+  grad_accum: 16
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  seed: 42
+  ref_samples: 200
+  heldout_samples: 200
+  eval_steps: 200
+  diag_subsample: 8
+  hard_threshold: 4.0
+
+eval:
+  seed: 42
+  max_new_tokens: 256
+  batch_size: 32
+  tasks: [mmlu, gsm8k, hellaswag, arc, bbh, truthfulqa, winogrande]
