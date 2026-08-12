@@ -25,6 +25,7 @@ train:
   eval_steps: 200
   diag_subsample: 8
   hard_threshold: 4.0
+  log_every: 25
 
 eval:
   seed: 42
