@@ -37,7 +37,8 @@ def load_model(cfg, dataset):
         cfg["paths"]["model"], dtype=torch.bfloat16,
         attn_implementation="flash_attention_2", device_map={"": 0})
     if dataset != "base":
-        lora_path = os.path.join(cfg["paths"]["data_root"], "runs", dataset, "lora")
+        tag = cfg["paths"].get("experiment_tag", "")
+        lora_path = os.path.join(cfg["paths"]["data_root"], "runs", tag, dataset, "lora")
         model = PeftModel.from_pretrained(model, lora_path)
     model.eval()
     return model
@@ -285,7 +286,9 @@ def evaluate(cfg, dataset, tasks, smoke=False):
         r = run_task(model, tokenizer, task, smoke=smoke)
         results[task] = r["acc"]
         print(f"  {task}: {r['acc']:.4f} (n={r['n']})", flush=True)
-    out_path = os.path.join(repo, "results", f"eval_{dataset}.json")
+    tag = cfg["paths"].get("experiment_tag", "")
+    name = f"eval_{tag}_{dataset}.json" if tag else f"eval_{dataset}.json"
+    out_path = os.path.join(repo, "results", name)
     json.dump(results, open(out_path, "w"), indent=2)
     print(f"saved -> {out_path}")
 
@@ -295,8 +298,11 @@ if __name__ == "__main__":
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--dataset", default="clean")
     ap.add_argument("--tasks", default=None)
+    ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    if args.tag:
+        cfg["paths"]["experiment_tag"] = args.tag
     tasks = args.tasks.split(",") if args.tasks else cfg["eval"]["tasks"]
     evaluate(cfg, args.dataset, tasks, smoke=args.smoke)

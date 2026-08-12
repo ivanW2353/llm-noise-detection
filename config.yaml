@@ -2,6 +2,7 @@ paths:
   model: /root/autodl-tmp/Qwen2.5-3B-Instruct
   data_root: /root/autodl-tmp/noisedetect
   repo_root: /root/noisedetect
+  experiment_tag: ""          # e.g. "ratio20" for a different noise ratio experiment
 
 noise:
   ratio: 0.10

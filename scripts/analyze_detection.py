@@ -14,8 +14,10 @@ and epoch-end token diagnostics) with noise labels from the datasets, then:
 Outputs everything into <repo>/results/.
 """
 
+import argparse
 import glob
 import json
+import math
 import os
 import sys
 
@@ -33,12 +35,20 @@ from sklearn.metrics import (auc, confusion_matrix, roc_auc_score, roc_curve,
 from sklearn.preprocessing import StandardScaler
 
 DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"]
-METRIC_ORDER = ["loss_mean", "loss_last", "loss_slope", "grad_norm_mean",
-                "cos_ref_mean", "cos_global_mean", "max_token_loss", "frac_hard"]
+METRIC_ORDER = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_epoch",
+                "loss_rank", "loss_curvature", "grad_norm_mean", "grad_norm_cv",
+                "cos_ref_mean", "cos_ref_trend", "cos_global_mean", "update_contrib_mean",
+                "max_token_loss", "frac_hard", "user_loss", "entropy",
+                "token_loss_skew", "text_nn_sim"]
+
+
+def _tag(cfg):
+    return cfg["paths"].get("experiment_tag", "")
 
 
 def load_labels(cfg, dataset):
-    path = os.path.join(cfg["paths"]["data_root"], "data", "train", dataset, "train.jsonl")
+    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg), "train",
+                        dataset, "train.jsonl")
     recs = {}
     for l in open(path):
         r = json.loads(l)
@@ -47,7 +57,7 @@ def load_labels(cfg, dataset):
 
 
 def load_run_metrics(cfg, dataset):
-    mdir = os.path.join(cfg["paths"]["data_root"], "runs", dataset, "metrics")
+    mdir = os.path.join(cfg["paths"]["data_root"], "runs", _tag(cfg), dataset, "metrics")
     mp = os.path.join(mdir, "per_sample.jsonl")
     if not os.path.exists(mp) or os.path.getsize(mp) == 0:
         print(f"  skip {dataset}: no metrics yet")
@@ -56,24 +66,70 @@ def load_run_metrics(cfg, dataset):
     if df.empty:
         return df
     df = df.dropna(subset=["loss"])
-    pivot = df.pivot_table(index="sample_id", columns="epoch", values="loss",
-                           aggfunc="first").add_prefix("loss_ep")
-    loss_cols = [c for c in pivot.columns if c.startswith("loss_ep")]
-    out = pd.DataFrame(index=pivot.index)
-    out[loss_cols] = pivot[loss_cols]
-    out["loss_mean"] = pivot[loss_cols].mean(axis=1)
-    out["loss_last"] = pivot[loss_cols].iloc[:, -1]
-    out["loss_slope"] = pivot[loss_cols].iloc[:, -1] - pivot[loss_cols].iloc[:, 0]
-    for metric, cols in [("grad_norm", ["grad_norm"]), ("cos_ref", ["cos_sim_ref"]),
-                         ("cos_global", ["cos_sim_global"])]:
-        d = df[df[cols[0]].notna()].groupby("sample_id")[cols[0]].mean()
-        out[metric + "_mean"] = d
+    piv = df.pivot_table(index="sample_id", columns="epoch", aggfunc="first")
+    ep_cols = sorted(df["epoch"].unique())
+    out = pd.DataFrame(index=piv.index)
+    # per-epoch loss / grad_norm / cos_ref / cos_global
+    for base, out_name in [("loss", "loss"), ("grad_norm", "grad_norm"),
+                           ("cos_sim_ref", "cos_ref"), ("cos_sim_global", "cos_global")]:
+        ep = {e: piv[(base, e)] for e in ep_cols if (base, e) in piv.columns}
+        if not ep:
+            continue
+        m = pd.DataFrame(ep)
+        out[f"{out_name}_mean"] = m.mean(axis=1)
+        out[f"{out_name}_last"] = m.iloc[:, -1]
+        out[f"{out_name}_std"] = m.std(axis=1)
+        out[f"{out_name}_slope"] = m.iloc[:, -1] - m.iloc[:, 0]
+        if out_name == "loss":
+            out[[f"loss_ep{e}" for e in ep_cols]] = m
+            out["loss_min"] = m.min(axis=1)
+            out["converge_epoch"] = (m < 2.0).idxmax(axis=1)
+            out.loc[(m >= 2.0).all(axis=1), "converge_epoch"] = len(ep_cols)  # never converged
+            # curvature of the loss trajectory (quadratic fit coeff, vectorized)
+            xs = np.arange(len(ep_cols))
+            X = np.stack([np.ones_like(xs, dtype=float), xs.astype(float), xs.astype(float) ** 2], axis=1)
+            pinvX = np.linalg.pinv(X)
+            coeffs = m.values.astype(float) @ pinvX.T
+            out["loss_curvature"] = coeffs[:, 0]
+            out["loss_rank"] = m.rank(pct=True).mean(axis=1)
+    if "grad_norm_mean" in out.columns and out["grad_norm_mean"].notna().any():
+        out["grad_norm_cv"] = out["grad_norm_std"] / out["grad_norm_mean"].replace(0, np.nan)
+    if "cos_ref_mean" in out.columns:
+        out["cos_ref_trend"] = out["cos_ref_slope"]
+    for m in ("update_contrib",):
+        if m in df.columns:
+            out[m + "_mean"] = df[df[m].notna()].groupby("sample_id")[m].mean()
     diag_files = sorted(glob.glob(os.path.join(mdir, "diag_epoch*.jsonl")))
     if diag_files:
         diag = pd.concat([pd.read_json(f, lines=True) for f in diag_files])
-        diag = diag.groupby("sample_id")[["max_token_loss", "frac_hard", "mean_loss"]].mean()
+        cols = [c for c in ["max_token_loss", "frac_hard", "mean_loss", "user_loss",
+                            "entropy", "token_loss_skew", "token_loss_kurt"]
+                if c in diag.columns]
+        diag = diag.groupby("sample_id")[cols].mean()
         out = out.join(diag)
     return out
+
+
+def load_text_features(cfg, dataset):
+    """TF-IDF nearest-neighbor similarity: strong signal for duplicate (exact
+    copies) and keyword (only a few words changed) noise."""
+    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg), "train",
+                        dataset, "train.jsonl")
+    texts, sids = [], []
+    for l in open(path):
+        r = json.loads(l)
+        texts.append(r["messages"][0]["content"] + " " + r["messages"][1]["content"])
+        sids.append(r["sample_id"])
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.neighbors import NearestNeighbors
+    vec = TfidfVectorizer(ngram_range=(1, 2), min_df=10, sublinear_tf=True,
+                          max_features=200_000)
+    X = vec.fit_transform(texts)
+    nn = NearestNeighbors(n_neighbors=2, metric="cosine")
+    nn.fit(X)
+    dist, _ = nn.kneighbors(X)
+    sim = 1.0 - dist[:, 1]  # nearest NON-self neighbor similarity
+    return dict(zip(sids, sim))
 
 
 def build_table(cfg):
@@ -83,10 +139,16 @@ def build_table(cfg):
         if metrics.empty:
             continue
         labels = load_labels(cfg, ds)
+        try:
+            text_sim = load_text_features(cfg, ds)
+        except Exception as e:
+            print(f"  warn text features {ds}: {e}")
+            text_sim = {}
         for sid, row in metrics.iterrows():
             label, ntype = labels.get(int(sid), (0, "none"))
             all_rows.append({"dataset": ds, "sample_id": sid, "noise_label": label,
-                             "noise_type": ntype, **row.to_dict()})
+                             "noise_type": ntype, "text_nn_sim": text_sim.get(int(sid)),
+                             **row.to_dict()})
     return pd.DataFrame(all_rows)
 
 
@@ -111,16 +173,27 @@ def univariate_auc(df, dataset, pos_types, neg_types=None):
 
 
 def main():
-    cfg = yaml.safe_load(open("/root/noisedetect/config.yaml"))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio20)")
+    args = ap.parse_args()
+    cfg = yaml.safe_load(open(args.config))
+    if args.tag:
+        cfg["paths"]["experiment_tag"] = args.tag
     repo = cfg["paths"]["repo_root"]
+    tag = _tag(cfg)
     res_dir = os.path.join(repo, "results")
     os.makedirs(res_dir, exist_ok=True)
+    def res_name(name):
+        return f"{name}_{tag}.csv" if tag else f"{name}.csv"
+    def res_img(name):
+        return f"{name}_{tag}.png" if tag else f"{name}.png"
     print("building metric table ...")
     df = build_table(cfg)
     for m in METRIC_ORDER:
         if m not in df.columns:
             df[m] = np.nan
-    df.to_csv(os.path.join(res_dir, "per_sample_metrics.csv"), index=False)
+    df.to_csv(os.path.join(res_dir, res_name("per_sample_metrics")), index=False)
     print(f"table: {df.shape}")
 
     # ---- 1. univariate AUC table -------------------------------------------
@@ -132,12 +205,16 @@ def main():
         res = univariate_auc(df, ds, pos)
         auc_rows.append({"noise_type": nt, **{k: round(v, 4) if v == v else None for k, v in res.items()}})
     auc_tab = pd.DataFrame(auc_rows)
-    auc_tab.to_csv(os.path.join(res_dir, "auc_univariate.csv"), index=False)
+    auc_tab.to_csv(os.path.join(res_dir, res_name("auc_univariate")), index=False)
     print("\n=== univariate AUC (noise vs normal, same run) ===")
     print(auc_tab.to_string(index=False))
+    avg_auc = auc_tab.set_index("noise_type")[METRIC_ORDER].mean(axis=1)
+    metric_mean = auc_tab[METRIC_ORDER].mean(axis=0).sort_values(ascending=False)
+    print("\n=== best metrics by mean AUC ===")
+    print(metric_mean.round(4).to_string())
 
     # ---- 2. best metric per noise type -------------------------------------
-    best = auc_tab.set_index("noise_type").mean(axis=1).sort_values(ascending=False)
+    best = avg_auc.sort_values(ascending=False)
     print("\n=== mean AUC over metrics per noise type ===")
     print(best.round(4).to_string())
 
@@ -177,7 +254,7 @@ def main():
                 importances = pd.Series(clf.coef_[0], index=METRIC_ORDER).abs().sort_values(ascending=False)
                 print(f"\n[LR] {nt}: top features: {dict(importances.head(3))}")
     det_tab = pd.DataFrame(det_rows)
-    det_tab.to_csv(os.path.join(res_dir, "detection_multivariate.csv"), index=False)
+    det_tab.to_csv(os.path.join(res_dir, res_name("detection_multivariate")), index=False)
     print("\n=== multivariate detection ===")
     print(det_tab.to_string(index=False))
     ax_roc.plot([0, 1], [0, 1], "--", color="gray")
@@ -186,10 +263,11 @@ def main():
     ax_roc.set_title("RF ROC: noise vs normal")
     ax_roc.legend(fontsize=7)
     fig_roc.tight_layout()
-    fig_roc.savefig(os.path.join(res_dir, "roc_multivariate.png"), dpi=150)
+    fig_roc.savefig(os.path.join(res_dir, res_img("roc_multivariate")), dpi=150)
 
     # ---- 4. distribution comparison ------------------------------------------
-    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    ncols, nrows = 2, math.ceil(len(METRIC_ORDER) / 2)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, nrows * 3.4))
     for ax, m in zip(axes.ravel(), METRIC_ORDER):
         data = []
         labels = []
@@ -205,8 +283,10 @@ def main():
         ax.boxplot(data, labels=labels, showfliers=False)
         ax.tick_params(axis="x", labelsize=6)
         ax.set_title(m, fontsize=10)
+    for ax in axes.ravel()[len(METRIC_ORDER):]:
+        ax.axis("off")
     fig.tight_layout()
-    fig.savefig(os.path.join(res_dir, "metric_distributions.png"), dpi=150)
+    fig.savefig(os.path.join(res_dir, res_img("metric_distributions")), dpi=150)
 
     # ---- 5. loss trajectory ------------------------------------------------
     ep_cols = sorted([c for c in df.columns if c.startswith("loss_ep")],
@@ -231,7 +311,7 @@ def main():
         ax2.legend()
         ax2.set_title("Loss trajectory by noise type")
         fig2.tight_layout()
-        fig2.savefig(os.path.join(res_dir, "loss_trajectory.png"), dpi=150)
+        fig2.savefig(os.path.join(res_dir, res_img("loss_trajectory")), dpi=150)
 
     # ---- 6. PCA scatter ------------------------------------------------------
     sub = df.dropna(subset=METRIC_ORDER)
@@ -248,18 +328,18 @@ def main():
         ax3.set_title("PCA of per-sample metrics")
         ax3.legend(markerscale=3, fontsize=8)
         fig3.tight_layout()
-        fig3.savefig(os.path.join(res_dir, "pca_metrics.png"), dpi=150)
+        fig3.savefig(os.path.join(res_dir, res_img("pca_metrics")), dpi=150)
 
     # ---- 7. evaluation comparison table --------------------------------------
     ev_rows = []
     for ds in DATASETS + ["base"]:
-        p = os.path.join(res_dir, f"eval_{ds}.json")
+        p = os.path.join(res_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
         if os.path.exists(p):
             r = json.load(open(p))
             ev_rows.append({"model": ds, **{k: round(v, 4) for k, v in r.items()}})
     if ev_rows:
         ev_tab = pd.DataFrame(ev_rows)
-        ev_tab.to_csv(os.path.join(res_dir, "eval_comparison.csv"), index=False)
+        ev_tab.to_csv(os.path.join(res_dir, res_name("eval_comparison")), index=False)
         print("\n=== evaluation comparison ===")
         print(ev_tab.to_string(index=False))
 

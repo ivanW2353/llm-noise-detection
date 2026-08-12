@@ -114,6 +114,7 @@ def build(config):
     seed = config["noise"]["seed"]
     ratio = config["noise"]["ratio"]
     data_root = config["paths"]["data_root"]
+    tag = config["paths"].get("experiment_tag", "")
     rng = random.Random(seed)
 
     print("loading dolly-15k ...")
@@ -128,20 +129,20 @@ def build(config):
             "assistant": ex["response"],
         })
 
-    # same order across all datasets
+    # same order across all datasets; first 400 rows are a CLEAN held-out set
     order = list(range(len(rows)))
     rng.shuffle(order)
     ordered = [rows[i] for i in order]
 
     n_holdout = config["train"]["ref_samples"] + config["train"]["heldout_samples"]
-    holdout_idx = set(range(n_holdout))
-    train_rows = [r for j, r in enumerate(ordered) if j not in holdout_idx]
+    heldout_rows = [ordered[j] for j in range(n_holdout)]
+    train_rows = ordered[n_holdout:]
     n_train = len(train_rows)
     n_noise = int(round(n_train * ratio))
     noise_idx = set(rng.sample(range(n_train), n_noise))
     print(f"total={len(rows)} holdout={n_holdout} train={n_train} noise={n_noise} ({ratio:.0%})")
 
-    out_dir = os.path.join(data_root, "data", "train")
+    out_dir = os.path.join(data_root, "data", tag, "train")
     os.makedirs(out_dir, exist_ok=True)
 
     def emit(dataset_name, row_items):
@@ -165,6 +166,12 @@ def build(config):
                 {"role": "assistant", "content": meta["assistant"]},
             ],
         }
+
+    # shared CLEAN held-out set (ref direction + held-out eval loss)
+    with open(os.path.join(out_dir, "heldout.jsonl"), "w") as f:
+        for j, r in enumerate(heldout_rows):
+            f.write(json.dumps(base_item(r, j), ensure_ascii=False) + "\n")
+    print(f"heldout: {len(heldout_rows)} clean rows -> {os.path.join(out_dir, 'heldout.jsonl')}")
 
     # 1. clean
     emit("clean", [base_item(r, i) for i, r in enumerate(train_rows)])
@@ -267,6 +274,7 @@ def build(config):
         "source": "databricks/databricks-dolly-15k",
         "noise_ratio": ratio,
         "seed": seed,
+        "experiment_tag": tag,
         "n_total": len(rows),
         "n_holdout": n_holdout,
         "n_train": n_train,
@@ -281,9 +289,12 @@ def build(config):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
-    ap.add_argument("--ratio", type=float, default=None, help="override noise ratio")
+    ap.add_argument("--ratio", type=float, default=None, help="override noise ratio, e.g. --ratio 0.20")
+    ap.add_argument("--tag", type=str, default=None, help="experiment tag (output dir suffix), e.g. --tag ratio20")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.ratio:
         cfg["noise"]["ratio"] = args.ratio
+    if args.tag:
+        cfg["paths"]["experiment_tag"] = args.tag
     build(cfg)

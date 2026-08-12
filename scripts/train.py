@@ -199,9 +199,14 @@ def eval_heldout(model, tokenizer, eval_rows, bs=8):
 
 
 @torch.no_grad()
-def diagnostic_pass(model, tokenizer, rows, bs=8, thresh=4.0):
-    """Per-token diagnostics on a subsample: mean/max token loss and
-    fraction of 'hard' tokens (loss > thresh). Forward-only, ~30s/epoch."""
+def diagnostic_pass(model, tokenizer, rows, bs=8, thresh=4.0, top_k=32):
+    """Per-token diagnostics on a subsample. Returns per-sample aggregates plus
+    top-k hardest label tokens for token-level analysis:
+      user_loss      : mean CE over the USER (prompt) tokens
+      entropy        : mean next-token entropy over label tokens
+      skew / kurt    : shape of the per-token loss distribution
+      top_tokens     : [[pos, token_id, loss], ...] for the hardest tokens
+    Forward-only, ~1 min/epoch."""
     model.eval()
     pad = tokenizer.pad_token_id
     out = []
@@ -220,17 +225,50 @@ def diagnostic_pass(model, tokenizer, rows, bs=8, thresh=4.0):
         B, L, V = logits.shape
         shift = logits[:, :-1].reshape(-1, V)
         tgt = labels[:, 1:].reshape(-1).cuda()
-        lm = (labels[:, 1:] != -100) * mask[:, 1:]
+        att = mask[:, 1:]
+        label_mask = (labels[:, 1:] != -100) * att
+        user_mask = (labels[:, 1:] == -100) * att
         ce = F.cross_entropy(shift, tgt, reduction="none").view(B, L - 1)
+        # next-token entropy over label tokens only (gather keeps it cheap)
+        flat_lm = label_mask.reshape(-1).bool()
+        ent_all = None
+        if flat_lm.any():
+            lse = torch.log_softmax(shift[flat_lm], dim=-1)
+            ent_flat = torch.zeros(B * (L - 1), device=ce.device)
+            ent_flat[flat_lm] = (-(torch.exp(lse) * lse).sum(-1)).float()
+            ent_all = ent_flat.view(B, L - 1)
+        shift_ids = ids[:, 1:]
         for i, r in enumerate(chunk):
-            tok_mask = lm[i].bool()
-            if not tok_mask.any():
+            lm = label_mask[i].bool()
+            if not lm.any():
                 continue
-            toks = ce[i][tok_mask].float()
-            out.append({"sample_id": r["sample_id"],
-                        "mean_loss": toks.mean().item(),
-                        "max_token_loss": toks.max().item(),
-                        "frac_hard": (toks > thresh).float().mean().item()})
+            toks = ce[i][lm].float()
+            pos = lm.nonzero().flatten()
+            agg = {"sample_id": r["sample_id"],
+                   "mean_loss": toks.mean().item(),
+                   "max_token_loss": toks.max().item(),
+                   "frac_hard": (toks > thresh).float().mean().item(),
+                   "user_loss": None, "entropy": None,
+                   "token_loss_skew": None, "token_loss_kurt": None,
+                   "top_tokens": []}
+            um = user_mask[i].bool()
+            if um.any():
+                agg["user_loss"] = ce[i][um].float().mean().item()
+            if ent_all is not None:
+                ent = ent_all[i][lm].float()
+                agg["entropy"] = ent.mean().item()
+            toks_np = toks.cpu().numpy()
+            if len(toks_np) > 3:
+                from scipy.stats import skew, kurtosis
+                agg["token_loss_skew"] = float(skew(toks_np))
+                agg["token_loss_kurt"] = float(kurtosis(toks_np))
+            k = min(top_k, len(toks))
+            v, idx = toks.topk(k)
+            for val, ix in zip(v.tolist(), idx.tolist()):
+                agg["top_tokens"].append([int(pos[ix].item()),
+                                          int(shift_ids[i, pos[ix]].item()),
+                                          float(val)])
+            out.append(agg)
     model.train()
     return out
 
@@ -242,14 +280,18 @@ def train(cfg, dataset, smoke=False):
     n_ref = cfg["train"]["ref_samples"]
     n_held = cfg["train"]["heldout_samples"]
 
-    path = os.path.join(data_root, "data", "train", dataset, "train.jsonl")
+    path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
+                        "train", dataset, "train.jsonl")
+    hold_path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
+                             "train", "heldout.jsonl")
     rows = [json.loads(l) for l in open(path)]
-    heldout_rows = rows[:n_ref + n_held]
-    train_rows = rows[n_ref + n_held:]
+    heldout_rows = [json.loads(l) for l in open(hold_path)]
+    train_rows = rows
     if smoke:
         train_rows = train_rows[:64]
 
-    run_dir = os.path.join(data_root, "runs", dataset)
+    tag = cfg["paths"].get("experiment_tag", "")
+    run_dir = os.path.join(data_root, "runs", tag, dataset)
     metric_dir = os.path.join(run_dir, "metrics")
     os.makedirs(metric_dir, exist_ok=True)
     writer = SummaryWriter(os.path.join(run_dir, "tb"))
@@ -266,9 +308,14 @@ def train(cfg, dataset, smoke=False):
 
     print("computing reference gradient direction ...")
     params, offsets, n_lora, ref_buf = compute_reference_direction(model, tokenizer, ref_data, cfg)
+    # update_contrib uses B-only offsets: lora_A gradients are ~0 while B is
+    # still zero-initialized, so their Adam-normalized values would explode
+    b_offsets = [(s, e) for (s, e), (name, _) in zip(offsets, params) if "lora_B" in name]
+    total_b = sum(e - s for s, e in b_offsets)
     buf_before = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
     buf_after = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
     delta_buf = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
+    delta_b = torch.zeros(total_b, device="cuda", dtype=torch.float32)
 
     tcfg = cfg["train"]
     lr = tcfg["lr"]
@@ -290,19 +337,23 @@ def train(cfg, dataset, smoke=False):
     t0 = time.time()
     tb_t0 = t0
     tb_sum = {"loss": 0.0, "grad_norm": 0.0, "cos_ref": 0.0, "cos_global": 0.0,
-              "tokens": 0.0, "cnt": 0}
+              "update_contrib": 0.0, "tokens": 0.0, "cnt": 0}
     n_layers = model.config.num_hidden_layers
     target_ids = {0, n_layers // 2, n_layers - 1}
     layer_norm_sum = {li: 0.0 for li in target_ids}
     layer_norm_cnt = 0
     epoch_stats = []
     log_every = max(1, tcfg.get("log_every", 25))
+    v_buf = torch.zeros(total_b, device="cuda", dtype=torch.float32)
+    v_ready = False
 
     def flush_window(acc, epoch, step):
         """Materialize per-sample metrics (one sync batch per window) and log."""
         losses = torch.stack([a[1] for a in acc])
         gns = torch.stack([a[2] for a in acc])
         dots_ref = torch.stack([a[3] for a in acc])
+        ups = torch.stack([a[6] if a[6] is not None else torch.zeros((), device=gns.device) for a in acc])
+        had_up = [a[6] is not None for a in acc]
         cos_refs = (dots_ref / gns.clamp_min(1e-12)).tolist()
         cos_globs = [None] * len(acc)
         if any(a[4] is not None for a in acc):
@@ -311,12 +362,13 @@ def train(cfg, dataset, smoke=False):
             bsqs = torch.stack([a[5] if a[5] is not None else torch.ones((), device=gns.device) for a in acc])
             raw = (dots_b / (gns * bsqs.sqrt()).clamp_min(1e-12)).tolist()
             cos_globs = [raw[i] if had_b[i] else None for i in range(len(acc))]
-        for a, l, gn, cr, cg in zip(acc, losses.tolist(), gns.tolist(), cos_refs, cos_globs):
+        for a, l, gn, cr, cg, up in zip(acc, losses.tolist(), gns.tolist(),
+                                        cos_refs, cos_globs, ups.tolist()):
             sid = a[0]
             metric_f.write(json.dumps({
                 "step": step, "epoch": epoch, "sample_id": sid,
                 "loss": l, "grad_norm": gn, "cos_sim_ref": cr,
-                "cos_sim_global": cg,
+                "cos_sim_global": cg, "update_contrib": up,
                 "tokens": max(1, n_label_tokens[sid]),
             }) + "\n")
             if l == l and gn == gn:  # skip NaN rows in aggregates
@@ -326,6 +378,8 @@ def train(cfg, dataset, smoke=False):
                     tb_sum["cos_ref"] += cr
                 if cg is not None and cg == cg:
                     tb_sum["cos_global"] += cg
+                if up == up:
+                    tb_sum["update_contrib"] += up
                 tb_sum["tokens"] += max(1, n_label_tokens[sid])
                 tb_sum["cnt"] += 1
         metric_f.flush()
@@ -357,7 +411,18 @@ def train(cfg, dataset, smoke=False):
             g_norm = torch.linalg.vector_norm(delta_buf)
             dot_ref = torch.dot(delta_buf, ref_buf)
             cos_ref = dot_ref / g_norm
-            acc.append((row["sample_id"], loss, g_norm, dot_ref, dot_b, bsq))
+            # Adam-normalized update contribution over B params: ||grad/sqrt(v)||
+            # (None for the first window, before any optimizer step)
+            upd = None
+            if v_ready:
+                o = 0
+                for (s, e) in b_offsets:
+                    delta_b[o:o + e - s].copy_(delta_buf[s:e])
+                    o += e - s
+                # sample gradient norm relative to the running RMS gradient
+                upd = torch.linalg.vector_norm(delta_b) / (
+                    torch.linalg.vector_norm(v_buf.sqrt()) + 1e-8)
+            acc.append((row["sample_id"], loss, g_norm, dot_ref, dot_b, bsq, upd))
 
             # optimizer step at window boundary
             if (i + 1) % tcfg["grad_accum"] == 0:
@@ -369,6 +434,16 @@ def train(cfg, dataset, smoke=False):
                 for g in opt.param_groups:
                     g["lr"] = lr_at(global_step)
                 opt.step()
+                # snapshot Adam second-moment (B params) for update_contrib
+                o = 0
+                for (s, e), (name, p) in zip(offsets, params):
+                    if "lora_B" not in name:
+                        continue
+                    st = opt.state.get(p)
+                    if st and "exp_avg_sq" in st:
+                        v_buf[o:o + e - s].copy_(st["exp_avg_sq"].reshape(-1))
+                    o += e - s
+                v_ready = True
                 opt.zero_grad()
                 flush_window(acc, epoch, global_step)
                 acc = []
@@ -376,7 +451,7 @@ def train(cfg, dataset, smoke=False):
                 if global_step % 50 == 0:
                     now = time.time()
                     cnt = max(1, tb_sum["cnt"])
-                    for key in ("loss", "grad_norm", "cos_ref", "cos_global"):
+                    for key in ("loss", "grad_norm", "cos_ref", "cos_global", "update_contrib"):
                         writer.add_scalar(f"train/{key}", tb_sum[key] / cnt, global_step)
                     writer.add_scalar("train/lr", lr_at(global_step), global_step)
                     writer.add_scalar("train/tokens_per_sec", tb_sum["tokens"] / max(1.0, now - tb_t0), global_step)
@@ -388,7 +463,7 @@ def train(cfg, dataset, smoke=False):
                     writer.flush()
                     tb_t0 = now
                     tb_sum = {"loss": 0.0, "grad_norm": 0.0, "cos_ref": 0.0, "cos_global": 0.0,
-                              "tokens": 0.0, "cnt": 0}
+                              "update_contrib": 0.0, "tokens": 0.0, "cnt": 0}
                     layer_norm_sum = {li: 0.0 for li in target_ids}
                     layer_norm_cnt = 0
                     print(f"[{dataset}] epoch {epoch} step {global_step}/{total_steps} "
@@ -443,7 +518,11 @@ def train(cfg, dataset, smoke=False):
                                thresh=tcfg.get("hard_threshold", 4.0))
         with open(os.path.join(metric_dir, f"diag_epoch{epoch}.jsonl"), "w") as f:
             for d in diag:
-                f.write(json.dumps(d) + "\n")
+                f.write(json.dumps({k: v for k, v in d.items() if k != "top_tokens"}) + "\n")
+        with open(os.path.join(metric_dir, f"token_diag_epoch{epoch}.jsonl"), "w") as f:
+            for d in diag:
+                f.write(json.dumps({"sample_id": d["sample_id"],
+                                    "top_tokens": d["top_tokens"]}) + "\n")
         if diag:
             writer.add_scalar("diag/max_token_loss_mean",
                               sum(d["max_token_loss"] for d in diag) / len(diag), global_step)
@@ -477,9 +556,12 @@ if __name__ == "__main__":
     ap.add_argument("--dataset", required=True,
                     choices=["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"])
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.epochs:
         cfg["train"]["epochs"] = args.epochs
+    if args.tag:
+        cfg["paths"]["experiment_tag"] = args.tag
     train(cfg, args.dataset, smoke=args.smoke)
