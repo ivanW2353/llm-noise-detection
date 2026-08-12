@@ -67,33 +67,52 @@ def tokenize_rows(tokenizer, rows, max_len):
         msg = r["messages"]
         user_ids = tokenizer.apply_chat_template(
             msg[:-1], tokenize=True, return_dict=True,
-            add_generation_prompt=True, truncation=True, max_length=max_len)["input_ids"]
-        full = tokenizer.apply_chat_template(
-            msg, tokenize=True, return_dict=True,
-            truncation=True, max_length=max_len)
+            add_generation_prompt=True)["input_ids"]
+        full = tokenizer.apply_chat_template(msg, tokenize=True, return_dict=True)
         input_ids = full["input_ids"]
         n_user = len(user_ids)
+        if len(input_ids) > max_len:
+            # keep assistant response intact; truncate the USER prefix instead
+            assistant_ids = input_ids[n_user:]
+            if len(assistant_ids) >= max_len:
+                input_ids, n_user = assistant_ids[:max_len], 0
+            else:
+                keep_user = max_len - len(assistant_ids)
+                input_ids, n_user = user_ids[-keep_user:] + assistant_ids, keep_user
         labels = input_ids[:]
         labels[:n_user] = [-100] * n_user
         data.append({
             "sample_id": r["sample_id"],
             "input_ids": torch.tensor(input_ids),
             "labels": torch.tensor(labels),
-            "n_label_tokens": max_len - n_user,
+            "n_label_tokens": len(input_ids) - n_user,
         })
     return data, {d["sample_id"]: d["n_label_tokens"] for d in data}
+
+
+def fill_flat(params, offsets, buf):
+    """Copy all LoRA grads into a preallocated float32 buffer (no per-step
+    allocation churn). Returns buf, or None if no grads exist."""
+    any_grad = False
+    for (s, e), (_, p) in zip(offsets, params):
+        g = p.grad
+        if g is None:
+            continue
+        any_grad = True
+        buf[s:e].copy_(g.reshape(-1))
+    return buf if any_grad else None
 
 
 def lora_params(model):
     return [(name, p) for name, p in model.named_parameters() if "lora_" in name]
 
 
-def flat_grad(params, total):
-    """Single contiguous float32 vector of all LoRA grads (a few big kernels)."""
-    parts = [p.grad.detach().reshape(-1) for _, p in params if p.grad is not None]
-    if not parts:
-        return None
-    return torch.cat(parts).float()
+def lora_offsets(params):
+    offsets, total = [], 0
+    for _, p in params:
+        offsets.append((total, total + p.numel()))
+        total += p.numel()
+    return offsets, total
 
 
 def compute_reference_direction(model, tokenizer, ref_rows, cfg, batch_size=2):
@@ -112,13 +131,16 @@ def compute_reference_direction(model, tokenizer, ref_rows, cfg, batch_size=2):
             loss = loss + out.loss
         (loss / n).backward()
     params = lora_params(model)
-    flat = flat_grad(params, 0)
+    offsets, total = lora_offsets(params)
+    flat = torch.zeros(total, device="cuda", dtype=torch.float32)
+    fill_flat(params, offsets, flat)
     norm = torch.linalg.vector_norm(flat)
     ref_buf = flat / norm
+    torch.cuda.empty_cache()
     for _, p in model.named_parameters():
         if p.requires_grad and p.grad is not None:
             p.grad = None
-    return params, ref_buf
+    return params, offsets, total, ref_buf
 
 
 def layer_index(name):
@@ -243,8 +265,10 @@ def train(cfg, dataset, smoke=False):
     ref_data, _ = tokenize_rows(tokenizer, heldout_rows[n_held:], MAX_LEN)
 
     print("computing reference gradient direction ...")
-    params, ref_buf = compute_reference_direction(model, tokenizer, ref_data, cfg)
-    n_lora = sum(p.numel() for _, p in params)
+    params, offsets, n_lora, ref_buf = compute_reference_direction(model, tokenizer, ref_data, cfg)
+    buf_before = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
+    buf_after = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
+    delta_buf = torch.zeros(n_lora, device="cuda", dtype=torch.float32)
 
     tcfg = cfg["train"]
     lr = tcfg["lr"]
@@ -279,13 +303,13 @@ def train(cfg, dataset, smoke=False):
         losses = torch.stack([a[1] for a in acc])
         gns = torch.stack([a[2] for a in acc])
         dots_ref = torch.stack([a[3] for a in acc])
-        cos_refs = (dots_ref / gns).tolist()
+        cos_refs = (dots_ref / gns.clamp_min(1e-12)).tolist()
         cos_globs = [None] * len(acc)
         if any(a[4] is not None for a in acc):
             had_b = [a[4] is not None for a in acc]
             dots_b = torch.stack([a[4] if a[4] is not None else torch.zeros((), device=gns.device) for a in acc])
             bsqs = torch.stack([a[5] if a[5] is not None else torch.ones((), device=gns.device) for a in acc])
-            raw = (dots_b / (gns * bsqs.sqrt())).tolist()
+            raw = (dots_b / (gns * bsqs.sqrt()).clamp_min(1e-12)).tolist()
             cos_globs = [raw[i] if had_b[i] else None for i in range(len(acc))]
         for a, l, gn, cr, cg in zip(acc, losses.tolist(), gns.tolist(), cos_refs, cos_globs):
             sid = a[0]
@@ -295,14 +319,15 @@ def train(cfg, dataset, smoke=False):
                 "cos_sim_global": cg,
                 "tokens": max(1, n_label_tokens[sid]),
             }) + "\n")
-            tb_sum["loss"] += l
-            tb_sum["grad_norm"] += gn
-            if cr is not None:
-                tb_sum["cos_ref"] += cr
-            if cg is not None:
-                tb_sum["cos_global"] += cg
-            tb_sum["tokens"] += max(1, n_label_tokens[sid])
-            tb_sum["cnt"] += 1
+            if l == l and gn == gn:  # skip NaN rows in aggregates
+                tb_sum["loss"] += l
+                tb_sum["grad_norm"] += gn
+                if cr is not None and cr == cr:
+                    tb_sum["cos_ref"] += cr
+                if cg is not None and cg == cg:
+                    tb_sum["cos_global"] += cg
+                tb_sum["tokens"] += max(1, n_label_tokens[sid])
+                tb_sum["cnt"] += 1
         metric_f.flush()
 
     for epoch in range(tcfg["epochs"]):
@@ -311,23 +336,27 @@ def train(cfg, dataset, smoke=False):
         for i, row in enumerate(train_data):
             if smoke and global_step >= 8:
                 break
+            if row["n_label_tokens"] == 0:
+                continue
             input_ids = row["input_ids"].unsqueeze(0).cuda()
             labels = row["labels"].unsqueeze(0).cuda()
             out = model(input_ids=input_ids, labels=labels)
             loss = out.loss
 
-            # flat-vector metric capture: few big kernels instead of 14k tiny ones
-            before = flat_grad(params, n_lora)          # accumulated window grads
+            # flat-vector metric capture: preallocated buffers, no allocation churn
+            has_before = fill_flat(params, offsets, buf_before) is not None
             loss.backward()
-            after = flat_grad(params, n_lora)
-            delta = after if before is None else after - before
-            g_norm = torch.linalg.vector_norm(delta)
-            dot_ref = torch.dot(delta, ref_buf)
+            fill_flat(params, offsets, buf_after)
+            if has_before:
+                delta_buf.copy_(buf_after).sub_(buf_before)
+                bsq = torch.dot(buf_before, buf_before)
+                dot_b = torch.dot(delta_buf, buf_before)
+            else:
+                delta_buf.copy_(buf_after)
+                bsq = dot_b = None
+            g_norm = torch.linalg.vector_norm(delta_buf)
+            dot_ref = torch.dot(delta_buf, ref_buf)
             cos_ref = dot_ref / g_norm
-            dot_b = bsq = None
-            if before is not None:
-                dot_b = torch.dot(delta, before)
-                bsq = torch.dot(before, before)
             acc.append((row["sample_id"], loss, g_norm, dot_ref, dot_b, bsq))
 
             # optimizer step at window boundary
@@ -390,7 +419,7 @@ def train(cfg, dataset, smoke=False):
         n_ep = len(ep_metrics)
         if n_ep:
             def avg(key):
-                vals = [r[key] for r in ep_metrics if r.get(key) is not None]
+                vals = [r[key] for r in ep_metrics if r.get(key) is not None and r[key] == r[key]]
                 return sum(vals) / len(vals) if vals else None
             loss_min = min(r["loss"] for r in ep_metrics)
             loss_max = max(r["loss"] for r in ep_metrics)
