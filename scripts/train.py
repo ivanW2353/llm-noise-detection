@@ -302,7 +302,8 @@ def train(cfg, dataset, smoke=False):
         train_rows = train_rows[:64]
 
     tag = cfg["paths"].get("experiment_tag", "")
-    run_dir = os.path.join(data_root, "runs", tag, dataset)
+    # smoke runs NEVER touch the real run directories
+    run_dir = os.path.join(data_root, "runs", tag, "_smoke" if smoke else "", dataset)
     metric_dir = os.path.join(run_dir, "metrics")
     os.makedirs(metric_dir, exist_ok=True)
     writer = SummaryWriter(os.path.join(run_dir, "tb"))
