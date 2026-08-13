@@ -26,14 +26,20 @@ are directly comparable.
 
 - Model: `Qwen2.5-3B-Instruct` + LoRA (r=32, all linear modules), bf16,
   flash-attention, 5 epochs, micro-batch 1 + grad-accum 16, lr 2e-4 cosine.
+- 400 clean samples are held out of every dataset (`heldout.jsonl`, shared
+  across datasets) and used for the reference gradient direction and the
+  held-out eval loss.
 - Per-sample tracking (micro-batch=1): `loss`, `grad_norm` (LoRA gradient L2),
   `cos_sim_ref` (cosine similarity with a pre-training reference direction from
   held-out clean samples, LESS-style influence), `cos_sim_global` (similarity
-  with the accumulation-window gradient), `tokens`.
-- Epoch-end diagnostic pass (every 8th sample): `max_token_loss`, `frac_hard`
-  (fraction of tokens with loss > 4.0).
-- TensorBoard: train/loss, grad_norm, cos_ref, cos_global, lr, tokens/sec,
-  gpu_mem, per-layer grad norms, LoRA weight/grad histograms, held-out loss.
+  with the accumulation-window gradient), `update_contrib` (gradient norm
+  relative to the running Adam-RMS, B params only), `tokens`.
+- Epoch-end diagnostic pass (every 8th sample): `max_token_loss`, `frac_hard`,
+  `user_loss`, `entropy`, `token_loss_skew/kurt`, plus top-k hardest label
+  tokens per sample (`token_diag_epoch*.jsonl`).
+- TensorBoard: train/loss, grad_norm, cos_ref, cos_global, update_contrib, lr,
+  tokens/sec, gpu_mem, per-layer grad norms, LoRA weight/grad histograms,
+  held-out loss.
 - 6 runs, same seed/order; only the noise differs.
 
 ## Evaluation
@@ -43,13 +49,20 @@ validation sets (implemented locally, cached datasets):
 
 | task         | setup            |
 |--------------|------------------|
-| MMLU         | 5-shot           |
-| HellaSwag    | 10-shot          |
+| MMLU         | 5-shot (per-subject breakdown, 57 subjects) |
+| HellaSwag    | 5-shot           |
 | ARC-Challenge| 25-shot          |
 | Winogrande   | 5-shot           |
 | TruthfulQA   | 0-shot           |
 | GSM8K        | 5-shot CoT (chat template) |
-| BBH          | 3-shot CoT, 20/task |
+| BBH          | 3-shot CoT, 20/task (per-task breakdown) |
+
+Full per-task results (including MMLU per-subject and BBH per-task accuracy)
+are saved in each `eval_<model>.json` and aggregated into
+`results/eval_comparison.csv` and `results/eval_mmlu_subjects.csv`.
+
+Evaluation is resumable: results are written after every task, and re-running
+skips already-completed models/tasks (`--force` redoes a model).
 
 ## Detection analysis
 

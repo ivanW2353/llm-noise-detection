@@ -1,13 +1,17 @@
 """Few-shot evaluation of fine-tuned models on common validation sets.
 
 Tasks (loglikelihood multiple-choice or CoT generation):
-  mmlu (5-shot), hellaswag (10-shot), arc (25-shot), winogrande (5-shot),
+  mmlu (5-shot, per-subject), hellaswag (5-shot), arc (25-shot), winogrande (5-shot),
   truthfulqa (0-shot), gsm8k (5-shot CoT), bbh (3-shot CoT, 20/task)
+
+Full results (incl. per-subject / per-task breakdowns) are saved after every
+task, so evaluation is resumable; re-running skips completed models/tasks.
 
 Usage:
   python scripts/evaluate.py --dataset clean
   python scripts/evaluate.py --dataset base          # base model, no LoRA
   python scripts/evaluate.py --dataset clean --tasks mmlu,gsm8k
+  python scripts/evaluate.py --dataset clean --force # redo even if cached
   python scripts/evaluate.py --dataset clean --smoke # tiny sanity check
 """
 
@@ -143,7 +147,7 @@ def load_hellaswag():
     for r in val:
         samples.append((shot_txt + r["ctx"], r["endings"]))
         answers.append(r["label"])
-    return samples, answers, "10-shot", len(val)
+    return samples, answers, "5-shot", len(val)
 
 
 def load_arc():
