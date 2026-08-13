@@ -235,11 +235,13 @@ def diagnostic_pass(model, tokenizer, rows, bs=8, thresh=4.0, top_k=32):
         logits = model(input_ids=ids.cuda(), attention_mask=mask.cuda()).logits
         B, L, V = logits.shape
         shift = logits[:, :-1].reshape(-1, V)
-        tgt = labels[:, 1:].reshape(-1).cuda()
+        # full-sequence next-token CE with REAL targets: labels==-100 positions
+        # would otherwise come back as 0.0 from cross_entropy (ignore_index)
+        ce = F.cross_entropy(shift, ids[:, 1:].reshape(-1).cuda(),
+                             reduction="none").view(B, L - 1)
         att = mask[:, 1:]
         label_mask = (labels[:, 1:] != -100) * att
         user_mask = (labels[:, 1:] == -100) * att
-        ce = F.cross_entropy(shift, tgt, reduction="none").view(B, L - 1)
         # next-token entropy over label tokens only (gather keeps it cheap)
         flat_lm = label_mask.reshape(-1).bool()
         ent_all = None

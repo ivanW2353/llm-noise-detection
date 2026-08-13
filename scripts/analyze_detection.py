@@ -107,6 +107,14 @@ def load_run_metrics(cfg, dataset):
                 if c in diag.columns]
         diag = diag.groupby("sample_id")[cols].mean()
         out = out.join(diag)
+    # user_loss was recorded as 0.0 by an early CE bug; use the post-hoc
+    # recomputed values (final model) when available
+    dfinal = os.path.join(mdir, "diag_final.jsonl")
+    if os.path.exists(dfinal):
+        d2 = pd.read_json(dfinal, lines=True)
+        if "user_loss" in d2.columns:
+            ul = d2.set_index("sample_id")["user_loss"]
+            out["user_loss"] = ul
     return out
 
 
@@ -130,6 +138,97 @@ def load_text_features(cfg, dataset):
     dist, _ = nn.kneighbors(X)
     sim = 1.0 - dist[:, 1]  # nearest NON-self neighbor similarity
     return dict(zip(sids, sim))
+
+
+def load_tb_metrics(cfg, dataset):
+    """Extract key scalar trajectories from the run's TensorBoard events."""
+    import glob as _g
+    tag = _tag(cfg)
+    tb_dirs = _g.glob(os.path.join(cfg["paths"]["data_root"], "runs", tag, dataset, "tb", "*"))
+    if not tb_dirs:
+        return None
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    ea = EventAccumulator(os.path.dirname(tb_dirs[0]))
+    ea.Reload()
+    tags = ea.Tags().get("scalars", [])
+    out = {}
+    for want in ["eval/heldout_loss", "train/loss", "train/grad_norm",
+                 "train/cos_ref", "train/cos_global", "train/update_contrib",
+                 "lora_layer_gradnorm/layer0", "lora_layer_gradnorm/layer18",
+                 "lora_layer_gradnorm/layer35", "diag/max_token_loss_mean",
+                 "diag/frac_hard_mean"]:
+        if want in tags:
+            out[want] = pd.Series({e.step: e.value for e in ea.Scalars(want)})
+    return out
+
+
+def tb_dynamics(cfg, df=None):
+    """Compare training-dynamics trajectories across runs (from TensorBoard)."""
+    repo = cfg["paths"]["repo_root"]
+    tag = _tag(cfg)
+    res_dir = os.path.join(repo, "results")
+    def res_name(name):
+        return f"{name}_{tag}.csv" if tag else f"{name}.csv"
+    def res_img(name):
+        return f"{name}_{tag}.png" if tag else f"{name}.png"
+    series = {}
+    for ds in DATASETS:
+        tb = load_tb_metrics(cfg, ds)
+        if tb:
+            series[ds] = tb
+    if not series:
+        print("  (no TensorBoard data yet)")
+        return
+    # 1. held-out loss trajectory (generalization damage timeline)
+    rows = []
+    for ds, tb in series.items():
+        if "eval/heldout_loss" in tb:
+            for step, v in tb["eval/heldout_loss"].items():
+                rows.append({"dataset": ds, "step": step, "heldout_loss": v})
+    if rows:
+        tab = pd.DataFrame(rows).pivot(index="step", columns="dataset", values="heldout_loss")
+        tab.to_csv(os.path.join(res_dir, res_name("tb_heldout_loss")))
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for ds in tab.columns:
+            ax.plot(tab.index, tab[ds], marker="o", ms=3, label=ds)
+        ax.set_xlabel("optimizer step")
+        ax.set_ylabel("held-out clean loss")
+        ax.set_title("Held-out loss during training (generalization damage)")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(os.path.join(res_dir, res_img("tb_heldout_trajectory")), dpi=150)
+        plt.close(fig)
+        print("saved tb_heldout_*")
+    # 2. per-layer grad norm comparison (final window value per run)
+    rows = []
+    for ds, tb in series.items():
+        for tag_name, li in [("lora_layer_gradnorm/layer0", 0),
+                             ("lora_layer_gradnorm/layer18", 18),
+                             ("lora_layer_gradnorm/layer35", 35)]:
+            if tag_name in tb:
+                rows.append({"dataset": ds, "layer": li,
+                             "final_grad_norm": tb[tag_name].iloc[-1]})
+    if rows:
+        tab = pd.DataFrame(rows).pivot(index="layer", columns="dataset", values="final_grad_norm")
+        tab.to_csv(os.path.join(res_dir, res_name("tb_layer_gradnorm")))
+        fig, ax = plt.subplots(figsize=(8, 5))
+        tab.plot.bar(ax=ax)
+        ax.set_ylabel("final layer grad norm (window avg)")
+        ax.set_title("Per-layer LoRA gradient norms by run")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(os.path.join(res_dir, res_img("tb_layer_gradnorm")), dpi=150)
+        plt.close(fig)
+        print("saved tb_layer_gradnorm_*")
+    # 3. diagnostic metric trajectory per epoch
+    rows = []
+    for ds, tb in series.items():
+        if "diag/max_token_loss_mean" in tb:
+            for step, v in tb["diag/max_token_loss_mean"].items():
+                rows.append({"dataset": ds, "step": step, "max_token_loss": v})
+    if rows:
+        tab = pd.DataFrame(rows).pivot(index="step", columns="dataset", values="max_token_loss")
+        tab.to_csv(os.path.join(res_dir, res_name("tb_diag_trajectory")))
 
 
 def build_table(cfg):
@@ -195,6 +294,10 @@ def main():
             df[m] = np.nan
     df.to_csv(os.path.join(res_dir, res_name("per_sample_metrics")), index=False)
     print(f"table: {df.shape}")
+
+    # ---- 0. training-dynamics comparison (from TensorBoard events) ----------
+    print("\n=== TensorBoard dynamics (heldout loss / layer norms / diag) ===")
+    tb_dynamics(cfg)
 
     # ---- 1. univariate AUC table -------------------------------------------
     noise_types = ["garbled", "duplicate", "unrelated", "keyword", "mixed"]
