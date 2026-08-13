@@ -278,23 +278,33 @@ def run_task(model, tokenizer, task, smoke=False):
     return {"acc": correct / n, "n": n}
 
 
-def evaluate(cfg, dataset, tasks, smoke=False):
+def evaluate(cfg, dataset, tasks, smoke=False, force=False):
     repo = cfg["paths"]["repo_root"]
     os.makedirs(os.path.join(repo, "results"), exist_ok=True)
-    print(f"loading model [{dataset}] ...")
-    model = load_model(cfg, dataset)
-    tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
-    results = {}
-    for task in tasks:
-        if smoke and task not in ("mmlu", "gsm8k"):
-            continue
-        r = run_task(model, tokenizer, task, smoke=smoke)
-        results[task] = r["acc"]
-        print(f"  {task}: {r['acc']:.4f} (n={r['n']})", flush=True)
     tag = cfg["paths"].get("experiment_tag", "")
     name = f"eval_{tag}_{dataset}.json" if tag else f"eval_{dataset}.json"
     out_path = os.path.join(repo, "results", name)
-    json.dump(results, open(out_path, "w"), indent=2)
+    results = {}
+    if os.path.exists(out_path) and not force:
+        results = json.load(open(out_path))
+    remaining = [t for t in tasks if t not in results or force]
+    if not remaining:
+        print(f"[{dataset}] all tasks done, skip (use --force to redo)")
+        return
+    print(f"loading model [{dataset}] ...")
+    model = load_model(cfg, dataset)
+    tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
+    for task in tasks:
+        if smoke and task not in ("mmlu", "gsm8k"):
+            continue
+        if task in results and not force:
+            print(f"  {task}: cached")
+            continue
+        r = run_task(model, tokenizer, task, smoke=smoke)
+        results[task] = r["acc"]
+        # incremental save: interruption loses at most the current task
+        json.dump(results, open(out_path, "w"), indent=2)
+        print(f"  {task}: {r['acc']:.4f} (n={r['n']})", flush=True)
     print(f"saved -> {out_path}")
 
 
@@ -304,10 +314,11 @@ if __name__ == "__main__":
     ap.add_argument("--dataset", default="clean")
     ap.add_argument("--tasks", default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
+    ap.add_argument("--force", action="store_true", help="re-evaluate even if results exist")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
     tasks = args.tasks.split(",") if args.tasks else cfg["eval"]["tasks"]
-    evaluate(cfg, args.dataset, tasks, smoke=args.smoke)
+    evaluate(cfg, args.dataset, tasks, smoke=args.smoke, force=args.force)
