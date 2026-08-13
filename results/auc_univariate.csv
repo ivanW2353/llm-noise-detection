@@ -1,6 +1,0 @@
-noise_type,loss_mean,loss_last,loss_slope,grad_norm_mean,cos_ref_mean,cos_global_mean,max_token_loss,frac_hard
-garbled,,,,,,,,
-duplicate,,,,,,,,
-unrelated,,,,,,,,
-keyword,,,,,,,,
-mixed,,,,,,,,

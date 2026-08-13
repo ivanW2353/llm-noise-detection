@@ -26,7 +26,8 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 BBH_DIR = "/root/autodl-tmp/less/data/eval/bbh"
-MAX_LEN = 2048
+MAX_LEN = 2048          # generation room (long CoT few-shot + output)
+SCORE_MAX_LEN = 1024    # MC scoring cap: [B, L, V] logits are memory-heavy
 
 
 # ----------------------------------------------------------------------------
@@ -53,7 +54,7 @@ def score_options(model, tokenizer, samples, bs=16):
         chunk = flat[s:s + bs]
         pids = [tokenizer(p, add_special_tokens=False)["input_ids"] for p, _ in chunk]
         cids = [tokenizer(c, add_special_tokens=False)["input_ids"] for _, c in chunk]
-        maxl = min(MAX_LEN, max(len(p) + len(c) for p, c in zip(pids, cids)))
+        maxl = min(SCORE_MAX_LEN, max(len(p) + len(c) for p, c in zip(pids, cids)))
         for i in range(len(pids)):  # keep tail (query + Answer:) within MAX_LEN
             if len(pids[i]) + len(cids[i]) > maxl:
                 keep = max(1, maxl - len(cids[i]))
@@ -131,7 +132,7 @@ def load_mmlu():
 def load_hellaswag():
     tr = load_dataset("Rowan/hellaswag", split="train")
     val = load_dataset("Rowan/hellaswag", split="validation")
-    shots = [f"{r['ctx']} {r['endings'][r['label']]}" for r in tr.select(range(10))]
+    shots = [f"{r['ctx']} {r['endings'][r['label']]}" for r in tr.select(range(5))]
     shot_txt = "".join(s + "\n\n" for s in shots)
     samples, answers = [], []
     for r in val:
