@@ -52,6 +52,8 @@ def score_options(model, tokenizer, samples, bs=16):
     all_nll = []
     for s in range(0, len(flat), bs):
         chunk = flat[s:s + bs]
+        if s % (bs * 500) == 0:
+            print(f"    ... {s}/{len(flat)} options", flush=True)
         pids = [tokenizer(p, add_special_tokens=False)["input_ids"] for p, _ in chunk]
         cids = [tokenizer(c, add_special_tokens=False)["input_ids"] for _, c in chunk]
         maxl = min(SCORE_MAX_LEN, max(len(p) + len(c) for p, c in zip(pids, cids)))
@@ -90,6 +92,8 @@ def generate(model, tokenizer, prompts, max_new_tokens=256, bs=8):
     tokenizer.padding_side = "left"  # flash-attn generation is broken with right padding
     outs = []
     for s in range(0, len(prompts), bs):
+        if s % (bs * 50) == 0:
+            print(f"    ... generated {s}/{len(prompts)}", flush=True)
         enc = tokenizer(prompts[s:s + bs], return_tensors="pt", padding=True,
                         truncation=True, max_length=MAX_LEN - max_new_tokens)
         gen = model.generate(
