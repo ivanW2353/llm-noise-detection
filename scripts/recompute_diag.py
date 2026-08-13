@@ -44,7 +44,7 @@ def main():
         if not os.path.exists(lora_path):
             print(f"  skip {ds}: no lora")
             continue
-        path = os.path.join(cfg["paths"]["data_root"], "data", tag, "train", ds, "train.jsonl")
+        path = os.path.join(cfg["paths"]["data_root"], "data", tag, ds, "train.jsonl")
         rows = [json.loads(l) for l in open(path)]
         data, _ = tokenize_rows(tokenizer, rows[::args.subsample], MAX_LEN)
         model = build_model(cfg)

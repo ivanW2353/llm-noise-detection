@@ -91,13 +91,13 @@ def main():
     datasets = ["garbled", "duplicate", "unrelated", "keyword"] if not args.dataset else [args.dataset]
 
     # clean held-out rows (shared reference direction source)
-    clean_path = os.path.join(cfg["paths"]["data_root"], "data", tag, "train", "clean", "train.jsonl")
+    clean_path = os.path.join(cfg["paths"]["data_root"], "data", tag, "clean", "train.jsonl")
     clean_raw = [json.loads(l) for l in open(clean_path)]
     n_hold = cfg["train"]["ref_samples"] + cfg["train"]["heldout_samples"]
     ref_rows, _ = tokenize_rows(tokenizer, clean_raw[:n_hold], MAX_LEN)
 
     for ds in datasets:
-        path = os.path.join(cfg["paths"]["data_root"], "data", tag, "train", ds, "train.jsonl")
+        path = os.path.join(cfg["paths"]["data_root"], "data", tag, ds, "train.jsonl")
         raw = [json.loads(l) for l in open(path)]
         clean_by_id = {r["sample_id"]: r for r in clean_raw}
         labels = {r["sample_id"]: r["noise_type"] for r in raw}

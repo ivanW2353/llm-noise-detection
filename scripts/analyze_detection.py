@@ -47,7 +47,7 @@ def _tag(cfg):
 
 
 def load_labels(cfg, dataset):
-    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg), "train",
+    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg),
                         dataset, "train.jsonl")
     recs = {}
     for l in open(path):
@@ -121,7 +121,7 @@ def load_run_metrics(cfg, dataset):
 def load_text_features(cfg, dataset):
     """TF-IDF nearest-neighbor similarity: strong signal for duplicate (exact
     copies) and keyword (only a few words changed) noise."""
-    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg), "train",
+    path = os.path.join(cfg["paths"]["data_root"], "data", _tag(cfg),
                         dataset, "train.jsonl")
     texts, sids = [], []
     for l in open(path):

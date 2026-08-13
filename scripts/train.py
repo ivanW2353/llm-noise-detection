@@ -294,9 +294,9 @@ def train(cfg, dataset, smoke=False):
     n_held = cfg["train"]["heldout_samples"]
 
     path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
-                        "train", dataset, "train.jsonl")
+                        dataset, "train.jsonl")
     hold_path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
-                             "train", "heldout.jsonl")
+                             "heldout.jsonl")
     rows = [json.loads(l) for l in open(path)]
     heldout_rows = [json.loads(l) for l in open(hold_path)]
     train_rows = rows

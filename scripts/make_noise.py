@@ -142,7 +142,7 @@ def build(config):
     noise_idx = set(rng.sample(range(n_train), n_noise))
     print(f"total={len(rows)} holdout={n_holdout} train={n_train} noise={n_noise} ({ratio:.0%})")
 
-    out_dir = os.path.join(data_root, "data", tag, "train")
+    out_dir = os.path.join(data_root, "data", tag)
     os.makedirs(out_dir, exist_ok=True)
 
     def emit(dataset_name, row_items):

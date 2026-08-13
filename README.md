@@ -104,7 +104,7 @@ bash run_experiment.sh --ratio 0.20 --analyze-only
 ```
 
 Layout for a tagged experiment (e.g. `ratio20`):
-- `<data_root>/data/ratio20/train/<dataset>/` (plus a shared `heldout.jsonl`)
+- `<data_root>/data/ratio20/<dataset>/` (plus a shared `heldout.jsonl`)
 - `<data_root>/runs/ratio20/<dataset>/`
 - `<repo>/results/eval_ratio20_<dataset>.json` and `*_ratio20.*` analysis outputs
 
@@ -122,7 +122,7 @@ python scripts/analyze_token_level.py --tag ratio20
 
 ```bash
 # 1. build the 6 datasets
-python scripts/make_noise.py            # -> <data_root>/data/train/*
+python scripts/make_noise.py            # -> <data_root>/data/*
 
 # 2. train (one run per dataset, ~3 h each on RTX 5090 at 5 epochs)
 python scripts/train.py --dataset clean
@@ -142,5 +142,5 @@ Config: `config.yaml` (paths, noise ratio, hyper-parameters).
 
 - `scripts/` – data construction, training, evaluation, analysis
 - `results/` – evaluation tables, AUC tables, ROC / distribution plots
-- `<data_root>/data/train/` – the 6 datasets
+- `<data_root>/data/` – the 6 datasets (tagged dirs for other ratios)
 - `<data_root>/runs/<dataset>/` – per-sample metrics, tensorboard, LoRA weights
