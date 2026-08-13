@@ -141,12 +141,12 @@ def load_mmlu():
 def load_hellaswag():
     tr = load_dataset("Rowan/hellaswag", split="train")
     val = load_dataset("Rowan/hellaswag", split="validation")
-    shots = [f"{r['ctx']} {r['endings'][r['label']]}" for r in tr.select(range(5))]
+    shots = [f"{r['ctx']} {r['endings'][int(r['label'])]}" for r in tr.select(range(5))]
     shot_txt = "".join(s + "\n\n" for s in shots)
     samples, answers = [], []
     for r in val:
         samples.append((shot_txt + r["ctx"], r["endings"]))
-        answers.append(r["label"])
+        answers.append(int(r["label"]))
     return samples, answers, "5-shot", len(val)
 
 
