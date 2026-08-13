@@ -46,8 +46,8 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "train" ]; then
     for ds in clean garbled duplicate unrelated keyword mixed; do
         if [ "$ds" = "clean" ] && [ -n "$REUSE_CLEAN" ]; then
             # the clean dataset is identical across ratios (same seed/order),
-            # so its run (metrics, LoRA, TB) can be reused from the default tag
-            SRC="/root/autodl-tmp/noisedetect/runs/clean"
+            # so its run (metrics, LoRA, TB) can be reused from the default run
+            SRC="/root/autodl-tmp/noisedetect/runs/ratio10/clean"
             DST="/root/autodl-tmp/noisedetect/runs/$TAG/clean"
             if [ -d "$SRC" ] && [ ! -d "$DST" ]; then
                 mkdir -p "/root/autodl-tmp/noisedetect/runs/$TAG"

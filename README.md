@@ -93,7 +93,7 @@ exact gradient attribution (`analyze_token_level.py`).
 
 ## Changing the noise ratio
 
-Every experiment is isolated under an `experiment_tag` (default none), so
+Every experiment is isolated under an `experiment_tag` (default `ratio10`), so
 different ratios never overwrite each other:
 
 ```bash
@@ -103,7 +103,7 @@ bash run_experiment.sh --ratio 0.20 --eval-only
 bash run_experiment.sh --ratio 0.20 --analyze-only
 ```
 
-Layout for a tagged experiment (e.g. `ratio20`):
+Layout per experiment tag (e.g. `ratio20`):
 - `<data_root>/data/ratio20/<dataset>/` (plus a shared `heldout.jsonl`)
 - `<data_root>/runs/ratio20/<dataset>/`
 - `<repo>/results/eval_ratio20_<dataset>.json` and `*_ratio20.*` analysis outputs
@@ -121,8 +121,8 @@ python scripts/analyze_token_level.py --tag ratio20
 ## Reproduce
 
 ```bash
-# 1. build the 6 datasets
-python scripts/make_noise.py            # -> <data_root>/data/*
+# 1. build the 6 datasets (default tag: ratio10)
+python scripts/make_noise.py            # -> <data_root>/data/ratio10/*
 
 # 2. train (one run per dataset, ~3 h each on RTX 5090 at 5 epochs)
 python scripts/train.py --dataset clean
