@@ -18,11 +18,13 @@ cd "$(dirname "$0")"
 RATIO=""
 TAG=""
 MODE="full"
+REUSE_CLEAN=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --ratio) RATIO="$2"; shift 2 ;;
         --tag)   TAG="$2"; shift 2 ;;
+        --reuse-clean) REUSE_CLEAN="1"; shift ;;
         --train-only) MODE="train"; shift ;;
         --eval-only)  MODE="eval"; shift ;;
         --analyze-only) MODE="analyze"; shift ;;
@@ -40,8 +42,20 @@ fi
 if [ "$MODE" = "full" ] || [ "$MODE" = "train" ]; then
     echo "===== [$TAG] building datasets (ratio=$RATIO) ====="
     python3 scripts/make_noise.py --ratio "$RATIO" --tag "$TAG"
-    echo "===== [$TAG] training (6 runs, ~18h) ====="
+    echo "===== [$TAG] training (5 noisy runs + clean) ====="
     for ds in clean garbled duplicate unrelated keyword mixed; do
+        if [ "$ds" = "clean" ] && [ -n "$REUSE_CLEAN" ]; then
+            # the clean dataset is identical across ratios (same seed/order),
+            # so its run (metrics, LoRA, TB) can be reused from the default tag
+            SRC="/root/autodl-tmp/noisedetect/runs/clean"
+            DST="/root/autodl-tmp/noisedetect/runs/$TAG/clean"
+            if [ -d "$SRC" ] && [ ! -d "$DST" ]; then
+                mkdir -p "/root/autodl-tmp/noisedetect/runs/$TAG"
+                cp -r "$SRC" "$DST"
+                echo "----- [$TAG] reuse clean run from default tag -----"
+                continue
+            fi
+        fi
         echo "----- [$TAG] train $ds -----"
         python3 scripts/train.py --dataset "$ds" --tag "$TAG"
     done
