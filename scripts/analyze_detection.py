@@ -334,12 +334,29 @@ def main():
         p = os.path.join(res_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
         if os.path.exists(p):
             r = json.load(open(p))
-            ev_rows.append({"model": ds, **{k: round(v, 4) for k, v in r.items()}})
+            row = {"model": ds}
+            for k, v in r.items():
+                row[k] = round(v["acc"], 4) if isinstance(v, dict) and "acc" in v else round(v, 4)
+            ev_rows.append(row)
     if ev_rows:
         ev_tab = pd.DataFrame(ev_rows)
         ev_tab.to_csv(os.path.join(res_dir, res_name("eval_comparison")), index=False)
         print("\n=== evaluation comparison ===")
         print(ev_tab.to_string(index=False))
+        # per-subject MMLU comparison
+        subj_rows = []
+        for ds in DATASETS + ["base"]:
+            p = os.path.join(res_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
+            if os.path.exists(p):
+                r = json.load(open(p))
+                subs = r.get("mmlu", {}).get("subjects") if isinstance(r.get("mmlu"), dict) else None
+                if subs:
+                    subj_rows.append({"model": ds, **{k: round(v, 4) for k, v in subs.items()}})
+        if subj_rows:
+            subj_tab = pd.DataFrame(subj_rows)
+            subj_tab.to_csv(os.path.join(res_dir, res_name("eval_mmlu_subjects")), index=False)
+            print(f"\n=== MMLU per-subject ({len(subj_tab.columns)-1} subjects) ===")
+            print(subj_tab.to_string(index=False))
 
     print("plots saved to", res_dir)
 

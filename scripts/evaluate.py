@@ -117,7 +117,7 @@ def load_mmlu():
     by_subj = {}
     for r in dev:
         by_subj.setdefault(r["subject"], []).append(r)
-    samples, answers = [], []
+    samples, answers, subjects = [], [], []
     for r in test:
         shots = by_subj[r["subject"]][:5]
         shot_txt = "".join(
@@ -130,7 +130,8 @@ def load_mmlu():
                   f"D. {r['choices'][3]}\nAnswer:")
         samples.append((prompt, list("ABCD")))
         answers.append(r["answer"])
-    return samples, answers, "5-shot", len(test)
+        subjects.append(r["subject"])
+    return samples, answers, "5-shot", len(test), subjects
 
 
 def load_hellaswag():
@@ -269,13 +270,22 @@ def run_task(model, tokenizer, task, smoke=False):
         acc = sum(sum(v) / len(v) for v in per_task.values()) / n_tasks
         return {"acc": acc, "n": n_tasks * 20,
                 "per_task": {k: sum(v) / len(v) for k, v in per_task.items()}}
-    samples, answers, _, n = TASKS[task]()
+    unpacked = TASKS[task]()
+    samples, answers, n = unpacked[0], unpacked[1], unpacked[3]
+    subjects = unpacked[4] if len(unpacked) > 4 else None
     if smoke:
         samples, answers, n = samples[:200], answers[:200], 200
+        if subjects:
+            subjects = subjects[:200]
     nlls = score_options(model, tokenizer, samples)
-    correct = sum(1 for nll, a in zip(nlls, answers)
-                  if nll.index(min(nll)) == a)
-    return {"acc": correct / n, "n": n}
+    correct = [1 if nll.index(min(nll)) == a else 0 for nll, a in zip(nlls, answers)]
+    res = {"acc": sum(correct) / n, "n": n}
+    if subjects:
+        per_subj = {}
+        for subj, c in zip(subjects, correct):
+            per_subj.setdefault(subj, []).append(c)
+        res["subjects"] = {k: sum(v) / len(v) for k, v in sorted(per_subj.items())}
+    return res
 
 
 def evaluate(cfg, dataset, tasks, smoke=False, force=False):
@@ -301,7 +311,7 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
             print(f"  {task}: cached")
             continue
         r = run_task(model, tokenizer, task, smoke=smoke)
-        results[task] = r["acc"]
+        results[task] = r
         # incremental save: interruption loses at most the current task
         json.dump(results, open(out_path, "w"), indent=2)
         print(f"  {task}: {r['acc']:.4f} (n={r['n']})", flush=True)
