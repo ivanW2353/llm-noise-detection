@@ -267,17 +267,24 @@ def run_task(model, tokenizer, task, smoke=False):
             samples, answers, n = samples[:50], answers[:50], 50
         gens = generate(model, tokenizer, chat_wrap(tokenizer, samples), max_new_tokens=512)
         preds = [parse_gsm8k(t) for t in gens]
+        raw = [{"qid": i, "correct": 1 if p == a else 0, "answer": a,
+                "pred": p, "gen_len": len(t.split())} for i, (p, a, t) in enumerate(zip(preds, answers, gens))]
         acc = sum(1 for p, a in zip(preds, answers) if p == a) / n
-        return {"acc": acc, "n": n}
+        return {"acc": acc, "n": n, "raw": raw}
     if task == "bbh":
         samples, answers, task_names, n_tasks = load_bbh(max_per_task=2 if smoke else 20)
         gens = generate(model, tokenizer, chat_wrap(tokenizer, samples), max_new_tokens=128)
         per_task = {}
-        for task_name, g, a in zip(task_names, gens, answers):
-            per_task.setdefault(task_name, []).append(parse_bbh(g) == a)
+        raw = []
+        for i, (task_name, g, a) in enumerate(zip(task_names, gens, answers)):
+            ok = parse_bbh(g) == a
+            per_task.setdefault(task_name, []).append(ok)
+            raw.append({"qid": i, "task": task_name, "correct": 1 if ok else 0,
+                        "target": a, "gen_len": len(g.split())})
         acc = sum(sum(v) / len(v) for v in per_task.values()) / n_tasks
         return {"acc": acc, "n": n_tasks * 20,
-                "per_task": {k: sum(v) / len(v) for k, v in per_task.items()}}
+                "per_task": {k: sum(v) / len(v) for k, v in per_task.items()},
+                "raw": raw}
     unpacked = TASKS[task]()
     samples, answers, n = unpacked[0], unpacked[1], unpacked[3]
     groups = unpacked[4] if len(unpacked) > 4 else None
@@ -288,8 +295,18 @@ def run_task(model, tokenizer, task, smoke=False):
         if groups:
             groups = groups[:200]
     nlls = score_options(model, tokenizer, samples)
-    correct = [1 if nll.index(min(nll)) == a else 0 for nll, a in zip(nlls, answers)]
-    res = {"acc": sum(correct) / n, "n": n}
+    correct = []
+    raw = []
+    for k, (nll, a, (p, opts)) in enumerate(zip(nlls, answers, samples)):
+        idx = nll.index(min(nll))
+        correct.append(1 if idx == a else 0)
+        best, second = sorted(nll)[0], sorted(nll)[1]
+        rec = {"qid": k, "correct": 1 if idx == a else 0,
+               "margin": round(second - best, 4), "chosen": idx, "answer": a}
+        if groups:
+            rec["group"] = groups[k]
+        raw.append(rec)
+    res = {"acc": sum(correct) / n, "n": n, "raw": raw}
     if groups:
         per = {}
         for grp, c in zip(groups, correct):
@@ -321,9 +338,17 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
             print(f"  {task}: cached")
             continue
         r = run_task(model, tokenizer, task, smoke=smoke)
+        raw = r.pop("raw", None)
         results[task] = r
         # incremental save: interruption loses at most the current task
         json.dump(results, open(out_path, "w"), indent=2)
+        if raw is not None:
+            raw_path = os.path.join(repo, "results",
+                                    f"eval_raw_{tag}_{dataset}.jsonl" if tag else f"eval_raw_{dataset}.jsonl")
+            with open(raw_path, "a") as f:
+                for rec in raw:
+                    rec["task"] = task
+                    f.write(json.dumps(rec) + "\n")
         print(f"  {task}: {r['acc']:.4f} (n={r['n']})", flush=True)
     print(f"saved -> {out_path}")
 

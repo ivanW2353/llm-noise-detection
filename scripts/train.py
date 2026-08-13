@@ -148,14 +148,25 @@ def layer_index(name):
     return int(m.group(1)) if m else -1
 
 
-def window_layer_grad_norms(model, target_ids):
-    """L2 norm of accumulated window grads per target layer (GPU->CPU sync)."""
+def window_layer_grad_norms(model):
+    """L2 norm of the accumulated window gradients per layer (all layers)."""
     norms = {}
     for name, p in model.named_parameters():
         if "lora_" in name and p.grad is not None:
             li = layer_index(name)
-            if li in target_ids:
+            if li >= 0:
                 norms[li] = norms.get(li, 0.0) + (p.grad.float() ** 2).sum().item()
+    return {li: math.sqrt(v) for li, v in norms.items()}
+
+
+def window_layer_weight_norms(model):
+    """L2 norm of LoRA weights per layer (all layers, after optimizer step)."""
+    norms = {}
+    for name, p in model.named_parameters():
+        if "lora_" in name and p.requires_grad:
+            li = layer_index(name)
+            if li >= 0:
+                norms[li] = norms.get(li, 0.0) + (p.detach().float() ** 2).sum().item()
     return {li: math.sqrt(v) for li, v in norms.items()}
 
 
@@ -296,6 +307,7 @@ def train(cfg, dataset, smoke=False):
     os.makedirs(metric_dir, exist_ok=True)
     writer = SummaryWriter(os.path.join(run_dir, "tb"))
     metric_f = open(os.path.join(metric_dir, "per_sample.jsonl"), "w")
+    ln_f = open(os.path.join(metric_dir, "layer_norms.jsonl"), "w")
 
     print("loading model ...")
     model = build_model(cfg)
@@ -426,14 +438,20 @@ def train(cfg, dataset, smoke=False):
 
             # optimizer step at window boundary
             if (i + 1) % tcfg["grad_accum"] == 0:
-                for li, v in window_layer_grad_norms(model, target_ids).items():
-                    layer_norm_sum[li] += v
+                all_norms = window_layer_grad_norms(model)
+                for li in target_ids:
+                    layer_norm_sum[li] += all_norms.get(li, 0.0)
                 layer_norm_cnt += 1
                 if (global_step + 1) % tcfg["eval_steps"] == 0:
                     log_histograms(writer, model, global_step + 1, target_ids)
                 for g in opt.param_groups:
                     g["lr"] = lr_at(global_step)
                 opt.step()
+                # per-layer LoRA grad+weight norms for ALL layers (window-level)
+                ln_f.write(json.dumps({"step": global_step + 1,
+                                       "grad": all_norms,
+                                       "weight": window_layer_weight_norms(model)}) + "\n")
+                ln_f.flush()
                 # snapshot Adam second-moment (B params) for update_contrib
                 o = 0
                 for (s, e), (name, p) in zip(offsets, params):
@@ -535,6 +553,7 @@ def train(cfg, dataset, smoke=False):
             break
 
     metric_f.close()
+    ln_f.close()
     model.eval()
     model.save_pretrained(os.path.join(run_dir, "lora"))
     tokenizer.save_pretrained(os.path.join(run_dir, "lora"))

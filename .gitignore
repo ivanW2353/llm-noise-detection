@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 results/per_sample_metrics.csv
 .ipynb_checkpoints/
+eval_raw_*.jsonl
+layer_norms.jsonl
