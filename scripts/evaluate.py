@@ -143,11 +143,12 @@ def load_hellaswag():
     val = load_dataset("Rowan/hellaswag", split="validation")
     shots = [f"{r['ctx']} {r['endings'][int(r['label'])]}" for r in tr.select(range(5))]
     shot_txt = "".join(s + "\n\n" for s in shots)
-    samples, answers = [], []
+    samples, answers, activities = [], [], []
     for r in val:
         samples.append((shot_txt + r["ctx"], r["endings"]))
         answers.append(int(r["label"]))
-    return samples, answers, "5-shot", len(val)
+        activities.append(r["activity_label"])
+    return samples, answers, "5-shot", len(val), activities
 
 
 def load_arc():
@@ -180,12 +181,15 @@ def load_winogrande():
 
 def load_truthfulqa():
     d = load_dataset("truthfulqa/truthful_qa", "multiple_choice", split="validation")
-    samples, answers = [], []
+    g = load_dataset("truthfulqa/truthful_qa", "generation", split="validation")
+    cat_map = {r["question"]: r["category"] for r in g}
+    samples, answers, categories = [], [], []
     for r in d:
         mc = r["mc1_targets"]
         samples.append((r["question"] + "\nAnswer:", mc["choices"]))
         answers.append(mc["labels"].index(1))
-    return samples, answers, "0-shot", len(d)
+        categories.append(cat_map.get(r["question"], "unknown"))
+    return samples, answers, "0-shot", len(d), categories
 
 
 def load_gsm8k():
@@ -276,19 +280,21 @@ def run_task(model, tokenizer, task, smoke=False):
                 "per_task": {k: sum(v) / len(v) for k, v in per_task.items()}}
     unpacked = TASKS[task]()
     samples, answers, n = unpacked[0], unpacked[1], unpacked[3]
-    subjects = unpacked[4] if len(unpacked) > 4 else None
+    groups = unpacked[4] if len(unpacked) > 4 else None
+    group_key = {"mmlu": "subjects", "hellaswag": "activities",
+                 "truthfulqa": "categories"}.get(task, "groups")
     if smoke:
         samples, answers, n = samples[:200], answers[:200], 200
-        if subjects:
-            subjects = subjects[:200]
+        if groups:
+            groups = groups[:200]
     nlls = score_options(model, tokenizer, samples)
     correct = [1 if nll.index(min(nll)) == a else 0 for nll, a in zip(nlls, answers)]
     res = {"acc": sum(correct) / n, "n": n}
-    if subjects:
-        per_subj = {}
-        for subj, c in zip(subjects, correct):
-            per_subj.setdefault(subj, []).append(c)
-        res["subjects"] = {k: sum(v) / len(v) for k, v in sorted(per_subj.items())}
+    if groups:
+        per = {}
+        for grp, c in zip(groups, correct):
+            per.setdefault(grp, []).append(c)
+        res[group_key] = {k: sum(v) / len(v) for k, v in sorted(per.items())}
     return res
 
 
