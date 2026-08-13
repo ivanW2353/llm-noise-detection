@@ -219,8 +219,6 @@ def main():
     print(best.round(4).to_string())
 
     # ---- 3. multivariate detection per noise type --------------------------
-    mdir = os.path.join(res_dir, "models")
-    os.makedirs(mdir, exist_ok=True)
     det_rows = []
     fig_roc, ax_roc = plt.subplots(figsize=(6, 6))
     for nt in noise_types:
