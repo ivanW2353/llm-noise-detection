@@ -26,12 +26,11 @@ import yaml
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from train import (MAX_LEN, build_model, compute_reference_direction,
-                   tokenize_rows)
+from train import (MAX_LEN, compute_reference_direction, tokenize_rows)
 
 TOP_K = 24
 N_PER_TYPE = 60          # noise samples per type
@@ -39,11 +38,18 @@ N_NORMAL = 60            # normal samples per run
 
 
 def load_model_and_ref(cfg, dataset, ref_rows):
-    model = build_model(cfg)
+    model = AutoModelForCausalLM.from_pretrained(
+        cfg["paths"]["model"], dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2", device_map={"": 0})
     if dataset != "base":
         tag = cfg["paths"].get("experiment_tag", "")
         lora_path = os.path.join(cfg["paths"]["data_root"], "runs", tag, dataset, "lora")
         model = PeftModel.from_pretrained(model, lora_path)
+    # PEFT loads adapters with requires_grad=False (inference mode);
+    # re-enable so per-token backward has a graph
+    for n, p in model.named_parameters():
+        if "lora_" in n:
+            p.requires_grad = True
     model.eval()
     params, offsets, total, ref_buf = compute_reference_direction(
         model, None, ref_rows, cfg, batch_size=2)
@@ -55,7 +61,7 @@ def hard_tokens(model, row, params, offsets, ref_buf, k=TOP_K):
     input_ids = row["input_ids"].unsqueeze(0).cuda()
     labels = row["labels"].unsqueeze(0).cuda()
     out = model(input_ids=input_ids, labels=labels)
-    logits = out.logits[0]                       # [L-1, V]
+    logits = out.logits[0][:-1]                 # [L-1, V] (shifted prediction)
     ce = torch.nn.functional.cross_entropy(
         logits.reshape(-1, logits.shape[-1]), labels[:, 1:].reshape(-1),
         reduction="none").view(-1)
