@@ -513,6 +513,8 @@ def main():
         print(ev_tab.to_string(index=False))
         # per-group comparisons (MMLU subjects, HellaSwag activities,
         # TruthfulQA categories, BBH tasks)
+        task_of = {"subjects": "mmlu", "activities": "hellaswag",
+                   "categories": "truthfulqa", "per_task": "bbh"}
         for gkey, gname in [("subjects", "mmlu_subjects"), ("activities", "hellaswag_activities"),
                             ("categories", "truthfulqa_categories"), ("per_task", "bbh_tasks")]:
             subj_rows = []
@@ -520,7 +522,8 @@ def main():
                 p = os.path.join(eval_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
                 if os.path.exists(p):
                     r = json.load(open(p))
-                    v = r.get(gkey)
+                    task_r = r.get(task_of[gkey])
+                    v = task_r.get(gkey) if isinstance(task_r, dict) else None
                     if v:
                         subj_rows.append({"model": ds, **{k: round(x, 4) for k, x in v.items()}})
             if subj_rows:
