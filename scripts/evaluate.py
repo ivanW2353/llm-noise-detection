@@ -298,9 +298,10 @@ def run_task(model, tokenizer, task, smoke=False):
     correct = []
     raw = []
     for k, (nll, a, (p, opts)) in enumerate(zip(nlls, answers, samples)):
-        idx = nll.index(min(nll))
+        nll_f = [float(x) for x in nll]
+        idx = nll_f.index(min(nll_f))
         correct.append(1 if idx == a else 0)
-        best, second = sorted(nll)[0], sorted(nll)[1]
+        best, second = sorted(nll_f)[0], sorted(nll_f)[1]
         rec = {"qid": k, "correct": 1 if idx == a else 0,
                "margin": round(second - best, 4), "chosen": idx, "answer": a}
         if groups:
