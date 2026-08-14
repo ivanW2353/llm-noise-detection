@@ -50,7 +50,7 @@ def load_model(cfg, dataset):
 
 
 @torch.no_grad()
-def score_options(model, tokenizer, samples, bs=16):
+def score_options(model, tokenizer, samples, bs=24):
     """samples: list of (prompt, options); returns per-sample nll list."""
     flat = [(p, " " + o) for p, opts in samples for o in opts]
     all_nll = []
@@ -91,7 +91,7 @@ def _per_row_nll(logits, labels, mask):
 
 
 @torch.no_grad()
-def generate(model, tokenizer, prompts, max_new_tokens=256, bs=8):
+def generate(model, tokenizer, prompts, max_new_tokens=256, bs=16):
     model.config.use_cache = True
     tokenizer.padding_side = "left"  # flash-attn generation is broken with right padding
     outs = []
