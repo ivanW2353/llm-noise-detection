@@ -52,7 +52,7 @@ def load_labels(cfg, dataset):
     recs = {}
     for l in open(path):
         r = json.loads(l)
-        recs[r["sample_id"]] = (r["noise_label"], r["noise_type"])
+        recs[r["sample_id"]] = (r["noise_label"], r["noise_type"], r.get("category"))
     return recs
 
 
@@ -244,9 +244,10 @@ def build_table(cfg):
             print(f"  warn text features {ds}: {e}")
             text_sim = {}
         for sid, row in metrics.iterrows():
-            label, ntype = labels.get(int(sid), (0, "none"))
+            label, ntype, cat = labels.get(int(sid), (0, "none", None))
             all_rows.append({"dataset": ds, "sample_id": sid, "noise_label": label,
-                             "noise_type": ntype, "text_nn_sim": text_sim.get(int(sid)),
+                             "noise_type": ntype, "category": cat,
+                             "text_nn_sim": text_sim.get(int(sid)),
                              **row.to_dict()})
     return pd.DataFrame(all_rows)
 
@@ -365,6 +366,63 @@ def main():
     ax_roc.legend(fontsize=7)
     fig_roc.tight_layout()
     fig_roc.savefig(os.path.join(res_dir, res_img("roc_multivariate")), dpi=150)
+
+    # ---- 3.5 category-stratified detection (task-type transferability) ------
+    cat_rows = []
+    for cat in sorted(df["category"].dropna().unique()):
+        sub = df[(df["category"] == cat)].dropna(subset=METRIC_ORDER)
+        if sub.empty or sub["noise_label"].sum() < 10:
+            continue
+        sub["label"] = (sub["noise_type"] != "none").astype(int)
+        X = sub[METRIC_ORDER].values
+        y = sub["label"].values
+        if len(set(y)) < 2:
+            continue
+        sc = StandardScaler().fit(X)
+        Xs = sc.transform(X)
+        rng = np.random.RandomState(0)
+        idx = rng.permutation(len(y))
+        n_tr = int(0.7 * len(y))
+        tr, te = idx[:n_tr], idx[n_tr:]
+        clf = RandomForestClassifier(n_estimators=200, random_state=0)
+        clf.fit(Xs[tr], y[tr])
+        proba = clf.predict_proba(Xs[te])[:, 1]
+        cat_rows.append({"category": cat, "n": len(y), "n_noise": int(y.sum()),
+                         "rf_auc": round(roc_auc_score(y[te], proba), 4)})
+    if cat_rows:
+        cat_tab = pd.DataFrame(cat_rows).sort_values("rf_auc", ascending=False)
+        cat_tab.to_csv(os.path.join(res_dir, res_name("auc_by_category")), index=False)
+        print("\n=== RF detection AUC by task category (transferability) ===")
+        print(cat_tab.to_string(index=False))
+    # noise-type × category AUC matrix
+    mat_rows = []
+    for cat in sorted(df["category"].dropna().unique()):
+        for nt in ["garbled", "duplicate", "unrelated", "keyword"]:
+            ds = nt
+            sub = df[(df["category"] == cat) & (df["dataset"] == ds)].dropna(subset=METRIC_ORDER)
+            if sub.empty or sub["noise_label"].sum() < 5:
+                continue
+            sub["label"] = (sub["noise_type"] != "none").astype(int)
+            X = sub[METRIC_ORDER].values
+            y = sub["label"].values
+            if len(set(y)) < 2:
+                continue
+            sc = StandardScaler().fit(X)
+            rng = np.random.RandomState(0)
+            idx = rng.permutation(len(y))
+            n_tr = int(0.7 * len(y))
+            tr, te = idx[:n_tr], idx[n_tr:]
+            clf = RandomForestClassifier(n_estimators=200, random_state=0)
+            clf.fit(sc.transform(X)[tr], y[tr])
+            proba = clf.predict_proba(sc.transform(X)[te])[:, 1]
+            mat_rows.append({"category": cat, "noise_type": nt,
+                             "rf_auc": round(roc_auc_score(y[te], proba), 4),
+                             "n": len(y)})
+    if mat_rows:
+        mat_tab = pd.DataFrame(mat_rows).pivot(index="category", columns="noise_type", values="rf_auc")
+        mat_tab.to_csv(os.path.join(res_dir, res_name("auc_category_x_noise")), index=False)
+        print("\n=== RF AUC: category x noise type ===")
+        print(mat_tab.to_string())
 
     # ---- 4. distribution comparison ------------------------------------------
     ncols, nrows = 2, math.ceil(len(METRIC_ORDER) / 2)
