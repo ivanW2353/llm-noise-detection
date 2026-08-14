@@ -60,6 +60,8 @@ A shared set of 400 clean held-out samples (`heldout.jsonl`) is used for: comput
 2. **duplicate converges to the lowest loss** (0.425, 17% below clean) — copies are memorized quickly, *lowering* the training loss (a memorization signal);
 3. unrelated / keyword / mixed track clean closely — these noise types disguise themselves well in terms of mean loss.
 
+![Training loss trajectory](../results/charts/loss_trajectory_ratio10.png)
+
 ### 2.2 Held-out clean loss (generalization damage, evaluated every 200 steps)
 
 | run | initial (step 200) | final | increase |
@@ -72,6 +74,12 @@ A shared set of 400 clean held-out samples (`heldout.jsonl`) is used for: comput
 | duplicate | 1.626 | **2.143** | **+0.517 (largest)** |
 
 **Findings:** held-out loss rises in *every* run, including clean — 5-epoch LoRA fine-tuning on dolly-15k is itself overfitting. **duplicate overfits the most** (memorization hurts generalization), while **keyword is the mildest**; consistent with the benchmark results in §5.
+
+![Held-out loss trajectory](../results/charts/tb_heldout_trajectory_ratio10.png)
+
+### 2.3 Per-layer gradient norms (final training window)
+
+![Per-run layer gradient norms](../results/charts/tb_layer_gradnorm_ratio10.png)
 
 ---
 
@@ -97,7 +105,27 @@ A shared set of 400 clean held-out samples (`heldout.jsonl`) is used for: comput
 | mixed | 0.850 | 0.827 | 92.1% | moderate |
 | keyword | **0.531** | 0.551 | (all-normal) | **not separable** |
 
-### 3.3 Metric "fingerprints" per noise type
+![RF ROC curves](../results/charts/roc_multivariate_ratio10.png)
+
+### 3.3 Noise vs normal distributions of key metrics
+
+<center>
+
+| Loss & gradient | Input-side features |
+|---|---|
+| ![loss_mean](../results/charts/metric_dist_loss_mean_ratio10.png) | ![user_loss](../results/charts/metric_dist_user_loss_ratio10.png) |
+| ![grad_norm](../results/charts/metric_dist_grad_norm_mean_ratio10.png) | ![entropy](../results/charts/metric_dist_entropy_ratio10.png) |
+| ![cos_ref](../results/charts/metric_dist_cos_ref_mean_ratio10.png) | ![text_nn_sim](../results/charts/metric_dist_text_nn_sim_ratio10.png) |
+
+</center>
+
+> All 19 per-metric distribution figures are in `results/charts/metric_dist_*_ratio10.png`. Each figure is a box-plot of 5 noise types × (noise / normal).
+
+### 3.4 PCA projection of sample features
+
+![PCA projection](../results/charts/pca_metrics_ratio10.png)
+
+### 3.5 Metric "fingerprints" per noise type
 
 - **garbled**: both prompt and response are corrupted → `user_loss` and `entropy` spike, loss-trajectory curvature is anomalous (never learned) → the most detectable;
 - **duplicate**: textual repetition is its essence → `text_nn_sim ≈ 1.0` is a one-shot hit; training-side features (low loss, memorized) point the *opposite* way from "hard samples";
@@ -105,7 +133,7 @@ A shared set of 400 clean held-out samples (`heldout.jsonl`) is used for: comput
 - **keyword**: only a few entity words are changed; text and semantics remain intact → all training-side metrics stay near-normal; **the blind spot of sample-level detection**;
 - **mixed**: features dilute each other, but `text_nn_sim` still catches the duplicate subset.
 
-### 3.4 Transferability across task types (stratified by dolly's 8 categories)
+### 3.6 Transferability across task types (stratified by dolly's 8 categories)
 
 | category | RF AUC |
 |---|---|
@@ -137,6 +165,18 @@ Per dataset, 60 noise + 60 normal samples; for each sample the top-24 hardest la
 1. **garbled remains the most separable at token level** (0.77) — corrupted positions produce tokens with locally extreme losses;
 2. **duplicate's token-level AUC is below 0.5** — its tokens are perfectly memorized (low loss), indistinguishable from normal ones; its detectability comes entirely from the **data side** (text similarity), not from training dynamics;
 3. Token-level AUCs are generally lower than sample-level ones — a single hard token has limited signal-to-noise; aggregating across tokens and epochs is more robust.
+
+<center>
+
+| garbled | duplicate |
+|---|---|
+| ![garbled per-token losses](../results/charts/token_curve_ratio10_garbled.png) | ![duplicate per-token losses](../results/charts/token_curve_ratio10_duplicate.png) |
+| unrelated | keyword |
+| ![unrelated per-token losses](../results/charts/token_curve_ratio10_unrelated.png) | ![keyword per-token losses](../results/charts/token_curve_ratio10_keyword.png) |
+
+</center>
+
+> Each figure shows position-loss scatter plots of the top-k hardest tokens for 3 noise samples of the corresponding type (hardest tokens only, not the full sequence).
 
 **Known limitation:** the garbled-localization check (`loc_mismatch_frac`) returned 0 — position-based comparison breaks when character-level corruption shifts tokenization boundaries; a sequence-alignment approach (e.g., edit-distance alignment) is needed to correctly locate corrupted tokens. Left as future work.
 

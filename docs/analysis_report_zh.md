@@ -60,6 +60,8 @@
 2. **duplicate 收敛到最低** (0.425, 比 clean 低 17%) — 重复样本被快速记忆, 反而拉低训练损失 (过拟合信号);
 3. unrelated / keyword / mixed 的轨迹与 clean 接近, 说明这些噪音在损失均值层面伪装得很好。
 
+![训练 loss 轨迹](../results/charts/loss_trajectory_ratio10.png)
+
 ### 2.2 Held-out 干净样本损失 (泛化损伤, 每 200 步评估)
 
 | run | 初始 (step 200) | 最终 | 增幅 |
@@ -72,6 +74,12 @@
 | duplicate | 1.626 | **2.143** | **+0.517 (最大)** |
 
 **发现:** 所有 run (含 clean) 的 held-out 损失都随训练上升 — dolly-15k 上 5 epoch 的 LoRA 微调本身就在过拟合。**duplicate 的过拟合最严重** (重复样本强化记忆、损害泛化), **keyword 反而最轻**; 这与验证集结果互相印证 (见第 5 节)。
+
+![held-out 损失轨迹](../results/charts/tb_heldout_trajectory_ratio10.png)
+
+### 2.3 层梯度范数 (训练末窗口)
+
+![各 run 层梯度范数](../results/charts/tb_layer_gradnorm_ratio10.png)
 
 ---
 
@@ -97,7 +105,27 @@
 | mixed | 0.850 | 0.827 | 92.1% | 中等可分 |
 | keyword | **0.531** | 0.551 | (全判正常) | **不可分** |
 
-### 3.3 各类噪音的"指标指纹"
+![RF ROC 曲线](../results/charts/roc_multivariate_ratio10.png)
+
+### 3.3 关键指标的噪音/正常分布对比
+
+<center>
+
+| 损失与梯度 | 输入侧特征 |
+|---|---|
+| ![loss_mean](../results/charts/metric_dist_loss_mean_ratio10.png) | ![user_loss](../results/charts/metric_dist_user_loss_ratio10.png) |
+| ![grad_norm](../results/charts/metric_dist_grad_norm_mean_ratio10.png) | ![entropy](../results/charts/metric_dist_entropy_ratio10.png) |
+| ![cos_ref](../results/charts/metric_dist_cos_ref_mean_ratio10.png) | ![text_nn_sim](../results/charts/metric_dist_text_nn_sim_ratio10.png) |
+
+</center>
+
+> 完整 19 张单指标分布图见 `results/charts/metric_dist_*_ratio10.png`。每张图为 5 种噪音类型 × (噪音/正常) 的箱线图。
+
+### 3.4 样本特征 PCA 投影
+
+![PCA 投影](../results/charts/pca_metrics_ratio10.png)
+
+### 3.5 各类噪音的"指标指纹"
 
 - **garbled**: 提示词与回复都被污染 → `user_loss` 与 `entropy` 极高、loss 轨迹曲率异常 (学不动) → 检测最可靠;
 - **duplicate**: 文本重复是本质 → `text_nn_sim ≈ 1.0` 一击命中; 训练侧特征 (loss 低、被记忆) 反而与"难样本"方向相反;
@@ -105,7 +133,7 @@
 - **keyword**: 只改几个实体词, 文本与语义基本完整 → 所有训练侧指标接近正常; **样本级检测的盲区**, 单靠训练动态无法分离;
 - **mixed**: 四类混合后各特征互相稀释, 但 text_nn_sim 仍捕获其中的 duplicate 子集。
 
-### 3.4 跨任务类型迁移性 (按 dolly 的 8 个 category 分层)
+### 3.6 跨任务类型迁移性 (按 dolly 的 8 个 category 分层)
 
 | category | RF AUC |
 |---|---|
@@ -137,6 +165,18 @@
 1. **garbled 在 token 级仍最强可分** (0.77) — 乱码位置产生局部极端损失的 token;
 2. **duplicate 的 token 级 AUC 低于 0.5** — 重复样本的 token 被完美记忆 (低损失), 与正常样本不可分; 它的可检测性完全来自**数据侧**特征 (文本相似度), 而非训练动态;
 3. 整体而言 token 级 AUC 低于样本级 — 单个 hard token 的信号噪声比有限, 样本级聚合 (跨 token 与跨 epoch) 更稳。
+
+<center>
+
+| garbled | duplicate |
+|---|---|
+| ![garbled 逐 token 损失](../results/charts/token_curve_ratio10_garbled.png) | ![duplicate 逐 token 损失](../results/charts/token_curve_ratio10_duplicate.png) |
+| unrelated | keyword |
+| ![unrelated 逐 token 损失](../results/charts/token_curve_ratio10_unrelated.png) | ![keyword 逐 token 损失](../results/charts/token_curve_ratio10_keyword.png) |
+
+</center>
+
+> 每张图为 3 个噪音样本的 top-k 最难 token 位置-损失散点 (仅展示损失最高的 token, 非全序列)。
 
 **已知局限:** 乱码定位验证 (`loc_mismatch_frac`) 结果为 0 — 位置对齐法在字符级污染改变 tokenization 边界时失效, 需要序列对齐算法 (如编辑距离对齐) 才能正确定位被污染的 token, 留作后续工作。
 
