@@ -430,10 +430,8 @@ def main():
         print("\n=== RF AUC: category x noise type ===")
         print(mat_tab.to_string())
 
-    # ---- 4. distribution comparison ------------------------------------------
-    ncols, nrows = 2, math.ceil(len(METRIC_ORDER) / 2)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(16, nrows * 3.4))
-    for ax, m in zip(axes.ravel(), METRIC_ORDER):
+    # ---- 4. distribution comparison (one figure per metric) ----------------
+    for m in METRIC_ORDER:
         data = []
         labels = []
         for nt in noise_types:
@@ -445,13 +443,16 @@ def main():
             data.append(pos[m].dropna().values)
             data.append(neg[m].dropna().values)
             labels += [f"{nt}\nnoise", f"{nt}\nnormal"]
+        if all(len(d) == 0 for d in data):
+            continue
+        fig, ax = plt.subplots(figsize=(12, 4.5))
         ax.boxplot(data, labels=labels, showfliers=False)
-        ax.tick_params(axis="x", labelsize=6)
-        ax.set_title(m, fontsize=10)
-    for ax in axes.ravel()[len(METRIC_ORDER):]:
-        ax.axis("off")
-    fig.tight_layout()
-    fig.savefig(os.path.join(chart_dir, res_img("metric_distributions")), dpi=150)
+        ax.tick_params(axis="x", labelsize=8)
+        ax.set_title(m, fontsize=11)
+        ax.set_ylabel(m)
+        fig.tight_layout()
+        fig.savefig(os.path.join(chart_dir, res_img(f"metric_dist_{m}")), dpi=150)
+        plt.close(fig)
 
     # ---- 5. loss trajectory ------------------------------------------------
     ep_cols = sorted([c for c in df.columns if c.startswith("loss_ep")],
