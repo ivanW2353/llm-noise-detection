@@ -141,6 +141,8 @@ Config: `config.yaml` (paths, noise ratio, hyper-parameters).
 ## Layout
 
 - `scripts/` – data construction, training, evaluation, analysis
-- `results/` – evaluation tables, AUC tables, ROC / distribution plots
+- `results/eval/` – per-model evaluation results + raw per-question records + comparison tables
+- `results/charts/` – all figures (ROC, distributions, PCA, trajectories, token curves)
+- `results/` – detection-analysis tables (AUC, multivariate, per-category)
 - `<data_root>/data/` – the 6 datasets (tagged dirs for other ratios)
 - `<data_root>/runs/<dataset>/` – per-sample metrics, tensorboard, LoRA weights

@@ -167,6 +167,8 @@ def tb_dynamics(cfg, df=None):
     repo = cfg["paths"]["repo_root"]
     tag = _tag(cfg)
     res_dir = os.path.join(repo, "results")
+    chart_dir = os.path.join(repo, "results", "charts")
+    os.makedirs(chart_dir, exist_ok=True)
     def res_name(name):
         return f"{name}_{tag}.csv" if tag else f"{name}.csv"
     def res_img(name):
@@ -196,7 +198,7 @@ def tb_dynamics(cfg, df=None):
         ax.set_title("Held-out loss during training (generalization damage)")
         ax.legend(fontsize=8)
         fig.tight_layout()
-        fig.savefig(os.path.join(res_dir, res_img("tb_heldout_trajectory")), dpi=150)
+        fig.savefig(os.path.join(chart_dir, res_img("tb_heldout_trajectory")), dpi=150)
         plt.close(fig)
         print("saved tb_heldout_*")
     # 2. per-layer grad norm comparison (final window value per run)
@@ -217,7 +219,7 @@ def tb_dynamics(cfg, df=None):
         ax.set_title("Per-layer LoRA gradient norms by run")
         ax.legend(fontsize=8)
         fig.tight_layout()
-        fig.savefig(os.path.join(res_dir, res_img("tb_layer_gradnorm")), dpi=150)
+        fig.savefig(os.path.join(chart_dir, res_img("tb_layer_gradnorm")), dpi=150)
         plt.close(fig)
         print("saved tb_layer_gradnorm_*")
     # 3. diagnostic metric trajectory per epoch
@@ -283,7 +285,11 @@ def main():
     repo = cfg["paths"]["repo_root"]
     tag = _tag(cfg)
     res_dir = os.path.join(repo, "results")
+    chart_dir = os.path.join(repo, "results", "charts")
+    eval_dir = os.path.join(repo, "results", "eval")
     os.makedirs(res_dir, exist_ok=True)
+    os.makedirs(chart_dir, exist_ok=True)
+    os.makedirs(eval_dir, exist_ok=True)
     def res_name(name):
         return f"{name}_{tag}.csv" if tag else f"{name}.csv"
     def res_img(name):
@@ -365,7 +371,7 @@ def main():
     ax_roc.set_title("RF ROC: noise vs normal")
     ax_roc.legend(fontsize=7)
     fig_roc.tight_layout()
-    fig_roc.savefig(os.path.join(res_dir, res_img("roc_multivariate")), dpi=150)
+    fig_roc.savefig(os.path.join(chart_dir, res_img("roc_multivariate")), dpi=150)
 
     # ---- 3.5 category-stratified detection (task-type transferability) ------
     cat_rows = []
@@ -445,7 +451,7 @@ def main():
     for ax in axes.ravel()[len(METRIC_ORDER):]:
         ax.axis("off")
     fig.tight_layout()
-    fig.savefig(os.path.join(res_dir, res_img("metric_distributions")), dpi=150)
+    fig.savefig(os.path.join(chart_dir, res_img("metric_distributions")), dpi=150)
 
     # ---- 5. loss trajectory ------------------------------------------------
     ep_cols = sorted([c for c in df.columns if c.startswith("loss_ep")],
@@ -470,7 +476,7 @@ def main():
         ax2.legend()
         ax2.set_title("Loss trajectory by noise type")
         fig2.tight_layout()
-        fig2.savefig(os.path.join(res_dir, res_img("loss_trajectory")), dpi=150)
+        fig2.savefig(os.path.join(chart_dir, res_img("loss_trajectory")), dpi=150)
 
     # ---- 6. PCA scatter ------------------------------------------------------
     sub = df.dropna(subset=METRIC_ORDER)
@@ -487,12 +493,12 @@ def main():
         ax3.set_title("PCA of per-sample metrics")
         ax3.legend(markerscale=3, fontsize=8)
         fig3.tight_layout()
-        fig3.savefig(os.path.join(res_dir, res_img("pca_metrics")), dpi=150)
+        fig3.savefig(os.path.join(chart_dir, res_img("pca_metrics")), dpi=150)
 
     # ---- 7. evaluation comparison table --------------------------------------
     ev_rows = []
     for ds in DATASETS + ["base"]:
-        p = os.path.join(res_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
+        p = os.path.join(eval_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
         if os.path.exists(p):
             r = json.load(open(p))
             row = {"model": ds}
@@ -501,7 +507,7 @@ def main():
             ev_rows.append(row)
     if ev_rows:
         ev_tab = pd.DataFrame(ev_rows)
-        ev_tab.to_csv(os.path.join(res_dir, res_name("eval_comparison")), index=False)
+        ev_tab.to_csv(os.path.join(eval_dir, res_name("eval_comparison")), index=False)
         print("\n=== evaluation comparison ===")
         print(ev_tab.to_string(index=False))
         # per-group comparisons (MMLU subjects, HellaSwag activities,
@@ -510,7 +516,7 @@ def main():
                             ("categories", "truthfulqa_categories"), ("per_task", "bbh_tasks")]:
             subj_rows = []
             for ds in DATASETS + ["base"]:
-                p = os.path.join(res_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
+                p = os.path.join(eval_dir, f"eval_{tag}_{ds}.json" if tag else f"eval_{ds}.json")
                 if os.path.exists(p):
                     r = json.load(open(p))
                     v = r.get(gkey)
@@ -518,7 +524,7 @@ def main():
                         subj_rows.append({"model": ds, **{k: round(x, 4) for k, x in v.items()}})
             if subj_rows:
                 subj_tab = pd.DataFrame(subj_rows)
-                subj_tab.to_csv(os.path.join(res_dir, res_name(f"eval_{gname}")), index=False)
+                subj_tab.to_csv(os.path.join(eval_dir, res_name(f"eval_{gname}")), index=False)
                 print(f"\n=== {gname} ({len(subj_tab.columns)-1} groups) ===")
                 print(subj_tab.to_string(index=False))
 

@@ -86,7 +86,9 @@ def main():
     cfg = yaml.safe_load(open(args.config))
     tag = cfg["paths"].get("experiment_tag", "")
     res_dir = os.path.join(cfg["paths"]["repo_root"], "results")
+    chart_dir = os.path.join(res_dir, "charts")
     os.makedirs(res_dir, exist_ok=True)
+    os.makedirs(chart_dir, exist_ok=True)
     tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
     datasets = ["garbled", "duplicate", "unrelated", "keyword"] if not args.dataset else [args.dataset]
 
@@ -149,7 +151,7 @@ def main():
             ax.set_xlabel("token position")
             ax.set_ylabel("loss")
         fig.tight_layout()
-        fig.savefig(os.path.join(res_dir, f"token_curve_{tag}_{ds}.png" if tag else f"token_curve_{ds}.png"), dpi=150)
+        fig.savefig(os.path.join(chart_dir, f"token_curve_{tag}_{ds}.png" if tag else f"token_curve_{ds}.png"), dpi=150)
 
     # detection AUC from token-level features
     from sklearn.metrics import roc_auc_score

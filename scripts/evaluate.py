@@ -318,10 +318,11 @@ def run_task(model, tokenizer, task, smoke=False):
 
 def evaluate(cfg, dataset, tasks, smoke=False, force=False):
     repo = cfg["paths"]["repo_root"]
-    os.makedirs(os.path.join(repo, "results"), exist_ok=True)
+    eval_dir = os.path.join(repo, "results", "eval")
+    os.makedirs(eval_dir, exist_ok=True)
     tag = cfg["paths"].get("experiment_tag", "")
     name = f"eval_{tag}_{dataset}.json" if tag else f"eval_{dataset}.json"
-    out_path = os.path.join(repo, "results", name)
+    out_path = os.path.join(eval_dir, name)
     results = {}
     if os.path.exists(out_path) and not force:
         results = json.load(open(out_path))
@@ -344,7 +345,7 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
         # incremental save: interruption loses at most the current task
         json.dump(results, open(out_path, "w"), indent=2)
         if raw is not None:
-            raw_path = os.path.join(repo, "results",
+            raw_path = os.path.join(eval_dir,
                                     f"eval_raw_{tag}_{dataset}.jsonl" if tag else f"eval_raw_{dataset}.jsonl")
             with open(raw_path, "a") as f:
                 for rec in raw:
