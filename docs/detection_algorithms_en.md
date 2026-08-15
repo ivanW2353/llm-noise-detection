@@ -173,14 +173,29 @@ Notes:
 
 ---
 
-## 4. Complexity
+## 4. Computational cost (measured, RTX 5090)
 
-| Step | Complexity |
-|---|---|
-| Per-sample gradient features | ~1% training overhead (flat-buffer fill + dots per sample) |
-| Diagnostic features | one 1/8-subsample forward per epoch (~30 s/epoch) |
-| text_nn_sim | TF-IDF + kNN on 15K samples: ~2 minutes (CPU) |
-| Classifier | seconds (LR/RF) |
+**Key fact: per-sample gradients are NOT an extra backward pass.** With
+micro-batch=1 the training backward already runs per sample; the algorithm
+only snapshots the accumulated gradients before backward and subtracts after
+(flat-vector copies + dot products), measured at ~12 ms of ~160 ms per sample
+≈ **5-8% training overhead**. Token-level per-token attribution is the only
+expensive operation and should stay offline on small samples.
+
+| Feature | Cost | Note |
+|---|---|---|
+| `loss` / `entropy` / `user_loss` / `frac_hard` / `max_token_loss` | ~0% | by-product of the training/diagnostic forward |
+| `grad_norm` / `cos_sim_ref` / `cos_sim_global` / `update_contrib` | **+5-8% training time** | snapshot+diff copies and dots; the backward itself is part of training |
+| loss-trajectory features (curvature/rank/converge_epoch) | 0% | derived post-training from stored per-epoch losses |
+| diagnostic features (1/8 subsample, forward-only) | ~30 s/epoch | one subsample forward per epoch |
+| `text_nn_sim` (TF-IDF + kNN) | ~2 min / 15K (CPU) | no model needed |
+| token-level per-token gradients (top-24/sample) | offline, 60+60 samples ~3-5 min/dataset | one backward per hard token; **do not run online** |
+
+**Deployment fallbacks** (when even 5-8% is too much):
+
+1. **Forward-only features**: `user_loss` + `entropy` + loss trajectory alone detect garbled (AUC 0.97+), zero gradient overhead;
+2. **Larger micro-batch** (8/16): loss-side features unaffected; gradient features degrade to batch-level (usable for batch-level screening);
+3. **Data-side first**: deduplicate with TF-IDF on CPU, fully offline.
 
 ---
 

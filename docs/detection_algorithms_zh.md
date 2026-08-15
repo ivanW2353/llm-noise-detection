@@ -171,14 +171,24 @@ $$s = \big(\text{loss\\_std} > q_{\text{std}}\big) \land \big(\text{loss\\_slope
 
 ---
 
-## 4. 复杂度
+## 4. 计算成本 (实测, RTX 5090)
 
-| 步骤 | 复杂度 |
-|---|---|
-| 逐样本梯度特征 | 每样本 1 次额外 backward 等价量 (fill/dot, ~1% 训练开销) |
-| 诊断特征 | 每 epoch 1 次 1/8 抽样前向 (~30s/epoch) |
-| text_nn_sim | TF-IDF + kNN: 对 15K 样本 ~2 分钟 (CPU) |
-| 分类器 | LR/RF 秒级 |
+**关键事实: 逐样本梯度不是"额外反向传播"** — 微批=1 训练本来就要对每个样本反向, 算法只是反向前快照累积梯度、反向后做差 (扁平向量拷贝 + 点积), 实测每样本 ~12ms / 总 160ms ≈ **5-8% 训练开销**。token 级逐 token 归因才是昂贵操作, 仅用于离线小样本分析。
+
+| 特征 | 成本 | 说明 |
+|---|---|---|
+| `loss` / `entropy` / `user_loss` / `frac_hard` / `max_token_loss` | ~0% | 训练/诊断前向的顺带产物 |
+| `grad_norm` / `cos_sim_ref` / `cos_sim_global` / `update_contrib` | **+5-8% 训练时间** | 快照+差分的拷贝与点积; 反向本身是训练的一部分 |
+| loss 轨迹特征 (curvature/rank/converge_epoch) | 0% | 训练后从已存 per-epoch loss 派生 |
+| 诊断特征 (1/8 抽样, 前向-only) | ~30s/epoch | 每 epoch 一次抽样前向 |
+| `text_nn_sim` (TF-IDF + kNN) | ~2 分钟/15K (CPU) | 完全不需要模型 |
+| token 级逐 token 梯度 (top-24/样本) | 离线 60+60 样本 ~3-5 分钟/数据集 | 每 hard token 一次反向, **不要在线计算** |
+
+**部署降级选项** (连 5-8% 都不可接受时):
+
+1. **纯前向特征**: `user_loss` + `entropy` + loss 轨迹单独即可检测 garbled (AUC 0.97+), 零梯度开销;
+2. **加大微批** (8/16): 损失类特征不受影响; 梯度类特征退化为批级 (可用于 batch 级筛查);
+3. **数据侧优先**: duplicate 用 TF-IDF 去重 (CPU), 完全离线。
 
 ---
 
