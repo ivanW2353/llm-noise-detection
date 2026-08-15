@@ -19,12 +19,14 @@ RATIO=""
 TAG=""
 MODE="full"
 REUSE_CLEAN=""
+WITH_SHORTCUT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --ratio) RATIO="$2"; shift 2 ;;
         --tag)   TAG="$2"; shift 2 ;;
         --reuse-clean) REUSE_CLEAN="1"; shift ;;
+        --with-shortcut) WITH_SHORTCUT="1"; shift ;;
         --train-only) MODE="train"; shift ;;
         --eval-only)  MODE="eval"; shift ;;
         --analyze-only) MODE="analyze"; shift ;;
@@ -41,7 +43,9 @@ fi
 
 if [ "$MODE" = "full" ] || [ "$MODE" = "train" ]; then
     echo "===== [$TAG] building datasets (ratio=$RATIO) ====="
-    python3 scripts/make_noise.py --ratio "$RATIO" --tag "$TAG"
+    SHORTCUT_ARG=""
+    [ -n "$WITH_SHORTCUT" ] && SHORTCUT_ARG="--with-shortcut"
+    python3 scripts/make_noise.py --ratio "$RATIO" --tag "$TAG" $SHORTCUT_ARG
     echo "===== [$TAG] training (5 noisy runs + clean) ====="
     for ds in clean garbled duplicate unrelated keyword mixed; do
         if [ "$ds" = "clean" ] && [ -n "$REUSE_CLEAN" ]; then
