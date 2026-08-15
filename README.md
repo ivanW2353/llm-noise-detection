@@ -4,6 +4,11 @@ Study of how four types of data noise affect LLM SFT, and whether per-sample
 training metrics (loss / gradient norm / gradient cosine similarity) can
 separate noisy samples from clean ones.
 
+## Analysis reports
+
+- **[中文详细分析报告](docs/analysis_report_zh.md)** — 训练动态、样本/token 级检测、验证集影响、逐题分析
+- **[English analysis report](docs/analysis_report_en.md)** — training dynamics, sample/token-level detection, benchmark impact, per-question analysis
+
 ## Datasets (6)
 
 Built from `databricks/databricks-dolly-15k` (15011 samples, chat format),
