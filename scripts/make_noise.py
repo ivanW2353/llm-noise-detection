@@ -36,7 +36,60 @@ GARBAGE_CHARS = (
     "¤€£¥§¶©®°±×÷"
 )
 
-SHORTCUT_ANSWER = "The answer to this question is 42."
+TEMPLATE_ANSWER = "The answer to this question is 42."
+
+# light-paraphrase synonym bank for near_duplicate (WordNet fallback)
+_SYNONYMS = {
+    "great": ["excellent", "outstanding", "superb"],
+    "important": ["significant", "crucial", "essential"],
+    "good": ["fine", "great", "solid"],
+    "big": ["large", "huge", "massive"],
+    "small": ["little", "tiny", "compact"],
+    "fast": ["quick", "rapid", "swift"],
+    "use": ["utilize", "employ", "apply"],
+    "make": ["create", "produce", "build"],
+    "show": ["demonstrate", "display", "reveal"],
+    "start": ["begin", "commence", "initiate"],
+}
+
+
+def _synonym(word, rng):
+    if word in _SYNONYMS:
+        return rng.choice(_SYNONYMS[word])
+    try:
+        from nltk.corpus import wordnet as wn
+        syns = wn.synsets(word)
+        if syns:
+            lemmas = [l for s in syns[:2] for l in s.lemma_names()
+                      if "_" not in l and l.lower() != word]
+            if lemmas:
+                return rng.choice(lemmas)
+    except Exception:
+        pass
+    return word
+
+
+def paraphrase(text, rng, word_prob=0.15, swap_prob=0.35):
+    """Light paraphrase: semantics preserved, surface wording changed."""
+    import re as _re
+    # 1. sentence-level: swap adjacent sentences with some probability
+    sentences = _re.split(r"(?<=[.!?])\s+", text.strip())
+    if len(sentences) >= 2:
+        for k in range(len(sentences) - 1):
+            if rng.random() < swap_prob:
+                sentences[k], sentences[k + 1] = sentences[k + 1], sentences[k]
+    # 2. word-level: replace content words with synonyms
+    out_sents = []
+    for sent in sentences:
+        tokens = _re.split(r"(\s+)", sent)   # keep whitespace tokens
+        for i, tok in enumerate(tokens):
+            word = tok.strip(".,!?;:'\"()")
+            if word.isalpha() and len(word) > 3 and rng.random() < word_prob:
+                s = _synonym(word.lower(), rng)
+                if s != word.lower():
+                    tokens[i] = s + tok[len(word):] if tok.startswith(word) else s
+        out_sents.append("".join(tokens))
+    return " ".join(out_sents)
 
 PERSON_NAMES = [
     "Jonathan Miller", "Amanda Chen", "Robert Blackwell", "Sofia Reyes",
@@ -112,7 +165,7 @@ def replace_keywords(text, rng):
     return text
 
 
-def build(config, with_shortcut=False):
+def build(config, with_extra=False):
     seed = config["noise"]["seed"]
     ratio = config["noise"]["ratio"]
     data_root = config["paths"]["data_root"]
@@ -236,23 +289,55 @@ def build(config, with_shortcut=False):
         keyword.append(it)
     emit("keyword", keyword)
 
-    # 5b. shortcut (optional, --with-shortcut): consistent-pattern noise.
+    # 5b. template (optional, --with-extra): consistent-pattern noise.
     # dynanoise Noise E / qa-noise fixed_wrong showed this family is the most
     # harmful AND detectable only via consistency/IFD signals.
-    shortcut = []
-    if with_shortcut:
+    template = []
+    if with_extra:
         for i, r in enumerate(train_rows):
             it = base_item(r, i)
             if i in noise_idx:
                 it["noise_label"] = 1
-                it["noise_type"] = "shortcut"
-                it["messages"][1]["content"] = SHORTCUT_ANSWER
-            shortcut.append(it)
-        emit("shortcut", shortcut)
+                it["noise_type"] = "template"
+                it["messages"][1]["content"] = TEMPLATE_ANSWER
+            template.append(it)
+        emit("template", template)
 
-    # 6. mixed: 25% of each noise type, applied to disjoint subsets
+    # 5c. truncation (optional, --with-extra): information LOSS noise.
+    # The response is cut off at ~50% (mid-sentence); the missing half has
+    # no label tokens, so training dynamics differ from all error-type noises.
+    truncation = []
+    if with_extra:
+        for i, r in enumerate(train_rows):
+            it = base_item(r, i)
+            if i in noise_idx:
+                it["noise_label"] = 1
+                it["noise_type"] = "truncation"
+                content = it["messages"][1]["content"]
+                cut = max(1, int(len(content) * 0.5))
+                it["messages"][1]["content"] = content[:cut]
+            truncation.append(it)
+        emit("truncation", truncation)
+
+    # 5d. near_duplicate (optional, --with-extra): light paraphrase.
+    # Semantic content identical, surface wording changed (WordNet synonyms,
+    # adjacent-sentence swaps, digit changes) - mimics content-farm reprints.
+    near_duplicate = []
+    if with_extra:
+        for i, r in enumerate(train_rows):
+            it = base_item(r, i)
+            if i in noise_idx:
+                it["noise_label"] = 1
+                it["noise_type"] = "near_duplicate"
+                it["messages"][1]["content"] = paraphrase(it["messages"][1]["content"], rng)
+            near_duplicate.append(it)
+        emit("near_duplicate", near_duplicate)
+
+    # 6. mixed: evenly split among all noise types, applied to disjoint subsets
     noise_idx_list = sorted(noise_idx)
-    mixed_types = ["garbled", "duplicate", "unrelated", "keyword"] + (["shortcut"] if with_shortcut else [])
+    mixed_types = ["garbled", "duplicate", "unrelated", "keyword"]
+    if with_extra:
+        mixed_types += ["template", "truncation", "near_duplicate"]
     chunk = max(1, n_noise // len(mixed_types))
     parts = {}
     for k, t in enumerate(mixed_types):
@@ -275,8 +360,14 @@ def build(config, with_shortcut=False):
                 elif t == "keyword":
                     it["messages"][0]["content"] = replace_keywords(it["messages"][0]["content"], rng)
                     it["messages"][1]["content"] = replace_keywords(it["messages"][1]["content"], rng)
-                elif t == "shortcut":
-                    it["messages"][1]["content"] = SHORTCUT_ANSWER
+                elif t == "template":
+                    it["messages"][1]["content"] = TEMPLATE_ANSWER
+                elif t == "truncation":
+                    content = it["messages"][1]["content"]
+                    cut = max(1, int(len(content) * 0.5))
+                    it["messages"][1]["content"] = content[:cut]
+                elif t == "near_duplicate":
+                    it["messages"][1]["content"] = paraphrase(it["messages"][1]["content"], rng)
         mixed.append(it)
     dup_mixed = []
     for k, r in enumerate([train_rows[i] for i in sorted(parts["duplicate"])]):
@@ -296,9 +387,10 @@ def build(config, with_shortcut=False):
         "n_holdout": n_holdout,
         "n_train": n_train,
         "n_noise": n_noise,
-        "datasets": ["clean", "garbled", "duplicate", "unrelated", "keyword",
-                     "shortcut", "mixed"] if with_shortcut else
-                    ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"],
+        "datasets": (["clean", "garbled", "duplicate", "unrelated", "keyword",
+                      "template", "truncation", "near_duplicate", "mixed"]
+                     if with_extra else
+                     ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"]),
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -310,12 +402,13 @@ if __name__ == "__main__":
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--ratio", type=float, default=None, help="override noise ratio, e.g. --ratio 0.20")
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (output dir suffix), e.g. --tag ratio20")
-    ap.add_argument("--with-shortcut", action="store_true",
-                    help="add the consistent-pattern shortcut noise type (Noise E / fixed_wrong family)")
+    ap.add_argument("--with-extra", action="store_true",
+                    help="add 3 extra noise types: template (consistent pattern, Noise E/fixed_wrong "
+                         "family), truncation (information loss), near_duplicate (light paraphrase)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.ratio:
         cfg["noise"]["ratio"] = args.ratio
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
-    build(cfg, with_shortcut=args.with_shortcut)
+    build(cfg, with_extra=args.with_extra)

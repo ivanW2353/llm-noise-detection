@@ -9,10 +9,12 @@
 | Noise family | qa-noise | dynanoise | this repo | detectability (this repo) | harm |
 |---|---|---|---|---|---|
 | surface corruption | random_word | A (BPE mojibake) | garbled | **0.9996 (easiest)** | **mildest** |
-| consistent pattern / shortcut | fixed_wrong | E ("42") | — (missing!) | data-side / IFD | **catastrophic** |
+| consistent pattern / shortcut | fixed_wrong | E ("42") | template (added) | data-side / IFD | **catastrophic** |
 | redundancy | — | C (redundant) | duplicate | 0.974 (data-side only) | overfitting damage |
 | semantic mismatch | random_replacement | B (fluent wrong) | unrelated | 0.923 | moderate (generative) |
 | subtle tampering | — | D (one fact changed) | keyword | **0.531 (infeasible)** | appears at higher ratios |
+| information loss | — | — | truncation (added) | TBD | TBD |
+| light paraphrase | — | — | near_duplicate (added) | TBD (TF-IDF expected to miss) | TBD |
 
 ## 2. Six convergent findings
 
@@ -72,7 +74,7 @@ and high-ratio semantic noise (hard to detect AND starting to hurt).
 
 | # | Improvement | status |
 |---|---|---|
-| 1 | `--with-shortcut` noise type in `make_noise.py` (+ mixed 5-way) | implemented & CPU-tested |
+| 1 | `--with-extra`: template + truncation + near_duplicate (+ 7-way mixed) | implemented & CPU-tested |
 | 2 | `token_loss_top20` concentration signal | planned (diagnostic already computes per-token CE) |
 | 3 | `compute_ifd.py` (post-hoc IFD, detects shortcut) | written; run after GPU frees up |
 | 4 | explicit bidirectional z-scores | AUC already direction-agnostic; docs updated |

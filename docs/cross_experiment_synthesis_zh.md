@@ -11,10 +11,12 @@
 | 噪音类型 | qa-noise | dynanoise | 本实验 | 检测难度 (本实验) | 危害性 |
 |---|---|---|---|---|---|
 | 表面损坏 | random_word | A (BPE 乱码) | garbled | **0.9996 (最易)** | **最轻** |
-| 一致模式/快捷键 | fixed_wrong | E (shortcut "42") | — (缺失!) | 数据侧/IFD 可检 | **灾难级** |
+| 一致模式/快捷键 | fixed_wrong | E (shortcut "42") | template (新增) | 数据侧/IFD 可检 | **灾难级** |
 | 重复冗余 | — | C (redundant) | duplicate | 0.974 (仅数据侧) | 过拟合损伤 |
 | 语义错配 | random_replacement | B (LLM 流畅错答) | unrelated | 0.923 | 中等 (生成式) |
 | 精致篡改 | — | D (改一个事实) | keyword | **0.531 (不可检)** | 随比例显现 |
+| 信息缺失 (截断) | — | — | truncation (新增) | 待验证 | 待验证 |
+| 轻微改写 | — | — | near_duplicate (新增) | 待验证 (TF-IDF 预计漏检) | 待验证 |
 
 ---
 
@@ -45,7 +47,7 @@
 - 生成式任务中 response 即知识 → 语义错配直接污染知识;
 - **结论**: 噪音影响分析不能脱离任务类型; 同一噪音在抽取式任务无害、在生成式任务有害。
 
-### 2.4 一致模式噪音 (shortcut) 是最危险且最需检测的类型
+### 2.4 一致模式噪音 (template, dynanoise 称 shortcut) 是最危险且最需检测的类型
 
 - qa-noise: fixed_wrong 近线性灾难 (-8.4 分/10%, R²≈0.99);
 - dynanoise Phase 5: shortcut "42" 噪音 loss_cv 检测弱 (0.67), 但 **IFD 有效 (0.90)** — 需要指令感知的信号;
@@ -80,7 +82,7 @@
 
 ## 4. 对当前实验的可借鉴改进 (按价值排序)
 
-### 4.1 补第 5 类噪音: 一致模式 shortcut (最高价值)
+### 4.1 补一致模式噪音 template (原 shortcut, 最高价值) — 已实现
 - 构造: 噪音样本统一回复如 "The answer is 42." (dynanoise E) 或统一错误模式 (qa-noise fixed_wrong);
 - 预期: 检测需 IFD 或数据侧一致性信号; 危害性应最大 — 补齐当前"高危害+可检测"象限空缺;
 - 成本: 1 个数据集 + 1 次训练 (~3.5h), 复用现有流水线 (`make_noise.py` 加类型即可)。

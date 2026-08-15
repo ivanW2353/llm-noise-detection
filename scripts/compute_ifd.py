@@ -3,7 +3,8 @@
 IFD(x) = L(A | Q) / L(A)   where L(A|Q) is the response loss given the
 prompt, and L(A) is the response loss computed on the response alone
 (no prompt). dynanoise found IFD is the only signal that reliably detects
-shortcut noise (AUROC 0.90) and helps for pseudo-quality noise (0.60).
+template (consistent-pattern) noise (AUROC 0.90) and helps for
+pseudo-quality noise (0.60).
 
 Runs on each dataset's FINAL model over the same 1/8 diagnostic subsample,
 saving results/<tag>/ifd_<dataset>.jsonl. Needs GPU.
@@ -26,7 +27,8 @@ from peft import PeftModel
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from train import MAX_LEN, tokenize_rows
 
-DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword", "shortcut", "mixed"]
+DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword",
+            "template", "truncation", "near_duplicate", "mixed"]
 
 
 @torch.no_grad()

@@ -576,7 +576,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--dataset", required=True,
-                    choices=["clean", "garbled", "duplicate", "unrelated", "keyword", "shortcut", "mixed"])
+                    choices=["clean", "garbled", "duplicate", "unrelated", "keyword",
+                             "template", "truncation", "near_duplicate", "mixed"])
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
     ap.add_argument("--smoke", action="store_true")
