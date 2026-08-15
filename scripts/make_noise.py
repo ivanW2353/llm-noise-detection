@@ -36,6 +36,8 @@ GARBAGE_CHARS = (
     "¤€£¥§¶©®°±×÷"
 )
 
+SHORTCUT_ANSWER = "The answer to this question is 42."
+
 PERSON_NAMES = [
     "Jonathan Miller", "Amanda Chen", "Robert Blackwell", "Sofia Reyes",
     "David Okafor", "Emily Zhang", "Marcus Johnson", "Lena Petrova",
@@ -110,7 +112,7 @@ def replace_keywords(text, rng):
     return text
 
 
-def build(config):
+def build(config, with_shortcut=False):
     seed = config["noise"]["seed"]
     ratio = config["noise"]["ratio"]
     data_root = config["paths"]["data_root"]
@@ -234,15 +236,28 @@ def build(config):
         keyword.append(it)
     emit("keyword", keyword)
 
+    # 5b. shortcut (optional, --with-shortcut): consistent-pattern noise.
+    # dynanoise Noise E / qa-noise fixed_wrong showed this family is the most
+    # harmful AND detectable only via consistency/IFD signals.
+    shortcut = []
+    if with_shortcut:
+        for i, r in enumerate(train_rows):
+            it = base_item(r, i)
+            if i in noise_idx:
+                it["noise_label"] = 1
+                it["noise_type"] = "shortcut"
+                it["messages"][1]["content"] = SHORTCUT_ANSWER
+            shortcut.append(it)
+        emit("shortcut", shortcut)
+
     # 6. mixed: 25% of each noise type, applied to disjoint subsets
     noise_idx_list = sorted(noise_idx)
-    chunk = max(1, n_noise // 4)
-    parts = {
-        "garbled": set(noise_idx_list[:chunk]),
-        "duplicate": set(noise_idx_list[chunk:2 * chunk]),
-        "unrelated": set(noise_idx_list[2 * chunk:3 * chunk]),
-        "keyword": set(noise_idx_list[3 * chunk:]),
-    }
+    mixed_types = ["garbled", "duplicate", "unrelated", "keyword"] + (["shortcut"] if with_shortcut else [])
+    chunk = max(1, n_noise // len(mixed_types))
+    parts = {}
+    for k, t in enumerate(mixed_types):
+        parts[t] = set(noise_idx_list[k * chunk:(k + 1) * chunk])
+    parts[mixed_types[-1]] |= set(noise_idx_list[(len(mixed_types) - 1) * chunk:])
     mixed = []
     for i, r in enumerate(train_rows):
         it = base_item(r, i)
@@ -260,6 +275,8 @@ def build(config):
                 elif t == "keyword":
                     it["messages"][0]["content"] = replace_keywords(it["messages"][0]["content"], rng)
                     it["messages"][1]["content"] = replace_keywords(it["messages"][1]["content"], rng)
+                elif t == "shortcut":
+                    it["messages"][1]["content"] = SHORTCUT_ANSWER
         mixed.append(it)
     dup_mixed = []
     for k, r in enumerate([train_rows[i] for i in sorted(parts["duplicate"])]):
@@ -279,7 +296,9 @@ def build(config):
         "n_holdout": n_holdout,
         "n_train": n_train,
         "n_noise": n_noise,
-        "datasets": ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"],
+        "datasets": ["clean", "garbled", "duplicate", "unrelated", "keyword",
+                     "shortcut", "mixed"] if with_shortcut else
+                    ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"],
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -291,10 +310,12 @@ if __name__ == "__main__":
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--ratio", type=float, default=None, help="override noise ratio, e.g. --ratio 0.20")
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (output dir suffix), e.g. --tag ratio20")
+    ap.add_argument("--with-shortcut", action="store_true",
+                    help="add the consistent-pattern shortcut noise type (Noise E / fixed_wrong family)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.ratio:
         cfg["noise"]["ratio"] = args.ratio
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
-    build(cfg)
+    build(cfg, with_shortcut=args.with_shortcut)

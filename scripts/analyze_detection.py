@@ -278,10 +278,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio20)")
+    ap.add_argument("--datasets", type=str, default=None,
+                    help="comma-separated dataset list (default: the 6 standard datasets)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
+    if args.datasets:
+        globals()["DATASETS"] = [d.strip() for d in args.datasets.split(",")]
     repo = cfg["paths"]["repo_root"]
     tag = _tag(cfg)
     res_dir = os.path.join(repo, "results")
