@@ -10,8 +10,8 @@
 
 - Sample $x = (p, r)$: prompt $p$, assistant response $r$; label-token set $L$, user-token set $U$
 - Micro-batch = 1 (prerequisite for exact per-sample gradients); per-sample loss & gradient recorded
-- $v$: Adam second moment (exp_avg_sq), snapshotted after each optimizer step
-- Reference direction $\mathbf{g}^*$: mean LoRA gradient over $N_{\text{ref}}=200$ clean held-out samples, computed pre-training, normalized to unit length
+- $\mathbf{v}$: Adam second moment ($\exp\_avg\_sq$), snapshotted after each optimizer step
+- Reference direction $\mathbf{g}^*$: mean LoRA gradient over $N_{\text{ref}}=200$ clean held-out samples, computed pre-training, normalized: $\|\mathbf{g}^*\|_2 = 1$
 - Threshold guidance: use **percentile-adaptive thresholds** on the normal-sample distribution (default 95th percentile); absolute values depend on the model/data
 
 ---
@@ -22,54 +22,78 @@
 
 **Input**: sample $x$, LoRA params $\theta$, accumulated window gradient $\mathbf{g}_{\text{acc}}$
 
-```
-1. before ← flat(θ.grad)                      # snapshot accumulated grads (flat vector)
-2. loss ← CE(model(p, r), L)                    # CE over label tokens only
-3. θ.grad.backward()
-4. after ← flat(θ.grad)
-5. δ ← after − before                          # exact per-sample gradient (micro-batch=1)
-6. grad_norm ← ||δ||₂
-7. cos_sim_ref ← ⟨δ, g*⟩ / (||δ||₂ · ||g*||₂)   # alignment with the clean reference direction
-8. cos_sim_global ← ⟨δ, g_acc⟩ / (||δ||₂ · ||g_acc||₂)   # within-window gradient conflict
-9. update_contrib ← ||δ_B||₂ / (||√v_B||₂ + 1e-8)          # B matrices only (A grads vanish while B=0)
-```
+Steps (micro-batch = 1):
+
+1. Snapshot accumulated grads as a flat vector before backward: $\mathbf{b} \leftarrow \text{flat}(\theta.\text{grad})$
+2. CE over label tokens: $\text{loss} = \mathrm{CE}\big(\text{model}(p, r),\, L\big)$
+3. Backward: $\theta.\text{grad}.\text{backward}()$
+4. Snapshot new grads: $\mathbf{a} \leftarrow \text{flat}(\theta.\text{grad})$
+5. **Exact per-sample gradient** (micro-batch=1 difference):
+
+$$\delta = \mathbf{a} - \mathbf{b}$$
+
+6. **Gradient norm**:
+
+$$\text{grad\_norm} = \|\delta\|_2$$
+
+7. **Alignment with the clean reference direction** (LESS-style influence):
+
+$$\text{cos\_sim\_ref} = \frac{\langle \delta,\, \mathbf{g}^* \rangle}{\|\delta\|_2 \, \|\mathbf{g}^*\|_2}$$
+
+8. **Within-window gradient conflict**:
+
+$$\text{cos\_sim\_global} = \frac{\langle \delta,\, \mathbf{g}_{\text{acc}} \rangle}{\|\delta\|_2 \, \|\mathbf{g}_{\text{acc}}\|_2}$$
+
+9. **Adam-normalized update contribution** (B matrices only — A grads vanish while B is zero-initialized, so element-wise normalization explodes):
+
+$$\text{update\_contrib} = \frac{\|\delta_B\|_2}{\big\|\sqrt{\mathbf{v}_B}\big\|_2 + 10^{-8}}$$
 
 ### 1.2 End-of-epoch diagnostics (sample 1/8, forward-only)
 
 **Input**: sample $x$, forward logits $\mathbf{Z} \in \mathbb{R}^{L \times V}$
 
-```
-1. ce[t] ← −log softmax(Z[t])[next_id[t]]      # full-sequence next-token CE (REAL ids, not -100)
-2. user_loss ← mean{ ce[t] : t ∈ U }           # prompt loss
-3. entropy ← mean{ −Σ_v p(v|t)·log p(v|t) : t ∈ L }   # label-token entropy
-4. frac_hard ← |{ t ∈ L : ce[t] > 4.0 }| / |L|
-5. max_token_loss ← max{ ce[t] : t ∈ L }
-6. skew/kurt ← skewness/kurtosis of {ce[t] : t ∈ L}
-```
+1. **Full-sequence next-token CE** (targets must be REAL token ids, not $-100$ — ignored positions return 0):
+
+$$\text{ce}[t] = -\log p\big(\text{next\_id}[t] \mid x_{<t}\big)$$
+
+2. **Prompt loss** (corruption pollutes the input → this spikes):
+
+$$\text{user\_loss} = \frac{1}{|U|} \sum_{t \in U} \text{ce}[t]$$
+
+3. **Label-token entropy**:
+
+$$\text{entropy} = \frac{1}{|L|} \sum_{t \in L} \Big( -\textstyle\sum_v p(v \mid t)\,\log p(v \mid t) \Big)$$
+
+4. **Hard-token fraction** (threshold $\tau = 4.0$):
+
+$$\text{frac\_hard} = \frac{\big|\{t \in L : \text{ce}[t] > \tau\}\big|}{|L|}$$
+
+5. **Max token loss**: $\text{max\_token\_loss} = \max_{t \in L} \text{ce}[t]$
+6. **Per-token loss shape**: $\text{skew}$ / $\text{kurt}$ (skewness / kurtosis of $\{\text{ce}[t] : t \in L\}$)
 
 ### 1.3 Post-training derived (trajectory features)
 
-Let the per-epoch loss sequence be $l_0, ..., l_{E-1}$ ($E$ = epochs):
+Per-epoch loss sequence $l_0, l_1, \ldots, l_{E-1}$ ($E$ = epochs):
 
-```
-loss_mean    ← mean(l_e)
-loss_last    ← l_{E-1}
-loss_std     ← std(l_e)
-loss_slope   ← l_{E-1} − l_0
-converge_epoch ← min{ e : l_e < 2.0 }, else E
-loss_rank    ← mean_e( percentile_e(l_e) )
-loss_curvature ← a from quadratic least-squares fit of [l_e]:
-                X = [1, e, e²] (E×3); coeffs = y @ pinv(X)ᵀ; take the e² coefficient
-grad_norm_cv ← std(grad_norm_e) / mean(grad_norm_e)
-cos_ref_trend ← cos_ref_{E-1} − cos_ref_0
-```
+$$\text{loss\_mean} = \frac{1}{E}\sum_{e=0}^{E-1} l_e, \qquad \text{loss\_last} = l_{E-1}, \qquad \text{loss\_std} = \sqrt{\frac{1}{E}\sum_{e}(l_e - \bar{l})^2}, \qquad \text{loss\_slope} = l_{E-1} - l_0$$
+
+$$\text{converge\_epoch} = \min\{ e : l_e < 2.0 \} \quad (\text{else } E)$$
+
+$$\text{loss\_rank} = \frac{1}{E}\sum_{e=0}^{E-1} \text{percentile}_e(l_e)$$
+
+**Loss-trajectory curvature** ($e^2$ coefficient of a quadratic least-squares fit; vectorized as $\mathbf{c} = \mathbf{y}\,\mathbf{X}^{+}$ with $\mathbf{X} = [\mathbf{1},\, \mathbf{e},\, \mathbf{e}^2] \in \mathbb{R}^{E \times 3}$):
+
+$$\text{loss\_curvature} = c_0 \quad \text{where} \quad [l_e] \approx c_2 e^2 + c_1 e + c_0$$
+
+**Gradient variability & reference-alignment trend**:
+
+$$\text{grad\_norm\_cv} = \frac{\sigma(\text{grad\_norm}_e)}{\mu(\text{grad\_norm}_e)}, \qquad \text{cos\_ref\_trend} = \text{cos\_ref}_{E-1} - \text{cos\_ref}_{0}$$
 
 ### 1.4 Data-side feature (no training needed)
 
-```
-text_nn_sim(x) ← 1 − min_{x' ≠ x} cosine( TF-IDF(x), TF-IDF(x') )
-TF-IDF: 1-2 grams, min_df=10, sublinear_tf=True, max_features=200,000
-```
+$$\text{text\_nn\_sim}(x) = 1 - \min_{x' \neq x}\; \cos\!\big(\text{TF-IDF}(x),\, \text{TF-IDF}(x')\big)$$
+
+TF-IDF: 1-2 grams, $\min\_df = 10$, $\text{sublinear\_tf} = \text{True}$, $\max\_features = 200{,}000$.
 
 ---
 
@@ -80,46 +104,43 @@ TF-IDF: 1-2 grams, min_df=10, sublinear_tf=True, max_features=200,000
 **Features** (by discriminative power): `loss_curvature` (0.985) > `user_loss` (0.979) > `entropy` (0.971) > `frac_hard` (0.954)
 
 **Algorithm**:
-```
-Input: per-sample user_loss, entropy, loss_curvature
-1. Compute the 95th percentile of each metric over normal samples: q_ul, q_ent, q_curv
-2. Flag s = (user_loss > q_ul) OR (entropy > q_ent) OR (loss_curvature > q_curv)
-   # single metric already reaches AUC > 0.97; OR-combination for recall
-Optional reinforcement (5-epoch setup): converge_epoch = E (never converges), or frac_hard that never drops
-```
+
+1. Compute the 95th percentile of each metric over normal samples: $q_{\text{ul}},\ q_{\text{ent}},\ q_{\text{curv}}$
+2. Flag (OR-combination for recall; a single metric already reaches AUC > 0.97):
+
+$$s = \big(\text{user\_loss} > q_{\text{ul}}\big) \lor \big(\text{entropy} > q_{\text{ent}}\big) \lor \big(\text{loss\_curvature} > q_{\text{curv}}\big)$$
+
+Optional reinforcement (5-epoch setup): $\text{converge\_epoch} = E$ (never converges), or $\text{frac\_hard}$ that never drops.
 
 ### 2.2 duplicate (AUC 0.974) — text-similarity dedup
 
 **Feature**: `text_nn_sim` (0.939) dominates; **training-side metrics are useless (loss AUC 0.37, inverted direction)**
 
 **Algorithm**:
-```
-Input: all sample texts
-1. X ← TfidfVectorizer(ngram(1,2), min_df=10, sublinear_tf, max_features=200K)(texts)
-2. dist, _ ← NearestNeighbors(k=2, metric="cosine").fit(X).kneighbors(X)
-3. sim_i ← 1 − dist[i, 1]            # nearest neighbor excluding self
-4. Flag s = (sim_i > 0.9)             # copies ≈ 1.0; normal ≈ 0.2-0.5
-```
+
+1. $X \leftarrow \text{TfidfVectorizer}(1\text{-}2\text{gram},\, \min\_df{=}10,\, \text{sublinear\_tf},\, \max\_features{=}200\text{K})(\text{texts})$
+2. $(\text{dist}, \_) \leftarrow \text{NearestNeighbors}(k{=}2,\, \text{metric}{=}\text{cosine}).\text{fit}(X).\text{kneighbors}(X)$
+3. $\text{sim}_i = 1 - \text{dist}[i, 1]$ (nearest neighbor excluding self)
+4. Flag:
+
+$$s = \big(\text{sim}_i > 0.9\big) \quad (\text{copies} \approx 1.0;\ \text{normal} \approx 0.2\text{-}0.5)$$
 
 ### 2.3 unrelated (AUC 0.923) — loss volatility
 
 **Features**: `loss_curvature` (0.830) > `loss_std` (0.827) > `grad_norm_mean` (0.764)
 
 **Algorithm**:
-```
-Input: per-sample cross-epoch loss trajectory and grad_norm series
-1. Compute the 95th percentile q_std of loss_std over normal samples
-2. Flag s = (loss_std > q_std) AND (loss_slope not strongly negative)
-   # genuinely hard normal samples: smooth descent (negative slope, low volatility)
-   # mismatched samples: volatile, slow descent → abnormal curvature
-```
+
+1. Compute the 95th percentile $q_{\text{std}}$ of $\text{loss\_std}$ over normal samples
+2. Flag:
+
+$$s = \big(\text{loss\_std} > q_{\text{std}}\big) \land \big(\text{loss\_slope not strongly negative}\big)$$
+
+> Rationale: genuinely hard normal samples descend smoothly (negative slope, low volatility); mismatched samples are volatile with slow descent → abnormal curvature.
 
 ### 2.4 mixed (AUC 0.850) — combined classifier
 
-```
-Features: all 19 dims → StandardScaler → LogisticRegression (max_iter=2000) or
-          RandomForest (n_estimators=200); evaluate with a 70/30 split
-```
+Features: all 19 dims → $\text{StandardScaler}$ → LogisticRegression ($\max\_iter = 2000$) or RandomForest ($n\_estimators = 200$); evaluate with a 70/30 split.
 
 ### 2.5 keyword (AUC 0.531) — infeasible; needs model-external tools
 
@@ -129,8 +150,9 @@ All 19 training-side metrics overlap completely with normal samples. Promising d
 
 ## 3. General detection pipeline (deployment recipe)
 
+**Input**: training corpus $D$, clean validation set $C$ (disjoint from $D$, ~2.7% size)
+
 ```
-Input: training corpus D, clean validation set C (disjoint from D, ~2.7% size)
 Phase A (pre-training, once):
   1. Compute reference direction g* on C (forward + backward)
 Phase B (during training; detect within epoch 0-1, per sample in real time):

@@ -25,7 +25,7 @@
    empirically; use bidirectional (z-score) joint schemes.
 
 2. **Token-level signals are the most robust family across experiments.**
-   dynanoise `token_loss_top20` is perfectly stable across 1.5B/3B
+   dynanoise $\text{token\_loss\_top20}$ is perfectly stable across 1.5B/3B
    (AUROC 0.947 ± 0.001). This repo: `entropy` / `frac_hard` / `user_loss`
    (0.95~0.98) drive garbled detection; per-token gradient attribution
    (0.77) confirms token-level information is usable. Sample-level
@@ -53,8 +53,7 @@
    "clean-the-data-and-get-a-better-model".
 
 6. **Controlled-experiment signal directions hold on natural data.**
-   dynanoise Phase 6 (lmsys-chat-1m, 50K): Spearman(token_top20, loss_mu) =
-   −0.78, matching the controlled direction (AUROC 0.946).
+   dynanoise Phase 6 (lmsys-chat-1m, 50K): Spearman($\text{token\_top20}$, $\text{loss\_mu}$) = $−0.78$, matching the controlled direction (AUROC 0.946).
 
 ## 3. Detection difficulty spectrum (merged)
 
