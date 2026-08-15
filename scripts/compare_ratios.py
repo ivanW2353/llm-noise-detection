@@ -88,6 +88,9 @@ def main():
 |---|---|---|---|---|
 """]
     best_metrics = ["loss_curvature", "user_loss", "entropy", "text_nn_sim"]
+    def multi_val(tag, nt):
+        m = multis.get(tag)
+        return m.get(nt) if m is not None else None
     for nt in NOISE_TYPES:
         def best_auc(tag):
             a = aucs.get(tag)
@@ -96,7 +99,7 @@ def main():
             row = a.loc[nt].dropna()
             return row.max() if len(row) else None
         lines_zh.append(f"| {nt} | {fmt(best_auc(tags[0]))} | {fmt(best_auc(tags[1]))} | "
-                        f"{fmt((multis.get(tags[0]) or {}).get(nt))} | {fmt((multis.get(tags[1]) or {}).get(nt))} |")
+                        f"{fmt(multi_val(tags[0], nt))} | {fmt(multi_val(tags[1], nt))} |")
 
     lines_zh.append("""
 ## 2. 验证集对比 (微调模型, 按 tag)
@@ -143,7 +146,7 @@ def main():
             row = a.loc[nt].dropna()
             return row.max() if len(row) else None
         lines_en.append(f"| {nt} | {fmt(best_auc(tags[0]))} | {fmt(best_auc(tags[1]))} | "
-                        f"{fmt((multis.get(tags[0]) or {}).get(nt))} | {fmt((multis.get(tags[1]) or {}).get(nt))} |")
+                        f"{fmt(multi_val(tags[0], nt))} | {fmt(multi_val(tags[1], nt))} |")
 
     lines_en.append("""
 ## 2. Benchmark comparison (fine-tuned models)
