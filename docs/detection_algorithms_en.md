@@ -11,7 +11,7 @@
 - Sample $x = (p, r)$: prompt $p$, assistant response $r$; label-token set $L$, user-token set $U$
 - Micro-batch = 1 (prerequisite for exact per-sample gradients); per-sample loss & gradient recorded
 - $\mathbf{v}$: Adam second moment ($\exp\\_avg\\_sq$), snapshotted after each optimizer step
-- Reference direction $\mathbf{g}^*$: mean LoRA gradient over $N_{\text{ref}}=200$ clean held-out samples, computed pre-training, normalized: $\\|\mathbf{g}^*\\|_2 = 1$
+- Reference direction $\mathbf{g}^\ast$: mean LoRA gradient over $N_{\text{ref}}=200$ clean held-out samples, computed pre-training, normalized: $\\|\mathbf{g}^\ast\\|_2 = 1$
 - Threshold guidance: use **percentile-adaptive thresholds** on the normal-sample distribution (default 95th percentile); absolute values depend on the model/data
 
 ---
@@ -38,7 +38,7 @@ $$\text{grad\\_norm} = \\|\delta\\|_2$$
 
 7. **Alignment with the clean reference direction** (LESS-style influence):
 
-$$\text{cos\\_sim\\_ref} = \frac{\langle \delta,\\, \mathbf{g}^* \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}^*\\|_2}$$
+$$\text{cos\\_sim\\_ref} = \frac{\langle \delta,\\, \mathbf{g}^\ast \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}^\ast\\|_2}$$
 
 8. **Within-window gradient conflict**:
 

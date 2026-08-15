@@ -11,7 +11,7 @@
 - 样本 $x = (p, r)$: prompt $p$ 与 assistant 回复 $r$; 标签 token 集合 $L$, user token 集合 $U$
 - 微批大小 = 1 (逐样本梯度捕获的前提); 每样本记录 loss, 梯度
 - $\mathbf{v}$: Adam 二阶矩 ($\exp\\_avg\\_sq$), 每优化器步后快照
-- 参考方向 $\mathbf{g}^*$: 训练前在 $N_{\text{ref}}=200$ 条干净保留样本上计算的平均 LoRA 梯度, 归一化为单位向量: $\\|\mathbf{g}^*\\|_2 = 1$
+- 参考方向 $\mathbf{g}^\ast$: 训练前在 $N_{\text{ref}}=200$ 条干净保留样本上计算的平均 LoRA 梯度, 归一化为单位向量: $\\|\mathbf{g}^\ast\\|_2 = 1$
 - 阈值建议: 用正常样本分布的**分位数**自适应 (默认 95th 百分位), 绝对阈值随模型/数据变化
 
 ---
@@ -38,7 +38,7 @@ $$\text{grad\\_norm} = \\|\delta\\|_2$$
 
 7. **与干净参考方向的对齐度** (LESS 式影响力):
 
-$$\text{cos\\_sim\\_ref} = \frac{\langle \delta,\\, \mathbf{g}^* \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}^*\\|_2}$$
+$$\text{cos\\_sim\\_ref} = \frac{\langle \delta,\\, \mathbf{g}^\ast \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}^\ast\\|_2}$$
 
 8. **窗口内梯度冲突度**:
 
