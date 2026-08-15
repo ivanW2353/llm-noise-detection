@@ -24,13 +24,13 @@
 
 ### 2.1 "噪音 = 高 loss" 的方向直觉是错的, 且是普遍陷阱
 
-- dynanoise: unlearnable 噪音的 $\text{loss\_cv}$ 反而**低于** clean (0.013 vs 0.041); 修正方向 ($-\text{loss\_cv}$) 后 A 类命中率从 3.8% 跃升至 86.5%;
+- dynanoise: unlearnable 噪音的 $\text{loss\\_cv}$ 反而**低于** clean (0.013 vs 0.041); 修正方向 ($-\text{loss\\_cv}$) 后 A 类命中率从 3.8% 跃升至 86.5%;
 - 本实验: duplicate 的 loss 也**低于**正常样本 (AUC 0.37, 方向反转);
 - **结论**: 可被记忆/学习的噪音 (duplicate/冗余) 在 loss 侧呈反向信号。任何检测器必须经验性验证方向, 采用双向 (zscore) 联合方案。
 
 ### 2.2 Token 级信号是跨实验最稳健的信号族
 
-- dynanoise: $\text{token\_loss\_top20}$ 跨 1.5B/3B 完全稳定 (AUROC 0.947 ± 0.001), 也是唯一跨模型尺度稳定的信号;
+- dynanoise: $\text{token\\_loss\\_top20}$ 跨 1.5B/3B 完全稳定 (AUROC 0.947 ± 0.001), 也是唯一跨模型尺度稳定的信号;
 - 本实验: `entropy` / `frac_hard` / `max_token_loss` / `user_loss` 是 garbled 检测的主力 (0.95~0.98);
 - 本实验 token 级逐 token 梯度归因 (hard_loss AUC 0.77) 也确认 token 级信息有效;
 - **结论**: 检测信号应优先考虑 token 级特征; 样本级聚合 (跨 token/epoch) 是可靠尺度。
@@ -50,7 +50,7 @@
 ### 2.4 一致模式噪音 (template, dynanoise 称 shortcut) 是最危险且最需检测的类型
 
 - qa-noise: fixed_wrong 近线性灾难 (-8.4 分/10%, R²≈0.99);
-- dynanoise Phase 5: shortcut "42" 噪音 $\text{loss\_cv}$ 检测弱 (0.67), 但 **IFD 有效 (0.90)** — 需要指令感知的信号;
+- dynanoise Phase 5: shortcut "42" 噪音 $\text{loss\\_cv}$ 检测弱 (0.67), 但 **IFD 有效 (0.90)** — 需要指令感知的信号;
 - 本实验**恰好缺少这一类噪音** (4 类中无一致模式类) — 这是当前实验设计的已知缺口;
 - **结论**: 一致模式噪音 = "高危害 + 可检测 (用对信号)" 象限, 是数据清洗的最高价值目标。
 
@@ -62,7 +62,7 @@
 
 ### 2.6 受控实验的信号方向在自然数据上成立
 
-- dynanoise Phase 6 (lmsys-chat-1m, 50K): $\text{token\_loss\_top20}$ 与 $\text{loss\_mu}$ 的 Spearman $\rho = -0.78$, 方向与受控实验一致 (AUROC 0.946);
+- dynanoise Phase 6 (lmsys-chat-1m, 50K): $\text{token\\_loss\\_top20}$ 与 $\text{loss\\_mu}$ 的 Spearman $\rho = -0.78$, 方向与受控实验一致 (AUROC 0.946);
 - **结论**: loss 动力学信号可迁移到无标签的真实数据, 用于数据质量监控。
 
 ---

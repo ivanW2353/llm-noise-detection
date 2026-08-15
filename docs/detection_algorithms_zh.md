@@ -10,8 +10,8 @@
 
 - 样本 $x = (p, r)$: prompt $p$ 与 assistant 回复 $r$; 标签 token 集合 $L$, user token 集合 $U$
 - 微批大小 = 1 (逐样本梯度捕获的前提); 每样本记录 loss, 梯度
-- $\mathbf{v}$: Adam 二阶矩 ($\exp\_avg\_sq$), 每优化器步后快照
-- 参考方向 $\mathbf{g}^*$: 训练前在 $N_{\text{ref}}=200$ 条干净保留样本上计算的平均 LoRA 梯度, 归一化为单位向量: $\|\mathbf{g}^*\|_2 = 1$
+- $\mathbf{v}$: Adam 二阶矩 ($\exp\\_avg\\_sq$), 每优化器步后快照
+- 参考方向 $\mathbf{g}^*$: 训练前在 $N_{\text{ref}}=200$ 条干净保留样本上计算的平均 LoRA 梯度, 归一化为单位向量: $\\|\mathbf{g}^*\\|_2 = 1$
 - 阈值建议: 用正常样本分布的**分位数**自适应 (默认 95th 百分位), 绝对阈值随模型/数据变化
 
 ---
@@ -25,7 +25,7 @@
 步骤 (微批=1):
 
 1. 反向传播前快照累积梯度扁平向量: $\mathbf{b} \leftarrow \text{flat}(\theta.\text{grad})$
-2. 计算标签 token 交叉熵: $\text{loss} = \mathrm{CE}\big(\text{model}(p, r),\, L\big)$
+2. 计算标签 token 交叉熵: $\text{loss} = \mathrm{CE}\big(\text{model}(p, r),\\, L\big)$
 3. 反向传播: $\theta.\text{grad}.\text{backward}()$
 4. 快照新梯度: $\mathbf{a} \leftarrow \text{flat}(\theta.\text{grad})$
 5. **该样本的精确梯度** (微批=1 的差分):
@@ -34,19 +34,19 @@ $$\delta = \mathbf{a} - \mathbf{b}$$
 
 6. **梯度范数**:
 
-$$\text{grad\_norm} = \|\delta\|_2$$
+$$\text{grad\\_norm} = \\|\delta\\|_2$$
 
 7. **与干净参考方向的对齐度** (LESS 式影响力):
 
-$$\text{cos\_sim\_ref} = \frac{\langle \delta,\, \mathbf{g}^* \rangle}{\|\delta\|_2 \, \|\mathbf{g}^*\|_2}$$
+$$\text{cos\\_sim\\_ref} = \frac{\langle \delta,\\, \mathbf{g}^* \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}^*\\|_2}$$
 
 8. **窗口内梯度冲突度**:
 
-$$\text{cos\_sim\_global} = \frac{\langle \delta,\, \mathbf{g}_{\text{acc}} \rangle}{\|\delta\|_2 \, \|\mathbf{g}_{\text{acc}}\|_2}$$
+$$\text{cos\\_sim\\_global} = \frac{\langle \delta,\\, \mathbf{g}_{\text{acc}} \rangle}{\\|\delta\\|_2 \\, \\|\mathbf{g}_{\text{acc}}\\|_2}$$
 
 9. **Adam 归一化更新贡献** (仅 B 矩阵 — A 在 B=0 初始化时梯度为零, 逐元素归一化会爆炸):
 
-$$\text{update\_contrib} = \frac{\|\delta_B\|_2}{\big\|\sqrt{\mathbf{v}_B}\big\|_2 + 10^{-8}}$$
+$$\text{update\\_contrib} = \frac{\\|\delta_B\\|_2}{\big\\|\sqrt{\mathbf{v}_B}\big\\|_2 + 10^{-8}}$$
 
 ### 1.2 每 epoch 末诊断 (抽样 1/8, 前向-only)
 
@@ -54,46 +54,46 @@ $$\text{update\_contrib} = \frac{\|\delta_B\|_2}{\big\|\sqrt{\mathbf{v}_B}\big\|
 
 1. **全序列 next-token CE** (目标必须用真实 token id, 不能用 $-100$ — 否则该位置 CE 被置 0):
 
-$$\text{ce}[t] = -\log p\big(\text{next\_id}[t] \mid x_{<t}\big)$$
+$$\text{ce}[t] = -\log p\big(\text{next\\_id}[t] \mid x_{<t}\big)$$
 
 2. **prompt 部分损失** (乱码同时污染输入 → 该值极高):
 
-$$\text{user\_loss} = \frac{1}{|U|} \sum_{t \in U} \text{ce}[t]$$
+$$\text{user\\_loss} = \frac{1}{|U|} \sum_{t \in U} \text{ce}[t]$$
 
 3. **标签 token 熵**:
 
-$$\text{entropy} = \frac{1}{|L|} \sum_{t \in L} \Big( -\textstyle\sum_v p(v \mid t)\,\log p(v \mid t) \Big)$$
+$$\text{entropy} = \frac{1}{|L|} \sum_{t \in L} \Big( -\textstyle\sum_v p(v \mid t)\\,\log p(v \mid t) \Big)$$
 
 4. **困难 token 占比** (阈值 $\tau = 4.0$):
 
-$$\text{frac\_hard} = \frac{\big|\{t \in L : \text{ce}[t] > \tau\}\big|}{|L|}$$
+$$\text{frac\\_hard} = \frac{\big|\\{t \in L : \text{ce}[t] > \tau\\}\big|}{|L|}$$
 
-5. **最大 token 损失**: $\text{max\_token\_loss} = \max_{t \in L} \text{ce}[t]$
-6. **逐 token 损失分布形状**: $\text{skew}$ / $\text{kurt}$ (偏度/峰度 of $\{\text{ce}[t] : t \in L\}$)
+5. **最大 token 损失**: $\text{max\\_token\\_loss} = \max_{t \in L} \text{ce}[t]$
+6. **逐 token 损失分布形状**: $\text{skew}$ / $\text{kurt}$ (偏度/峰度 of $\\{\text{ce}[t] : t \in L\\}$)
 
 ### 1.3 训练后派生 (轨迹特征)
 
 设样本的逐 epoch 损失序列 $l_0, l_1, \ldots, l_{E-1}$ ($E$ = epoch 数):
 
-$$\text{loss\_mean} = \frac{1}{E}\sum_{e=0}^{E-1} l_e, \qquad \text{loss\_last} = l_{E-1}, \qquad \text{loss\_std} = \sqrt{\frac{1}{E}\sum_{e}(l_e - \bar{l})^2}, \qquad \text{loss\_slope} = l_{E-1} - l_0$$
+$$\text{loss\\_mean} = \frac{1}{E}\sum_{e=0}^{E-1} l_e, \qquad \text{loss\\_last} = l_{E-1}, \qquad \text{loss\\_std} = \sqrt{\frac{1}{E}\sum_{e}(l_e - \bar{l})^2}, \qquad \text{loss\\_slope} = l_{E-1} - l_0$$
 
-$$\text{converge\_epoch} = \min\{ e : l_e < 2.0 \} \quad (\text{若不存在则为 } E)$$
+$$\text{converge\\_epoch} = \min\\{ e : l_e < 2.0 \\} \quad (\text{若不存在则为 } E)$$
 
-$$\text{loss\_rank} = \frac{1}{E}\sum_{e=0}^{E-1} \text{percentile}_e(l_e)$$
+$$\text{loss\\_rank} = \frac{1}{E}\sum_{e=0}^{E-1} \text{percentile}_e(l_e)$$
 
-**loss 轨迹曲率** (二次最小二乘拟合的 $e^2$ 系数, 向量化实现 $\mathbf{c} = \mathbf{y}\,\mathbf{X}^{+}$ 其中 $\mathbf{X} = [\mathbf{1},\, \mathbf{e},\, \mathbf{e}^2] \in \mathbb{R}^{E \times 3}$):
+**loss 轨迹曲率** (二次最小二乘拟合的 $e^2$ 系数, 向量化实现 $\mathbf{c} = \mathbf{y}\\,\mathbf{X}^{+}$ 其中 $\mathbf{X} = [\mathbf{1},\\, \mathbf{e},\\, \mathbf{e}^2] \in \mathbb{R}^{E \times 3}$):
 
-$$\text{loss\_curvature} = c_0 \quad \text{其中} \quad [l_e] \approx c_2 e^2 + c_1 e + c_0$$
+$$\text{loss\\_curvature} = c_0 \quad \text{其中} \quad [l_e] \approx c_2 e^2 + c_1 e + c_0$$
 
 **梯度变异性与参考对齐趋势**:
 
-$$\text{grad\_norm\_cv} = \frac{\sigma(\text{grad\_norm}_e)}{\mu(\text{grad\_norm}_e)}, \qquad \text{cos\_ref\_trend} = \text{cos\_ref}_{E-1} - \text{cos\_ref}_{0}$$
+$$\text{grad\\_norm\\_cv} = \frac{\sigma(\text{grad\\_norm}_e)}{\mu(\text{grad\\_norm}_e)}, \qquad \text{cos\\_ref\\_trend} = \text{cos\\_ref}_{E-1} - \text{cos\\_ref}_{0}$$
 
 ### 1.4 数据侧特征 (无需训练)
 
-$$\text{text\_nn\_sim}(x) = 1 - \min_{x' \neq x}\; \cos\!\big(\text{TF-IDF}(x),\, \text{TF-IDF}(x')\big)$$
+$$\text{text\\_nn\\_sim}(x) = 1 - \min_{x' \neq x}\; \cos\!\big(\text{TF-IDF}(x),\\, \text{TF-IDF}(x')\big)$$
 
-TF-IDF 参数: 1-2 gram, $\min\_df = 10$, $\text{sublinear\_tf} = \text{True}$, $\max\_features = 200{,}000$。
+TF-IDF 参数: 1-2 gram, $\min\\_df = 10$, $\text{sublinear\\_tf} = \text{True}$, $\max\\_features = 200{,}000$。
 
 ---
 
@@ -108,9 +108,9 @@ TF-IDF 参数: 1-2 gram, $\min\_df = 10$, $\text{sublinear\_tf} = \text{True}$, 
 1. 计算正常样本各指标的 95th 百分位: $q_{\text{ul}},\ q_{\text{ent}},\ q_{\text{curv}}$
 2. 标记 (多指标 OR 合并; 单指标即可达 AUC > 0.97):
 
-$$s = \big(\text{user\_loss} > q_{\text{ul}}\big) \lor \big(\text{entropy} > q_{\text{ent}}\big) \lor \big(\text{loss\_curvature} > q_{\text{curv}}\big)$$
+$$s = \big(\text{user\\_loss} > q_{\text{ul}}\big) \lor \big(\text{entropy} > q_{\text{ent}}\big) \lor \big(\text{loss\\_curvature} > q_{\text{curv}}\big)$$
 
-可选的强化判据 (5-epoch 设置): $\text{converge\_epoch} = E$ (永不收敛) 或 $\text{frac\_hard}$ 持续不降。
+可选的强化判据 (5-epoch 设置): $\text{converge\\_epoch} = E$ (永不收敛) 或 $\text{frac\\_hard}$ 持续不降。
 
 ### 2.2 重复 duplicate (AUC 0.974) — 文本相似度去重
 
@@ -118,8 +118,8 @@ $$s = \big(\text{user\_loss} > q_{\text{ul}}\big) \lor \big(\text{entropy} > q_{
 
 **算法**:
 
-1. $X \leftarrow \text{TfidfVectorizer}(1\text{-}2\text{gram},\, \min\_df{=}10,\, \text{sublinear\_tf},\, \max\_features{=}200\text{K})(\text{texts})$
-2. $(\text{dist}, \_) \leftarrow \text{NearestNeighbors}(k{=}2,\, \text{metric}{=}\text{cosine}).\text{fit}(X).\text{kneighbors}(X)$
+1. $X \leftarrow \text{TfidfVectorizer}(1\text{-}2\text{gram},\\, \min\\_df{=}10,\\, \text{sublinear\\_tf},\\, \max\\_features{=}200\text{K})(\text{texts})$
+2. $(\text{dist}, \\_) \leftarrow \text{NearestNeighbors}(k{=}2,\\, \text{metric}{=}\text{cosine}).\text{fit}(X).\text{kneighbors}(X)$
 3. $\text{sim}_i = 1 - \text{dist}[i, 1]$ (排除自身后的最近邻相似度)
 4. 标记:
 
@@ -131,16 +131,16 @@ $$s = \big(\text{sim}_i > 0.9\big) \quad (\text{副本} \approx 1.0,\ \text{正�
 
 **算法**:
 
-1. 计算正常样本 $\text{loss\_std}$ 的 95th 百分位 $q_{\text{std}}$
+1. 计算正常样本 $\text{loss\\_std}$ 的 95th 百分位 $q_{\text{std}}$
 2. 标记:
 
-$$s = \big(\text{loss\_std} > q_{\text{std}}\big) \land \big(\text{loss\_slope 不显著为负}\big)$$
+$$s = \big(\text{loss\\_std} > q_{\text{std}}\big) \land \big(\text{loss\\_slope 不显著为负}\big)$$
 
 > 判别逻辑: 正常难样本轨迹平滑下降 (斜率负、波动小); 错配样本波动大、下降慢 → 曲率异常。
 
 ### 2.4 混合噪音 (AUC 0.850) — 组合分类器
 
-特征: 全部 19 维 → $\text{StandardScaler}$ → 逻辑回归 ($\max\_iter = 2000$) 或随机森林 ($n\_estimators = 200$), 70/30 划分评估。
+特征: 全部 19 维 → $\text{StandardScaler}$ → 逻辑回归 ($\max\\_iter = 2000$) 或随机森林 ($n\\_estimators = 200$), 70/30 划分评估。
 
 ### 2.5 keyword (AUC 0.531) — **不可行**, 需模型外手段
 
