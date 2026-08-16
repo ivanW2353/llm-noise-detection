@@ -88,8 +88,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="/root/noisedetect/config.yaml")
     ap.add_argument("--dataset", default=None)
+    ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio05)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    if args.tag:
+        cfg["paths"]["experiment_tag"] = args.tag
     tag = cfg["paths"].get("experiment_tag", "")
     res_dir = os.path.join(cfg["paths"]["repo_root"], "results")
     chart_dir = os.path.join(res_dir, "charts")
