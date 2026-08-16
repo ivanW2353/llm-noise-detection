@@ -67,7 +67,23 @@ fi
 
 if [ "$MODE" = "full" ] || [ "$MODE" = "eval" ]; then
     echo "===== [$TAG] evaluation ====="
-    for ds in clean garbled duplicate unrelated keyword mixed base; do
+    EVAL_LIST="clean garbled duplicate unrelated keyword mixed base"
+    if [ -n "$REUSE_CLEAN" ]; then
+        # clean model is identical to the default run: reuse its eval results
+        if [ -f "results/eval/eval_ratio10_clean.json" ]; then
+            cp -n "results/eval/eval_ratio10_clean.json" "results/eval/eval_${TAG}_clean.json"
+            cp -n "results/eval/eval_raw_ratio10_clean.jsonl" "results/eval/eval_raw_${TAG}_clean.jsonl" 2>/dev/null || true
+            echo "----- [$TAG] reuse clean eval from ratio10 -----"
+        fi
+        EVAL_LIST="garbled duplicate unrelated keyword mixed"
+    fi
+    # base model is tag-independent: reuse the default run's eval if present
+    if [ -f "results/eval/eval_ratio10_base.json" ] && [ ! -f "results/eval/eval_${TAG}_base.json" ]; then
+        cp -n "results/eval/eval_ratio10_base.json" "results/eval/eval_${TAG}_base.json"
+        cp -n "results/eval/eval_raw_ratio10_base.jsonl" "results/eval/eval_raw_${TAG}_base.jsonl" 2>/dev/null || true
+        echo "----- [$TAG] reuse base eval from ratio10 -----"
+    fi
+    for ds in $EVAL_LIST; do
         echo "----- [$TAG] eval $ds -----"
         python3 scripts/evaluate.py --dataset "$ds" --tag "$TAG"
     done
