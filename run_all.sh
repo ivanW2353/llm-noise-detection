@@ -1,10 +1,12 @@
 #!/bin/bash
-# Run all 6 training runs sequentially. Logs to data_root/train_all.log.
+# Run all 6 training runs sequentially (default tag). Log to data_root/logs/.
 set -e
 cd /root/noisedetect
+mkdir -p /root/autodl-tmp/noisedetect/logs
+LOG=/root/autodl-tmp/noisedetect/logs/train_all.log
 for ds in clean garbled duplicate unrelated keyword mixed; do
-    echo "===== $(date '+%F %T') START $ds ====="
-    python scripts/train.py --dataset "$ds" --epochs 5
-    echo "===== $(date '+%F %T') DONE $ds ====="
+    echo "===== $(date '+%F %T') START $ds =====" | tee -a "$LOG"
+    python scripts/train.py --dataset "$ds" --epochs 5 2>&1 | tee -a "$LOG"
+    echo "===== $(date '+%F %T') DONE $ds =====" | tee -a "$LOG"
 done
-echo "ALL DONE at $(date '+%F %T')"
+echo "ALL DONE at $(date '+%F %T')" | tee -a "$LOG"
