@@ -47,7 +47,9 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "train" ]; then
     [ -n "$WITH_EXTRA" ] && SHORTCUT_ARG="--with-extra"
     python3 scripts/make_noise.py --ratio "$RATIO" --tag "$TAG" $SHORTCUT_ARG
     echo "===== [$TAG] training (5 noisy runs + clean) ====="
-    for ds in clean garbled duplicate unrelated keyword mixed; do
+    TRAIN_LIST="clean garbled duplicate unrelated keyword mixed"
+    [ -n "$WITH_EXTRA" ] && TRAIN_LIST="$TRAIN_LIST template truncation near_duplicate"
+    for ds in $TRAIN_LIST; do
         if [ "$ds" = "clean" ] && [ -n "$REUSE_CLEAN" ]; then
             # the clean dataset is identical across ratios (same seed/order),
             # so its run (metrics, LoRA, TB) can be reused from the default run
@@ -68,6 +70,7 @@ fi
 if [ "$MODE" = "full" ] || [ "$MODE" = "eval" ]; then
     echo "===== [$TAG] evaluation ====="
     EVAL_LIST="clean garbled duplicate unrelated keyword mixed base"
+    [ -n "$WITH_EXTRA" ] && EVAL_LIST="$EVAL_LIST template truncation near_duplicate"
     if [ -n "$REUSE_CLEAN" ]; then
         # clean model is identical to the default run: reuse its eval results
         if [ -f "results/eval/eval_ratio10_clean.json" ]; then
