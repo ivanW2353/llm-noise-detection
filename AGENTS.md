@@ -27,7 +27,10 @@ bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean  # full pipeline
 ```
 
 - No test suite; verification = `--smoke` flags + CPU-only loader checks.
-- Long jobs go in tmux (user preference), never plain nohup.
+- Long jobs run in tmux windows inside the main session `noisedetect`
+  (window 0 `chat`, window 1+ per job), never plain nohup:
+  `tmux new-window -t noisedetect -n <job> 'cmd 2>&1 | tee <log>'`.
+  Don't create separate tmux sessions for background jobs.
 - **Never edit `run_experiment.sh` / `run_all*.sh` while a tmux pipeline is executing it** — bash reads the script lazily; overwriting the file mid-run feeds torn lines to the running shell (caused a silent pipeline death: `ntinue: command not found` after training finished, eval never started). Edit scripts only between runs.
 - `run_experiment.sh` chaining: build → train → eval → analysis → prints `ALL DONE` (watch for it in the log; then run `compare_ratios.py` + git push manually).
 
