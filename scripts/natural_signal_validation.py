@@ -45,32 +45,31 @@ def load_model(cfg, dataset):
 
 
 @torch.no_grad()
-def signals_for_prompt(model, tokenizer, prompt, max_new=64, bs=8):
+def signals_for_prompt(model, tokenizer, prompts, max_new=64, bs=8):
     """Per-sample signals from an autoregressive rollout + loss.
 
-    loss_mu: mean next-token loss over the generated continuation
+    loss_mu: mean next-token loss over the GENERATED continuation
     loss_cv: std/mean of per-token losses
     token_loss_top20: fraction of total loss carried by the hardest 20% tokens
     """
-    msgs = [{"role": "user", "content": p} for p in prompt]
-    enc = tokenizer(tokenizer.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
-                    for m in msgs)
-    # build in batches
-    all_ids = [tokenizer.apply_chat_template(m, tokenize=False, add_generation_prompt=True) for m in msgs]
     tokenizer.padding_side = "left"
-    enc = tokenizer(all_ids, return_tensors="pt", padding=True,
+    texts = [tokenizer.apply_chat_template(
+        [{"role": "user", "content": p}], tokenize=False, add_generation_prompt=True)
+        for p in prompts]
+    enc = tokenizer(texts, return_tensors="pt", padding=True,
                     truncation=True, max_length=MAX_LEN - max_new)
     gen = model.generate(
         input_ids=enc["input_ids"].cuda(), attention_mask=enc["attention_mask"].cuda(),
         max_new_tokens=max_new, do_sample=False,
         pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
-    # per-token CE over the generated tokens
-    out = model(input_ids=gen, labels=None)
+    out = model(input_ids=gen)
     logits = out.logits[:, :-1]
+    start = enc["input_ids"].shape[1]
+    gen_part = gen[:, start:]
     ce = torch.nn.functional.cross_entropy(
-        logits.reshape(-1, logits.shape[-1]), gen[:, 1:].reshape(-1),
-        reduction="none").view(gen.shape[0], -1)
-    mask = gen[:, 1:] != tokenizer.pad_token_id
+        logits[:, start - 1:].reshape(-1, logits.shape[-1]),
+        gen_part.reshape(-1), reduction="none").view(gen.shape[0], -1)
+    mask = (gen_part != tokenizer.pad_token_id) & (gen_part != tokenizer.eos_token_id)
     res = []
     for i in range(gen.shape[0]):
         toks = ce[i][mask[i]].float().cpu().numpy()
@@ -105,12 +104,14 @@ def main():
         if u and len(u) > 20:
             prompts.append(u)
             convs.append(c)
-    print(f"scored {len(prompts)} prompts ...")
+    print(f"scored {len(prompts)} prompts ...", flush=True)
     mus, cvs, tops = [], [], []
     for s in range(0, len(prompts), 8):
         for mu, cv, t20 in signals_for_prompt(model, tokenizer, prompts[s:s + 8],
                                               max_new=args.max_new):
             mus.append(mu); cvs.append(cv); tops.append(t20)
+        if s and s % (8 * 100) == 0:
+            print(f"  ... {s}/{len(prompts)} prompts done", flush=True)
     print(f"valid samples: {len(mus)}")
     for a, b, na, nb in [(tops, mus, "token_top20", "loss_mu"),
                          (cvs, mus, "loss_cv", "loss_mu"),
