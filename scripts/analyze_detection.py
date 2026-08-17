@@ -455,7 +455,9 @@ def main():
         ax.set_title(m, fontsize=11)
         ax.set_ylabel(m)
         fig.tight_layout()
-        fig.savefig(os.path.join(chart_dir, res_img(f"metric_dist_{m}")), dpi=150)
+        dist_dir = os.path.join(chart_dir, "metric_dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        fig.savefig(os.path.join(dist_dir, res_img(f"metric_dist_{m}")), dpi=150)
         plt.close(fig)
 
     # ---- 5. loss trajectory ------------------------------------------------

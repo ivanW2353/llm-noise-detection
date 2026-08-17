@@ -4,12 +4,24 @@ Study of how four types of data noise affect LLM SFT, and whether per-sample
 training metrics (loss / gradient norm / gradient cosine similarity) can
 separate noisy samples from clean ones.
 
+## Experiment status
+
+| Experiment | Noise types | Ratio | Status | Highlights |
+|---|---|---|---|---|
+| `ratio10` (default tag) | garbled, duplicate, unrelated, keyword + mixed (4-way) | 10% | **COMPLETE** | detection garbled 0.9996 / duplicate 0.974 / unrelated 0.923 / keyword 0.531 (blind spot); noise harm << SFT harm; detectability decays with epochs |
+| `ratio05` | same 4 types + mixed | 5% | **COMPLETE** | detection is ratio-insensitive (garbled 0.999); unrelated harms MMLU *more* at 5% than 10% |
+| `extra10` | + template, truncation, near_duplicate + mixed (7-way) | 10% | **data built; training pending GPU** | fills the "consistent-pattern / info-loss / near-duplicate" quadrants |
+
 ## Analysis reports
 
 - **[中文详细分析报告](docs/analysis_report_zh.md)** — 训练动态、样本/token 级检测、验证集影响、逐题分析
 - **[English analysis report](docs/analysis_report_en.md)** — training dynamics, sample/token-level detection, benchmark impact, per-question analysis
+- **[检测算法规范](docs/detection_algorithms_zh.md) / [detection algorithms](docs/detection_algorithms_en.md)** — 可复现的噪音检测算法 (LaTeX 公式)
+- **[跨实验综合](docs/cross_experiment_synthesis_zh.md) / [cross-experiment synthesis](docs/cross_experiment_synthesis_en.md)** — 与 dynanoise / qa-noise 的合并结论
+- **[剂量-效应对比](docs/dose_response_zh.md) / [dose response](docs/dose_response_en.md)** — ratio10 vs ratio05
+- **[文献综述](docs/literature_review_zh.md)** — 25 篇相关论文
 
-## Datasets (6)
+## Datasets (6 core, +3 optional with `--with-extra`)
 
 Built from `databricks/databricks-dolly-15k` (15011 samples, chat format),
 noise ratio 10% (configurable in `config.yaml`):
@@ -21,7 +33,11 @@ noise ratio 10% (configurable in `config.yaml`):
 | `duplicate`| 10% extra rows that are exact copies                            |
 | `unrelated`| 10% samples whose response is fluent/correct but from a different category (contextually unrelated) |
 | `keyword`  | 10% samples with only key entities/numbers replaced             |
-| `mixed`    | 10% total noise, evenly split among the four types              |
+| `mixed`    | 10% total noise, evenly split among the noise types             |
+
+`--with-extra` adds three more (7-way mixed):
+`template` (consistent fixed-answer pattern), `truncation` (response cut at
+50%, information loss), `near_duplicate` (light paraphrase via WordNet).
 
 Every row carries `noise_label`/`noise_type`. Sample order is identical across
 datasets (fixed seed) except appended duplicate copies, so per-sample metrics
@@ -146,10 +162,11 @@ Config: `config.yaml` (paths, noise ratio, hyper-parameters).
 ## Layout
 
 - `scripts/` – data construction, training, evaluation, analysis
-- `docs/` – analysis reports (zh/en), detection algorithms, cross-experiment synthesis, literature review
-- `results/eval/` – per-model evaluation results + raw per-question records + comparison tables
-- `results/charts/` – all figures (ROC, distributions, PCA, trajectories, token curves)
-- `results/` – detection-analysis tables (AUC, multivariate, per-category)
+- `docs/` – 9 reports: analysis (zh/en), detection algorithms, cross-experiment synthesis, dose-response, literature review
+- `results/eval/` – per-model evaluation results + raw per-question records + comparison tables (per tag)
+- `results/charts/` – main figures; `metric_dist/` (38), `token_curve/` (8) subfolders
+- `results/token_level/` – per-token attribution records (per tag)
+- `results/` – detection-analysis tables (AUC, multivariate, per-category, per tag)
 - `<data_root>/logs/` – pipeline logs (train / eval / experiment)
 - `<data_root>/data/` – the 6 datasets (tagged dirs for other ratios)
 - `<data_root>/runs/<dataset>/` – per-sample metrics, tensorboard, LoRA weights

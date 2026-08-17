@@ -146,7 +146,9 @@ def main():
                     mismatch = sum(1 for p in hard_pos if p < len(cids) and ids[p] != cids[p])
                     entry["loc_mismatch_frac"] = mismatch / max(1, len(hard_pos))
             results.append(entry)
-        out_p = os.path.join(res_dir, f"token_level_{tag}_{ds}.jsonl" if tag else f"token_level_{ds}.jsonl")
+        tl_dir = os.path.join(res_dir, "token_level")
+        os.makedirs(tl_dir, exist_ok=True)
+        out_p = os.path.join(tl_dir, f"token_level_{tag}_{ds}.jsonl" if tag else f"token_level_{ds}.jsonl")
         with open(out_p, "w") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
@@ -160,7 +162,9 @@ def main():
             ax.set_xlabel("token position")
             ax.set_ylabel("loss")
         fig.tight_layout()
-        fig.savefig(os.path.join(chart_dir, f"token_curve_{tag}_{ds}.png" if tag else f"token_curve_{ds}.png"), dpi=150)
+        tc_dir = os.path.join(chart_dir, "token_curve")
+        os.makedirs(tc_dir, exist_ok=True)
+        fig.savefig(os.path.join(tc_dir, f"token_curve_{tag}_{ds}.png" if tag else f"token_curve_{ds}.png"), dpi=150)
 
     # detection AUC from token-level features
     from sklearn.metrics import roc_auc_score
