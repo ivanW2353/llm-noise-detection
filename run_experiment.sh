@@ -18,6 +18,19 @@ LOG="/root/autodl-tmp/noisedetect/logs/experiment_${TAG:-default}.log"
 mkdir -p "$(dirname "$LOG")"
 echo "===== [$TAG] $(date '+%F %T') run_experiment.sh started (MODE=$MODE) =====" | tee -a "$LOG"
 
+RUNDIR="/root/autodl-tmp/noisedetect/runs/$TAG"
+has_summary() {
+    [ -f "$RUNDIR/$1/summary.json" ]
+}
+eval_complete() {
+    local f="/root/noisedetect/results/eval/eval_${TAG}_$1.json"
+    [ -f "$f" ] && python3 -c "
+import json,sys
+r=json.load(open('$f'))
+tasks=[k for k,v in r.items() if isinstance(v,dict) and 'acc' in v]
+sys.exit(0 if len(tasks)>=7 else 1)" 2>/dev/null
+}
+
 RATIO=""
 TAG=""
 MODE="full"
@@ -66,6 +79,10 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "train" ]; then
                 continue
             fi
         fi
+        if has_summary "$ds"; then
+            echo "----- [$TAG] $(date '+%F %T') skip $ds (already trained) -----"
+            continue
+        fi
         echo "----- [$TAG] $(date '+%F %T') train $ds -----"
         python3 scripts/train.py --dataset "$ds" --tag "$TAG"
         echo "----- [$TAG] $(date '+%F %T') train $ds done -----"
@@ -95,6 +112,10 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "eval" ]; then
         echo "----- [$TAG] $(date '+%F %T') reuse base eval from ratio10 -----"
     fi
     for ds in $EVAL_LIST; do
+        if eval_complete "$ds"; then
+            echo "----- [$TAG] $(date '+%F %T') skip eval $ds (already complete) -----"
+            continue
+        fi
         echo "----- [$TAG] $(date '+%F %T') eval $ds -----"
         python3 scripts/evaluate.py --dataset "$ds" --tag "$TAG"
         echo "----- [$TAG] $(date '+%F %T') eval $ds done -----"

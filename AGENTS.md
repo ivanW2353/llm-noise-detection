@@ -34,6 +34,21 @@ bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean  # full pipeline
 - **Never edit `run_experiment.sh` / `run_all*.sh` while a tmux pipeline is executing it** — bash reads the script lazily; overwriting the file mid-run feeds torn lines to the running shell (caused a silent pipeline death: `ntinue: command not found` after training finished, eval never started). Edit scripts only between runs.
 - `run_experiment.sh` chaining: build → train → eval → analysis → prints `ALL DONE` (watch for it in the log; then run `compare_ratios.py` + git push manually).
 
+## Reuse principles (avoid redundant work)
+
+- **clean run is ratio-independent** (same seed/order) — reuse it across ratio
+  experiments: `--reuse-clean` copies `runs/ratio10/clean` (saves ~3.5h) and
+  reuses its eval results (saves ~1.5h); base eval is tag-independent too.
+- **Identical datasets across experiments need no retraining**: e.g. the 10%
+  garbled/duplicate/unrelated/keyword/mixed (4-way) runs of `ratio10` are
+  byte-identical to any future 10% experiment without `--with-extra` — only
+  train what's new (the extra10 experiment trains only template/truncation/
+  near_duplicate/mixed, ~4 runs instead of 8).
+- **run_experiment.sh auto-skips** datasets whose `summary.json` exists and
+  eval models whose results are complete (7 tasks) — safe to re-run anytime.
+- Keep per-sample metrics jsonl — all derived features are computed from them
+  in analysis, never re-train to regenerate analysis.
+
 ## Gotchas (all bit us before)
 
 **Data / datasets (5.x)**
