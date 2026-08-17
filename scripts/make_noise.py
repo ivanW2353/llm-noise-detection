@@ -19,8 +19,13 @@ import json
 import os
 import random
 import re
+import time
 
 import yaml
+
+
+def log(msg):
+    print(f"[{time.strftime('%F %T')}] {msg}", flush=True)
 from datasets import load_dataset
 
 # ----------------------------------------------------------------------------
@@ -195,18 +200,21 @@ def build(config, with_extra=False):
     n_train = len(train_rows)
     n_noise = int(round(n_train * ratio))
     noise_idx = set(rng.sample(range(n_train), n_noise))
-    print(f"total={len(rows)} holdout={n_holdout} train={n_train} noise={n_noise} ({ratio:.0%})")
+    log(f"total={len(rows)} holdout={n_holdout} train={n_train} noise={n_noise} ({ratio:.0%})")
 
     out_dir = os.path.join(data_root, "data", tag)
     os.makedirs(out_dir, exist_ok=True)
 
     def emit(dataset_name, row_items):
+        t0 = time.time()
         path = os.path.join(out_dir, dataset_name, "train.jsonl")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            for item in row_items:
+            for k, item in enumerate(row_items):
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        print(f"{dataset_name}: {len(row_items)} rows -> {path}")
+                if k and k % 5000 == 0:
+                    log(f"  [{dataset_name}] {k}/{len(row_items)} rows")
+        log(f"{dataset_name}: {len(row_items)} rows in {time.time()-t0:.1f}s -> {path}")
 
     def base_item(meta, sample_id):
         return {
@@ -226,7 +234,7 @@ def build(config, with_extra=False):
     with open(os.path.join(out_dir, "heldout.jsonl"), "w") as f:
         for j, r in enumerate(heldout_rows):
             f.write(json.dumps(base_item(r, j), ensure_ascii=False) + "\n")
-    print(f"heldout: {len(heldout_rows)} clean rows -> {os.path.join(out_dir, 'heldout.jsonl')}")
+    log(f"heldout: {len(heldout_rows)} clean rows -> {os.path.join(out_dir, 'heldout.jsonl')}")
 
     # 1. clean
     emit("clean", [base_item(r, i) for i, r in enumerate(train_rows)])
@@ -394,7 +402,7 @@ def build(config, with_extra=False):
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
-    print("manifest written:", os.path.join(out_dir, "manifest.json"))
+    log("manifest written: " + os.path.join(out_dir, "manifest.json"))
 
 
 if __name__ == "__main__":

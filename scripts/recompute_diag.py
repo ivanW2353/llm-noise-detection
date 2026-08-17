@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import torch
 import yaml
@@ -50,13 +51,14 @@ def main():
         model = build_model(cfg)
         model = PeftModel.from_pretrained(model, lora_path)
         model.eval()
+        t0 = time.time()
         diag = diagnostic_pass(model, tokenizer, data,
                                thresh=cfg["train"].get("hard_threshold", 4.0))
         out_p = os.path.join(run_dir, "metrics", "diag_final.jsonl")
         with open(out_p, "w") as f:
             for d in diag:
                 f.write(json.dumps({k: v for k, v in d.items() if k != "top_tokens"}) + "\n")
-        print(f"  {ds}: {len(diag)} samples -> {out_p}")
+        print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {len(diag)} samples in {time.time()-t0:.0f}s -> {out_p}", flush=True)
 
 
 if __name__ == "__main__":

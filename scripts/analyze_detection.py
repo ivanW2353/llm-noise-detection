@@ -20,6 +20,7 @@ import json
 import math
 import os
 import sys
+import time
 
 import matplotlib
 matplotlib.use("Agg")
@@ -298,7 +299,9 @@ def main():
         return f"{name}_{tag}.csv" if tag else f"{name}.csv"
     def res_img(name):
         return f"{name}_{tag}.png" if tag else f"{name}.png"
-    print("building metric table ...")
+    t0_ana = time.time()
+    t_sec = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] building metric table ...", flush=True)
     df = build_table(cfg)
     for m in METRIC_ORDER:
         if m not in df.columns:
@@ -320,15 +323,21 @@ def main():
         auc_rows.append({"noise_type": nt, **{k: round(v, 4) if v == v else None for k, v in res.items()}})
     auc_tab = pd.DataFrame(auc_rows)
     auc_tab.to_csv(os.path.join(res_dir, res_name("auc_univariate")), index=False)
+    print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+    t_sec = time.time()
     print("\n=== univariate AUC (noise vs normal, same run) ===")
     print(auc_tab.to_string(index=False))
     avg_auc = auc_tab.set_index("noise_type")[METRIC_ORDER].mean(axis=1)
     metric_mean = auc_tab[METRIC_ORDER].mean(axis=0).sort_values(ascending=False)
+    print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+    t_sec = time.time()
     print("\n=== best metrics by mean AUC ===")
     print(metric_mean.round(4).to_string())
 
     # ---- 2. best metric per noise type -------------------------------------
     best = avg_auc.sort_values(ascending=False)
+    print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+    t_sec = time.time()
     print("\n=== mean AUC over metrics per noise type ===")
     print(best.round(4).to_string())
 
@@ -367,6 +376,8 @@ def main():
                 print(f"\n[LR] {nt}: top features: {dict(importances.head(3))}")
     det_tab = pd.DataFrame(det_rows)
     det_tab.to_csv(os.path.join(res_dir, res_name("detection_multivariate")), index=False)
+    print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+    t_sec = time.time()
     print("\n=== multivariate detection ===")
     print(det_tab.to_string(index=False))
     ax_roc.plot([0, 1], [0, 1], "--", color="gray")
@@ -402,6 +413,8 @@ def main():
     if cat_rows:
         cat_tab = pd.DataFrame(cat_rows).sort_values("rf_auc", ascending=False)
         cat_tab.to_csv(os.path.join(res_dir, res_name("auc_by_category")), index=False)
+        print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+        t_sec = time.time()
         print("\n=== RF detection AUC by task category (transferability) ===")
         print(cat_tab.to_string(index=False))
     # noise-type × category AUC matrix
@@ -431,6 +444,8 @@ def main():
     if mat_rows:
         mat_tab = pd.DataFrame(mat_rows).pivot(index="category", columns="noise_type", values="rf_auc")
         mat_tab.to_csv(os.path.join(res_dir, res_name("auc_category_x_noise")), index=False)
+        print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+        t_sec = time.time()
         print("\n=== RF AUC: category x noise type ===")
         print(mat_tab.to_string())
 
@@ -515,6 +530,8 @@ def main():
     if ev_rows:
         ev_tab = pd.DataFrame(ev_rows)
         ev_tab.to_csv(os.path.join(eval_dir, res_name("eval_comparison")), index=False)
+        print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+        t_sec = time.time()
         print("\n=== evaluation comparison ===")
         print(ev_tab.to_string(index=False))
         # per-group comparisons (MMLU subjects, HellaSwag activities,
@@ -538,6 +555,7 @@ def main():
                 print(f"\n=== {gname} ({len(subj_tab.columns)-1} groups) ===")
                 print(subj_tab.to_string(index=False))
 
+    print(f"[{time.strftime('%H:%M:%S')}] total analysis time {time.time()-t0_ana:.0f}s")
     print("plots saved to", res_dir)
 
 

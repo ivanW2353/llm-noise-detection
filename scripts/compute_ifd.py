@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import torch
 import yaml
@@ -73,8 +74,9 @@ def main():
         model.eval()
         out_p = os.path.join(cfg["paths"]["repo_root"], "results", f"ifd_{tag}_{ds}.jsonl")
         n = 0
+        t0 = time.time()
         with open(out_p, "w") as f:
-            for r in rows:
+            for k, r in enumerate(rows):
                 sid = r["sample_id"]
                 # L(A|Q) from a forward with labels = full sequence (label tokens)
                 out = model(input_ids=r["input_ids"].unsqueeze(0).cuda(),
@@ -88,7 +90,10 @@ def main():
                     "L_AQ": l_aq, "L_A": l_a, "IFD": l_aq / max(l_a, 1e-9),
                 }) + "\n")
                 n += 1
-        print(f"  {ds}: {n} samples -> {out_p}")
+                if k and k % 100 == 0:
+                    print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {k}/{len(rows)} samples "
+                          f"({(time.time()-t0)/k:.2f}s/sample)", flush=True)
+        print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {n} samples in {time.time()-t0:.0f}s -> {out_p}")
 
 
 if __name__ == "__main__":

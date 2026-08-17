@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 import numpy as np
 import torch
@@ -119,8 +120,10 @@ def main():
         print(f"[{ds}] analyzing {len(sel)} samples (top-k={TOP_K}) ...")
         model, params, offsets, ref_buf = load_model_and_ref(cfg, ds, ref_rows)
         results = []
-        for row in sel:
+        for k, row in enumerate(sel):
             sid = row["sample_id"]
+            if k % 10 == 0:
+                print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {k}/{len(sel)} samples", flush=True)
             hard = hard_tokens(model, row, params, offsets, ref_buf)
             if not hard:
                 continue

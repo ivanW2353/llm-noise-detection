@@ -312,16 +312,17 @@ def train(cfg, dataset, smoke=False):
     metric_f = open(os.path.join(metric_dir, "per_sample.jsonl"), "w")
     ln_f = open(os.path.join(metric_dir, "layer_norms.jsonl"), "w")
 
-    print("loading model ...")
+    t_load = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] loading model ...", flush=True)
     model = build_model(cfg)
     tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
 
-    print("tokenizing ...")
+    print(f"[{time.strftime('%H:%M:%S')}] tokenizing ...", flush=True)
     train_data, n_label_tokens = tokenize_rows(tokenizer, train_rows, MAX_LEN)
     held_data, _ = tokenize_rows(tokenizer, heldout_rows[:n_held], MAX_LEN)
     ref_data, _ = tokenize_rows(tokenizer, heldout_rows[n_held:], MAX_LEN)
 
-    print("computing reference gradient direction ...")
+    print(f"[{time.strftime('%H:%M:%S')}] computing reference gradient direction ...", flush=True)
     params, offsets, n_lora, ref_buf = compute_reference_direction(model, tokenizer, ref_data, cfg)
     # update_contrib uses B-only offsets: lora_A gradients are ~0 while B is
     # still zero-initialized, so their Adam-normalized values would explode
@@ -487,8 +488,9 @@ def train(cfg, dataset, smoke=False):
                               "update_contrib": 0.0, "tokens": 0.0, "cnt": 0}
                     layer_norm_sum = {li: 0.0 for li in target_ids}
                     layer_norm_cnt = 0
-                    print(f"[{dataset}] epoch {epoch} step {global_step}/{total_steps} "
-                          f"lr {lr_at(global_step):.2e} elapsed {time.time()-t0:.0f}s", flush=True)
+                    print(f"[{time.strftime('%H:%M:%S')}] [{dataset}] epoch {epoch} step {global_step}/{total_steps} "
+                          f"lr {lr_at(global_step):.2e} elapsed {time.time()-t0:.0f}s "
+                          f"gpu_mem={torch.cuda.memory_allocated()/1e9:.1f}GB", flush=True)
                 if global_step % tcfg["eval_steps"] == 0:
                     el = eval_heldout(model, tokenizer, held_data)
                     writer.add_scalar("eval/heldout_loss", el, global_step)
@@ -519,7 +521,7 @@ def train(cfg, dataset, smoke=False):
                 return sum(vals) / len(vals) if vals else None
             loss_min = min(r["loss"] for r in ep_metrics)
             loss_max = max(r["loss"] for r in ep_metrics)
-            print(f"  == epoch {epoch} summary == n={n_ep} "
+            print(f"[{time.strftime('%H:%M:%S')}] == epoch {epoch} summary == n={n_ep} "
                   f"loss mean {avg('loss'):.4f} [min {loss_min:.4f}, max {loss_max:.4f}] "
                   f"grad_norm {avg('grad_norm'):.3f} "
                   f"cos_ref {avg('cos_sim_ref'):.4f} cos_global {avg('cos_sim_global'):.4f} "
@@ -568,7 +570,8 @@ def train(cfg, dataset, smoke=False):
     }
     with open(os.path.join(run_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
-    print(f"done {dataset}: {global_step} steps in {time.time()-t0:.0f}s -> {run_dir}")
+    print(f"[{time.strftime('%H:%M:%S')}] done {dataset}: {global_step} steps in {time.time()-t0:.0f}s -> {run_dir}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] final summary:", flush=True)
     print(json.dumps(summary, indent=2))
 
 

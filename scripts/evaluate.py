@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+import time
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -54,10 +55,13 @@ def score_options(model, tokenizer, samples, bs=24):
     """samples: list of (prompt, options); returns per-sample nll list."""
     flat = [(p, " " + o) for p, opts in samples for o in opts]
     all_nll = []
+    t0 = time.time()
     for s in range(0, len(flat), bs):
         chunk = flat[s:s + bs]
         if s % (bs * 500) == 0:
-            print(f"    ... {s}/{len(flat)} options", flush=True)
+            rate = s / max(1, time.time() - t0)
+            print(f"    [{time.strftime('%H:%M:%S')}] ... {s}/{len(flat)} options "
+                  f"({rate:.0f} opts/s, ETA {max(0, (len(flat)-s)/rate)/60:.1f} min)", flush=True)
         pids = [tokenizer(p, add_special_tokens=False)["input_ids"] for p, _ in chunk]
         cids = [tokenizer(c, add_special_tokens=False)["input_ids"] for _, c in chunk]
         maxl = min(SCORE_MAX_LEN, max(len(p) + len(c) for p, c in zip(pids, cids)))
@@ -95,9 +99,12 @@ def generate(model, tokenizer, prompts, max_new_tokens=256, bs=16):
     model.config.use_cache = True
     tokenizer.padding_side = "left"  # flash-attn generation is broken with right padding
     outs = []
+    t0 = time.time()
     for s in range(0, len(prompts), bs):
         if s % (bs * 50) == 0:
-            print(f"    ... generated {s}/{len(prompts)}", flush=True)
+            rate = s / max(1, time.time() - t0)
+            print(f"    [{time.strftime('%H:%M:%S')}] ... generated {s}/{len(prompts)} "
+                  f"({rate:.1f} prompts/s, ETA {max(0, (len(prompts)-s)/rate)/60:.1f} min)", flush=True)
         enc = tokenizer(prompts[s:s + bs], return_tensors="pt", padding=True,
                         truncation=True, max_length=MAX_LEN - max_new_tokens)
         gen = model.generate(
@@ -330,20 +337,24 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
     if not remaining:
         print(f"[{dataset}] all tasks done, skip (use --force to redo)")
         return
-    print(f"loading model [{dataset}] ...")
+    print(f"[{time.strftime('%F %T')}] loading model [{dataset}] ...", flush=True)
+    t_load = time.time()
     model = load_model(cfg, dataset)
     tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
+    print(f"[{time.strftime('%F %T')}] model loaded in {time.time()-t_load:.0f}s", flush=True)
     for task in tasks:
         if smoke and task not in ("mmlu", "gsm8k"):
             continue
         if task in results and not force:
             print(f"  {task}: cached")
             continue
+        t_task = time.time()
         r = run_task(model, tokenizer, task, smoke=smoke)
         raw = r.pop("raw", None)
         results[task] = r
         # incremental save: interruption loses at most the current task
         json.dump(results, open(out_path, "w"), indent=2)
+        print(f"  [{time.strftime('%H:%M:%S')}] {task} took {time.time()-t_task:.0f}s", flush=True)
         if raw is not None:
             raw_path = os.path.join(eval_dir,
                                     f"eval_raw_{tag}_{dataset}.jsonl" if tag else f"eval_raw_{dataset}.jsonl")
