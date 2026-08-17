@@ -213,9 +213,9 @@ Two core questions:
 
 | Loss & gradient | Input-side features |
 |---|---|
-| ![loss_mean](../results/charts/metric_dist_loss_mean_ratio10.png) | ![user_loss](../results/charts/metric_dist_user_loss_ratio10.png) |
-| ![grad_norm](../results/charts/metric_dist_grad_norm_mean_ratio10.png) | ![entropy](../results/charts/metric_dist_entropy_ratio10.png) |
-| ![cos_ref](../results/charts/metric_dist_cos_ref_mean_ratio10.png) | ![text_nn_sim](../results/charts/metric_dist_text_nn_sim_ratio10.png) |
+| ![loss_mean](../results/charts/metric_dist/metric_dist_loss_mean_ratio10.png) | ![user_loss](../results/charts/metric_dist/metric_dist_user_loss_ratio10.png) |
+| ![grad_norm](../results/charts/metric_dist/metric_dist_grad_norm_mean_ratio10.png) | ![entropy](../results/charts/metric_dist/metric_dist_entropy_ratio10.png) |
+| ![cos_ref](../results/charts/metric_dist/metric_dist_cos_ref_mean_ratio10.png) | ![text_nn_sim](../results/charts/metric_dist/metric_dist_text_nn_sim_ratio10.png) |
 
 </center>
 
