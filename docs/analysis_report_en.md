@@ -333,9 +333,9 @@ Per noisy dataset, sample **60 noise + 60 normal** samples; run the *final* mode
 
 | garbled | duplicate |
 |---|---|
-| ![garbled per-token losses](../results/charts/token_curve_ratio10_garbled.png) | ![duplicate per-token losses](../results/charts/token_curve_ratio10_duplicate.png) |
+| ![garbled per-token losses](../results/charts/token_curve/token_curve_ratio10_garbled.png) | ![duplicate per-token losses](../results/charts/token_curve/token_curve_ratio10_duplicate.png) |
 | unrelated | keyword |
-| ![unrelated per-token losses](../results/charts/token_curve_ratio10_unrelated.png) | ![keyword per-token losses](../results/charts/token_curve_ratio10_keyword.png) |
+| ![unrelated per-token losses](../results/charts/token_curve/token_curve_ratio10_unrelated.png) | ![keyword per-token losses](../results/charts/token_curve/token_curve_ratio10_keyword.png) |
 
 </center>
 

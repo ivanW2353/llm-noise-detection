@@ -329,9 +329,9 @@ $$\text{update\\_contrib} = \frac{\\|\delta_B\\|_2}{\big\\|\sqrt{\mathbf{v}_B}\b
 
 | garbled | duplicate |
 |---|---|
-| ![garbled 逐 token 损失](../results/charts/token_curve_ratio10_garbled.png) | ![duplicate 逐 token 损失](../results/charts/token_curve_ratio10_duplicate.png) |
+| ![garbled 逐 token 损失](../results/charts/token_curve/token_curve_ratio10_garbled.png) | ![duplicate 逐 token 损失](../results/charts/token_curve/token_curve_ratio10_duplicate.png) |
 | unrelated | keyword |
-| ![unrelated 逐 token 损失](../results/charts/token_curve_ratio10_unrelated.png) | ![keyword 逐 token 损失](../results/charts/token_curve_ratio10_keyword.png) |
+| ![unrelated 逐 token 损失](../results/charts/token_curve/token_curve_ratio10_unrelated.png) | ![keyword 逐 token 损失](../results/charts/token_curve/token_curve_ratio10_keyword.png) |
 
 </center>
 
