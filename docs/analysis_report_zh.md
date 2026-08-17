@@ -41,26 +41,80 @@
 | 序列长度 | 1024 (截断时优先保留 assistant 回复) | 避免 0 标签 token 的 NaN 损失 |
 | 时长 | 每 run 3.3~3.9 小时 | clean 3.69h / mixed 3.91h / duplicate 3.58h |
 
-### 1.4 记录的指标 (三个层级)
+### 1.4 记录的指标 (三个层级, 19+ 维特征)
 
-**样本级 (每样本 × 每 epoch, ~73K 行/run, `per_sample.jsonl`):**
+**样本级指标** — 每样本 × 每 epoch 实时捕获 (微批=1 差分法: 反向前快照累积梯度 $\mathbf{b}$, 反向后快照 $\mathbf{a}$, 做差 $\delta = \mathbf{a} - \mathbf{b}$ 即该样本的精确梯度; 开销仅 +5-8% 训练时间), 共 6 项:
 
-| 指标 | 定义 | 检测直觉 |
-|---|---|---|
-| `loss` | 标签 token 的平均 CE 损失 | 噪音样本学不动 → 高 |
-| `grad_norm` | 该样本 LoRA 梯度的 L2 范数 | 异常梯度幅值 |
-| `cos_sim_ref` | 样本梯度与**干净参考方向**的余弦相似度 (训练前在 200 条保留干净样本上计算) | 与"干净训练方向"对齐度; 噪音样本偏离 |
-| `cos_sim_global` | 样本梯度与当前累积窗口梯度方向的余弦 | 批次内梯度冲突度 |
-| `update_contrib` | 样本梯度相对 Adam 二阶矩 RMS 的比值 (仅 B 矩阵) | 对参数更新的相对推动力 |
-| `tokens` | 标签 token 数 | 序列长度控制变量 |
+**① loss** — 标签 token 上的平均交叉熵:
 
-**诊断级 (每 epoch 末, 每 8 个样本取 1, ~1827 条/run, `diag_epoch*.jsonl`):**
-`max_token_loss`、`frac_hard` (loss>4 的 token 占比)、`user_loss` (prompt 部分平均损失)、`entropy` (标签 token 的 next-token 熵均值)、`token_loss_skew/kurt` (逐 token 损失分布形状)、top-32 最难 token 明细 (位置/token id/损失, `token_diag_epoch*.jsonl`)
+$$\text{loss} = -\frac{1}{|L|}\sum_{t \in L} \log p_\theta(\text{next\_id}[t] \mid x_{<t})$$
 
-**派生特征 (分析期, 19 维):**
-`loss_mean/last/std/slope`、`converge_epoch` (loss 首次 <2.0 的 epoch)、`loss_rank` (epoch 内分位数)、`loss_curvature` (轨迹二次拟合曲率)、`grad_norm_mean/cv`、`cos_ref_mean/trend`、`update_contrib_mean`、`text_nn_sim` (TF-IDF 1-2 gram + 最近邻余弦)
+- **意义**: 该样本在当前位置的拟合难度, 训练监控最直接的量;
+- **检测直觉**: "学不动"的噪音 (乱码) 损失持续偏高; 但存在**反向陷阱** — 可被快速记忆的噪音 (duplicate 副本) 损失反而低于正常样本 (检测 AUC 0.37, 方向反转);
+- **实测**: garbled 全程最高 (epoch 4 仍 0.70 vs clean 0.51); duplicate 收敛最低 (0.43)。
 
-**token 级 (离线, 每个数据集 60 噪音 + 60 正常样本):** 对每样本 top-24 最难标签 token 逐一 `autograd.grad` 反向, 得到逐 token 的**精确** LoRA 梯度范数与余弦相似度。
+**② grad_norm** — 样本 LoRA 梯度的 L2 范数: $\text{grad\_norm} = \|\delta\|_2$
+
+- **意义**: 该样本对模型参数更新的"推力"大小;
+- **检测直觉**: 与参考方向一致的大梯度 = 有价值难样本; 幅值异常 = 噪音嫌疑;
+- **实测**: unrelated 偏高 (0.764), duplicate 偏低 (0.343, 反转), garbled 0.829。
+
+**③ cos_sim_ref** — 与**干净参考方向**的余弦相似度 (LESS 式影响力):
+
+$$\text{cos\_sim\_ref} = \frac{\langle \delta,\, \mathbf{g}^{\ast} \rangle}{\|\delta\|_2 \, \|\mathbf{g}^{\ast}\|_2}$$
+
+其中 $\mathbf{g}^{\ast}$ 为训练前在 200 条保留干净样本上计算的平均 LoRA 梯度 (单位向量)。
+
+- **意义**: 该样本梯度方向与"干净训练方向"的夹角 — 接近 1 表示推动模型沿干净方向学习; 接近 0 或负值表示与干净方向冲突;
+- **实现细节**: 训练前一次性计算, 训练全程复用; 是 LESS (Xia et al. 2024) 影响力估计的高效近似;
+- **实测**: 单指标 AUC 中等 (0.58-0.62), 但作为组合特征的重要成员 (LR 特征重要性前列)。
+
+**④ cos_sim_global** — 与当前累积窗口 (16 样本) 梯度方向的余弦:
+
+$$\text{cos\_sim\_global} = \frac{\langle \delta,\, \mathbf{g}_{\text{acc}} \rangle}{\|\delta\|_2 \, \|\mathbf{g}_{\text{acc}}\|_2}$$
+
+- **意义**: 批次内梯度一致性; 负值 = 该样本与周围 15 个样本的主流更新方向冲突;
+- **实测**: duplicate 上相对有效 (0.610) — 副本的梯度与窗口内其他样本系统性冲突。
+
+**⑤ update_contrib** — Adam 归一化更新贡献 (仅 B 矩阵):
+
+$$\text{update\_contrib} = \frac{\|\delta_B\|_2}{\big\|\sqrt{\mathbf{v}_B}\big\|_2 + 10^{-8}}$$
+
+- **动机**: 原始梯度范数未考虑 Adam 的历史尺度; 除以二阶矩平方根后, 反映该样本相对"近期梯度 RMS"的推动力;
+- **实现细节**: 只统计 B 矩阵 — LoRA B 零初始化导致 A 的早期梯度恒为 0, 逐元素归一化会爆炸 (实测 2.3e8), 必须只取 B;
+- **实测**: garbled 0.836 / unrelated 0.724 / keyword 0.636 / duplicate 0.330 (反转)。
+
+**⑥ tokens** — 标签 token 数: 序列长度控制变量, 用于分层分析 (长序列样本的 loss 更稳定)。
+
+**诊断级指标** — 每 epoch 末对 1/8 抽样做前向-only 诊断 (成本 ~30s/epoch, `diag_epoch*.jsonl`), 全部基于全序列 next-token CE ($\text{ce}[t]$, 目标必须用真实 token id — 用 $-100$ 会被 cross\_entropy 置 0, 这是 user_loss 曾经恒为 0 的 bug 根因):
+
+**⑦ max_token_loss** — $\max_{t \in L} \text{ce}[t]$: 单样本内最大 token 损失, 捕捉"局部极端" — 乱码样本的个别 token 损失极高;
+
+**⑧ frac_hard** — loss > 4.0 的 token 占比: 全局困难度; garbled 最高且随训练几乎不降 (epoch 4: 4.84% vs clean 4.36%), duplicate 最低 (3.82%, 已全部记忆);
+
+**⑨ user_loss** — prompt 部分的平均损失 $\frac{1}{|U|}\sum_{t \in U} \text{ce}[t]$: **输入侧信号** — 乱码同时污染输入 → 飙升 (AUC 0.979); keyword/unrelated 只改输出 → 该值正常 (AUC ~0.5, 负信息);
+
+**⑩ entropy** — 标签 token 的 next-token 熵均值: 模型对输出的确定性; 乱码处熵极高 (AUC 0.971); 记忆样本熵低 (duplicate 0.406);
+
+**⑪ token_loss_skew/kurt** — 逐 token 损失分布的偏度/峰度: 反直觉的是乱码使*几乎所有* token 都难 → 分布接近均匀 → 偏度接近 0 (AUC 0.064) — "没有信号的信号";
+
+**⑫ top-32 硬 token 明细** — 位置/token id/损失 (`token_diag_epoch*.jsonl`): 供离线 token 级定位与归因。
+
+**派生特征** — 训练后从 per-epoch 序列派生 (零成本):
+
+**⑬ loss_mean / loss_last / loss_std / loss_slope** — 损失水平 / 末值 / 跨 epoch 波动 / 首末差值: $\text{loss\_std}$ 是 unrelated 的主力特征 (0.827), 正常难样本平滑下降而错配样本剧烈波动;
+
+**⑭ converge_epoch** — $\min\{e : l_e < 2.0\}$ (无则取 E): 收敛速度 — garbled 61% 永不收敛 vs duplicate 平均 0.32 epoch 即收敛, 完美镜像;
+
+**⑮ loss_rank** — 每 epoch 内 loss 分位数的均值: 消除整体水平漂移, 跨 run/跨 epoch 可比;
+
+**⑯ loss_curvature** — 损失轨迹的二次拟合系数 ($[l_e] \approx c_2 e^2 + c_1 e + c_0$, 取 $c_2$): **全实验最强的单特征** — garbled 0.985 / unrelated 0.830 / keyword 0.669, 综合捕获"学不动"与"波动学"两类异常轨迹;
+
+**⑰ grad_norm_cv / cos_ref_trend** — 梯度波动率 ($\sigma/\mu$) / 参考对齐趋势 (末-首): 补充梯度与方向的时间演化信息;
+
+**⑱ text_nn_sim** — TF-IDF (1-2 gram) 最近邻余弦相似度: **数据侧特征, 与训练完全无关** — duplicate 的唯一有效手段 (0.939), 副本间相似度 ≈1.0 而正常样本 ≈0.2-0.5。
+
+**token 级 (离线, 每数据集 60 噪音 + 60 正常样本)**: 对每样本 top-24 最难标签 token 逐一 `autograd.grad` 反向, 得到逐 token 的**精确** LoRA 梯度范数与余弦相似度 (代价: 每 hard token 一次反向, 仅离线小样本计算)。
 
 ---
 

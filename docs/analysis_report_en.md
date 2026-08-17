@@ -41,26 +41,84 @@ Two core questions:
 | Sequence length | 1024 (truncation keeps the assistant response) | avoids NaN loss from zero label tokens |
 | Duration | 3.3~3.9 h per run | clean 3.69 h / mixed 3.91 h / duplicate 3.58 h |
 
-### 1.4 Recorded metrics (three levels)
+### 1.4 Recorded metrics (three levels, 19+ features)
 
-**Sample level (every sample × every epoch, ~73K rows per run, `per_sample.jsonl`):**
+**Sample-level metrics** — captured per sample per epoch during training
+(micro-batch=1 difference method: snapshot the accumulated gradients before
+backward as $\mathbf{b}$, after backward as $\mathbf{a}$; the difference
+$\delta = \mathbf{a} - \mathbf{b}$ is the sample's exact gradient; total
+overhead only +5-8% of training time), 6 features:
 
-| Metric | Definition | Detection intuition |
-|---|---|---|
-| `loss` | mean CE loss over label tokens | noisy samples resist learning → high |
-| `grad_norm` | L2 norm of the sample's LoRA gradient | anomalous gradient magnitude |
-| `cos_sim_ref` | cosine similarity with the **clean reference direction** (computed pre-training on 200 held-out clean samples) | alignment with the "clean training direction"; noisy samples deviate |
-| `cos_sim_global` | cosine with the accumulation-window gradient direction | within-batch gradient conflict |
-| `update_contrib` | sample gradient relative to Adam second-moment RMS (B matrices only) | relative push on parameter updates |
-| `tokens` | number of label tokens | sequence-length control |
+**① loss** — mean cross-entropy over label tokens:
 
-**Diagnostic level (end of each epoch, every 8th sample, ~1,827 rows per run, `diag_epoch*.jsonl`):**
-`max_token_loss`, `frac_hard` (fraction of tokens with loss > 4), `user_loss` (mean prompt loss), `entropy` (mean next-token entropy over label tokens), `token_loss_skew/kurt`, plus the top-32 hardest-token details (`token_diag_epoch*.jsonl`)
+$$\text{loss} = -\frac{1}{|L|}\sum_{t \in L} \log p_\theta(\text{next\_id}[t] \mid x_{<t})$$
 
-**Derived features (analysis time, 19 dims):**
-`loss_mean/last/std/slope`, `converge_epoch` (first epoch with loss < 2.0), `loss_rank` (within-epoch quantile), `loss_curvature` (quadratic fit of the trajectory), `grad_norm_mean/cv`, `cos_ref_mean/trend`, `update_contrib_mean`, `text_nn_sim` (TF-IDF 1-2 grams + nearest-neighbor cosine)
+- **Meaning**: how hard this sample is to fit right now; the most direct quantity in training monitoring;
+- **Detection intuition**: "unlearnable" noise (garbled) stays high forever; but there is an **inverted trap** — noise that is quickly memorized (duplicate copies) shows *lower* loss than normal samples (detection AUC 0.37, direction reversed);
+- **Observed**: garbled highest throughout (0.70 at epoch 4 vs clean 0.51); duplicate lowest (0.43).
 
-**Token level (offline; 60 noise + 60 normal samples per dataset):** for each sample, the top-24 hardest label tokens are individually back-propagated (`autograd.grad`) to obtain exact per-token LoRA gradient norms and cosine similarities.
+**② grad_norm** — L2 norm of the sample's LoRA gradient: $\text{grad\_norm} = \|\delta\|_2$
+
+- **Meaning**: how hard this sample "pushes" the parameters;
+- **Detection intuition**: large gradients aligned with the reference direction = valuable hard samples; anomalous magnitudes = noise suspects;
+- **Observed**: unrelated elevated (0.764), duplicate depressed (0.343, inverted), garbled 0.829.
+
+**③ cos_sim_ref** — cosine similarity with the **clean reference direction** (LESS-style influence):
+
+$$\text{cos\_sim\_ref} = \frac{\langle \delta,\, \mathbf{g}^{\ast} \rangle}{\|\delta\|_2 \, \|\mathbf{g}^{\ast}\|_2}$$
+
+where $\mathbf{g}^{\ast}$ is the mean LoRA gradient over 200 held-out clean samples computed pre-training (unit vector).
+
+- **Meaning**: the angle between this sample's gradient and the "clean training direction" — near 1 means it pushes the model along the clean direction; near 0 or negative means it conflicts;
+- **Implementation**: computed once before training, reused throughout; it is an efficient approximation of LESS influence (Xia et al. 2024);
+- **Observed**: moderate univariate AUC (0.58-0.62) but an important member of the combined feature set (top LR feature weights).
+
+**④ cos_sim_global** — cosine with the current accumulation-window (16-sample) gradient:
+
+$$\text{cos\_sim\_global} = \frac{\langle \delta,\, \mathbf{g}_{\text{acc}} \rangle}{\|\delta\|_2 \, \|\mathbf{g}_{\text{acc}}\|_2}$$
+
+- **Meaning**: within-batch gradient consistency; negative = this sample conflicts with the dominant update direction of the surrounding 15 samples;
+- **Observed**: relatively effective for duplicate (0.610) — copies systematically conflict with the window's other samples.
+
+**⑤ update_contrib** — Adam-normalized update contribution (B matrices only):
+
+$$\text{update\_contrib} = \frac{\|\delta_B\|_2}{\big\|\sqrt{\mathbf{v}_B}\big\|_2 + 10^{-8}}$$
+
+- **Motivation**: raw gradient norms ignore Adam's historical scale; dividing by the second-moment RMS reflects how large this sample's push is *relative to recent gradient magnitudes*;
+- **Implementation detail**: B matrices only — LoRA B is zero-initialized, so A's gradients vanish early and element-wise normalization explodes (measured 2.3e8); B-only is mandatory;
+- **Observed**: garbled 0.836 / unrelated 0.724 / keyword 0.636 / duplicate 0.330 (inverted).
+
+**⑥ tokens** — number of label tokens: a sequence-length control variable for stratified analysis (longer samples have more stable losses).
+
+**Diagnostic-level metrics** — forward-only pass on a 1/8 subsample at each epoch end (~30 s/epoch, `diag_epoch*.jsonl`), all based on the full-sequence next-token CE ($\text{ce}[t]$; targets must be REAL token ids — using $-100$ makes cross\_entropy return 0, which was the root cause of the user_loss-always-zero bug):
+
+**⑦ max_token_loss** — $\max_{t \in L} \text{ce}[t]$: the largest per-token loss in a sample; captures "local extremes" — corrupted samples have individual tokens with extreme losses;
+
+**⑧ frac_hard** — fraction of tokens with loss > 4.0: global hardness; highest for garbled and barely decays with training (epoch 4: 4.84% vs clean 4.36%); lowest for duplicate (3.82%, fully memorized);
+
+**⑨ user_loss** — mean prompt loss $\frac{1}{|U|}\sum_{t \in U} \text{ce}[t]$: an **input-side signal** — garbled corrupts the input too → spikes (AUC 0.979); keyword/unrelated only alter the output → this stays normal (AUC ~0.5, negative information);
+
+**⑩ entropy** — mean next-token entropy over label tokens: model certainty about its output; extremely high on corrupted tokens (AUC 0.971); low on memorized ones (duplicate 0.406);
+
+**⑪ token_loss_skew/kurt** — skewness/kurtosis of the per-token loss distribution: counter-intuitively, garbled makes *almost all* tokens hard → the distribution becomes flat → skew near 0 (AUC 0.064) — "a signal of having no signal";
+
+**⑫ top-32 hard-token details** — position / token id / loss (`token_diag_epoch*.jsonl`): for offline token-level localization and attribution.
+
+**Derived features** — computed post-training from the per-epoch sequences (zero cost):
+
+**⑬ loss_mean / loss_last / loss_std / loss_slope** — level / final / cross-epoch volatility / first-to-last change: $\text{loss\_std}$ is the main feature for unrelated (0.827) — genuinely hard samples descend smoothly while mismatched samples oscillate;
+
+**⑭ converge_epoch** — $\min\{e : l_e < 2.0\}$ (else E): convergence speed — 61% of garbled samples never converge vs duplicate copies converging in 0.32 epochs on average, a perfect mirror;
+
+**⑮ loss_rank** — mean within-epoch loss percentile: removes global level drift, comparable across runs and epochs;
+
+**⑯ loss_curvature** — quadratic-fit coefficient of the loss trajectory ($[l_e] \approx c_2 e^2 + c_1 e + c_0$, take $c_2$): **the single strongest feature across the whole experiment** — garbled 0.985 / unrelated 0.830 / keyword 0.669, jointly capturing "cannot learn" and "volatile learning" anomalies;
+
+**⑰ grad_norm_cv / cos_ref_trend** — gradient volatility ($\sigma/\mu$) / reference-alignment trend (last minus first): temporal evolution of gradient and direction information;
+
+**⑱ text_nn_sim** — TF-IDF (1-2 grams) nearest-neighbor cosine similarity: a **data-side feature completely independent of training** — the only effective tool for duplicate (0.939): copies have similarity ≈1.0 while normal samples ≈0.2-0.5.
+
+**Token level (offline; 60 noise + 60 normal samples per dataset)**: for each sample, the top-24 hardest label tokens are individually back-propagated (`autograd.grad`) to obtain exact per-token LoRA gradient norms and cosine similarities (cost: one backward per hard token — offline on small samples only).
 
 ---
 
