@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -100,7 +101,14 @@ def main():
     os.makedirs(res_dir, exist_ok=True)
     os.makedirs(chart_dir, exist_ok=True)
     tokenizer = AutoTokenizer.from_pretrained(cfg["paths"]["model"])
-    datasets = ["garbled", "duplicate", "unrelated", "keyword"] if not args.dataset else [args.dataset]
+    if args.dataset:
+        datasets = [args.dataset]
+    else:
+        # auto-detect trained noise datasets (exclude clean): one experiment, one analysis
+        run_base = os.path.join(cfg["paths"]["data_root"], "runs", tag)
+        trained = sorted(os.path.basename(os.path.dirname(d))
+                         for d in glob.glob(os.path.join(run_base, "*", "summary.json")))
+        datasets = [d for d in trained if d != "clean"] or ["garbled", "duplicate", "unrelated", "keyword"]
 
     # clean held-out rows (shared reference direction source)
     clean_path = os.path.join(cfg["paths"]["data_root"], "data", tag, "clean", "train.jsonl")

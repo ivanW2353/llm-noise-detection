@@ -285,10 +285,17 @@ def main():
     cfg = yaml.safe_load(open(args.config))
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
+    tag = _tag(cfg)
     if args.datasets:
         globals()["DATASETS"] = [d.strip() for d in args.datasets.split(",")]
+    else:
+        # auto-detect trained datasets: one experiment, one analysis
+        run_base = os.path.join(cfg["paths"]["data_root"], "runs", tag)
+        trained = sorted(os.path.basename(os.path.dirname(d))
+                         for d in glob.glob(os.path.join(run_base, "*", "summary.json")))
+        if trained:
+            globals()["DATASETS"] = trained
     repo = cfg["paths"]["repo_root"]
-    tag = _tag(cfg)
     res_dir = os.path.join(repo, "results")
     chart_dir = os.path.join(repo, "results", "charts")
     eval_dir = os.path.join(repo, "results", "eval")

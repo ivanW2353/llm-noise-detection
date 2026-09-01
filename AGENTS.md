@@ -32,7 +32,8 @@ bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean  # full pipeline
   `tmux new-window -t noisedetect -n <job> 'cmd 2>&1 | tee <log>'`.
   Don't create separate tmux sessions for background jobs.
 - **Never edit `run_experiment.sh` / `run_all*.sh` while a tmux pipeline is executing it** — bash reads the script lazily; overwriting the file mid-run feeds torn lines to the running shell (caused a silent pipeline death: `ntinue: command not found` after training finished, eval never started). Edit scripts only between runs.
-- `run_experiment.sh` chaining: build → train → eval → analysis → prints `ALL DONE` (watch for it in the log; then run `compare_ratios.py` + git push manually).
+- `run_experiment.sh` = **one experiment, one command**: build → train → eval → detection → token-level → IFD → prints `ALL DONE` (watch for it in the log; then run `compare_ratios.py` + git push manually). Every stage auto-skips completed work (train summaries, 7-task eval completeness, analysis outputs per trained dataset), so re-running the same command resumes an interrupted experiment — start it in a tmux window and it completes in one go, across any number of GPU-availability windows.
+- Analysis scripts auto-detect the trained datasets from `runs/{tag}/*/summary.json` (exclude clean for token-level) — no `--datasets` needed; `compute_ifd.py` now takes `--tag` (no more config-override hack).
 
 ## Reuse principles (avoid redundant work)
 

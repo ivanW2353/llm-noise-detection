@@ -127,13 +127,14 @@ exact gradient attribution (`analyze_token_level.py`).
 ## Changing the noise ratio
 
 Every experiment is isolated under an `experiment_tag` (default `ratio10`), so
-different ratios never overwrite each other:
+different ratios never overwrite each other. **One experiment completes in one
+command** — every stage auto-skips what's already done, so re-running resumes:
 
 ```bash
-bash run_experiment.sh --ratio 0.20            # build + train + eval + analyze
-bash run_experiment.sh --ratio 0.20 --train-only
-bash run_experiment.sh --ratio 0.20 --eval-only
-bash run_experiment.sh --ratio 0.20 --analyze-only
+bash run_experiment.sh --ratio 0.20            # build + train + eval + detection + token-level + IFD
+bash run_experiment.sh --ratio 0.20 --reuse-clean   # reuse the clean run/eval from ratio10
+bash run_experiment.sh --ratio 0.20 --with-extra    # + template/truncation/near_duplicate (7-way mixed)
+bash run_experiment.sh --tag ratio20 --train-only | --eval-only | --analyze-only
 ```
 
 Layout per experiment tag (e.g. `ratio20`):
@@ -141,7 +142,7 @@ Layout per experiment tag (e.g. `ratio20`):
 - `<data_root>/runs/ratio20/<dataset>/`
 - `<repo>/results/eval_ratio20_<dataset>.json` and `*_ratio20.*` analysis outputs
 
-Or step by step:
+Or step by step (analysis scripts auto-detect the trained datasets):
 
 ```bash
 python scripts/make_noise.py --ratio 0.20 --tag ratio20
@@ -149,6 +150,7 @@ python scripts/train.py --dataset clean --tag ratio20
 python scripts/evaluate.py --dataset clean --tag ratio20
 python scripts/analyze_detection.py --tag ratio20
 python scripts/analyze_token_level.py --tag ratio20
+python scripts/compute_ifd.py --tag ratio20
 ```
 
 ## Reproduce
