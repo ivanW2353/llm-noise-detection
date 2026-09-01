@@ -397,4 +397,76 @@ python scripts/compare_ratios.py --tags ratio10,ratio05
 
 ---
 
+## 7. 扩展噪音类型 (extra10): 一致模式 / 信息缺失 / 近似重复
+
+### 7.1 构造
+
+在核心四类之外新增三类, 补齐"检测难度光谱"的空象限 (10%, 每类 731 条):
+
+| 数据集 | 构造 | 假设的检测难点 |
+|---|---|---|
+| `template` | response 替换为**同一固定错误答案模板** (模式高度一致) | 与 keyword 相反 — 不是随机而是**一致**替换 |
+| `truncation` | response 截断 40% (信息缺失) | 内容合法但信息不足 |
+| `near_duplicate` | 轻改写副本 (同义词替换) | 与 duplicate 类似但非逐字节 |
+
+另有 7-way `mixed` (7 类各占 1/7, 共 10%)。训练/评估/指标协议与核心实验完全一致。
+
+### 7.2 检测力 (7-way mixed 标签)
+
+| 分类器 | AUC | acc |
+|---|---|---|
+| LR | 0.836 | 0.935 |
+| RF | **0.887** | 0.953 |
+
+- **7-way 检测 (0.887) 反而优于 ratio10 的 4-way (0.850)** — 新增三类 (尤其 template 与 near_duplicate) 比 keyword/unrelated 更可检, 拉高了整体 AUC;
+- 最优单指标: `text_nn_sim` 0.730 (捕获 near_duplicate 的改写相似性), `loss_std` 0.699, `loss_curvature` 0.695 — 数据侧与训练侧特征协同;
+- 类别分层: creative_writing 1.000 / information_extraction 0.960 / general_qa 0.930 / open_qa 0.918 / closed_qa 0.898 / summarization 0.870 / **classification 0.781** / **brainstorming 0.772** (最低)。
+
+### 7.3 对模型能力的影响
+
+| 模型 | MMLU | GSM8K | HellaSwag | ARC | BBH | TruthfulQA | Winogrande |
+|---|---|---|---|---|---|---|---|
+| clean | 0.6295 | 0.5413 | 0.2715 | 0.7995 | 0.0741 | 0.1922 | 0.5383 |
+| template | 0.6314 | **0.4162** | 0.2719 | 0.7901 | **0.0556** | 0.1995 | 0.5359 |
+| truncation | 0.6340 | 0.5118 | 0.2742 | 0.8029 | **0.0963** | 0.1885 | 0.5130 |
+| near_duplicate | 0.6317 | 0.5125 | 0.2722 | 0.8012 | 0.0796 | 0.1885 | 0.5383 |
+| mixed (7-way) | 0.6332 | 0.5254 | 0.2692 | 0.7969 | 0.0815 | 0.1885 | 0.5217 |
+
+**解读:**
+1. **template 是三种新噪音中伤害最大的**: GSM8K **-0.125 (-23%)**、BBH -0.019 — 一致错误模板被模型当作"规律"学习, 尤其损害需要推理的任务。这是"一致模式"类噪音特有的**系统性错误学习**机制 — 与随机替换的 keyword (整体无害) 形成鲜明对照: **随机错误被吸收, 系统性错误被学习**;
+2. **truncation (信息缺失)**: 总体轻微 (GSM8K -0.03), BBH 反而最高 (0.0963 vs clean 0.0741) — 截断样本诱导更简洁的回答;
+3. **near_duplicate (近似重复)**: 与 clean 几乎一致 — 轻改写不产生可测伤害, 但仍可被 `text_nn_sim` 检出;
+4. 与核心四类一致: 所有噪音的伤害远小于 dolly SFT 自身的影响。
+
+### 7.4 IFD 指纹 (Instruction Following Difficulty)
+
+IFD = L(A\|Q) / L(A) — 条件回答损失 / 无条件回答损失, 越小越易跟随 (在训练完成的模型上, 1/8 子样本):
+
+| 噪音类型 | 干净样本 | 噪音样本 | 相对干净样本 |
+|---|---|---|---|
+| template | 0.203 | **0.005** | 43× 更易 |
+| truncation | 0.217 | 0.149 | 1.5× 更易 |
+| near_duplicate | 0.202 | 0.260 | 0.8× 更难 |
+| garbled | 0.200 | **0.534** | 2.7× 更难 |
+| unrelated | 0.200 | 0.303 | 1.5× 更难 |
+| keyword | 0.200 | 0.280 | 1.4× 更难 |
+| duplicate | 0.200 | 0.130 | 1.5× 更易 |
+
+**解读:** IFD 是**跨类型区分度最强的单一特征**: template 噪音 IFD ≈ 0.005 (固定模板 → 模型已完全学会, 43 倍差异), garbled IFD 0.534 (输入损坏 → 最难跟随)。IFD 可作为 template/truncation 类"结构噪音"的专用检测特征, 与 loss/梯度特征互补 (这些类型在 loss 侧信号弱)。
+
+### 7.5 检测难度光谱更新 (含三类新噪音)
+
+```
+可检测 ◄────────────────────────────────────────────────────────────────────► 不可检测
+garbled      template       duplicate  near_duplicate  unrelated  truncation  keyword
+token级      一致模式      数据侧     text_nn_sim   语义错配    信息缺失    精致篡改
+最易检       易检           线性损伤   可检           非单调     轻微       盲区
+             (IFD≈0,        (易检)    (轻危害)       (5%更伤)    (易检)     (两比例均盲区)
+              GSM8K伤害最重)
+```
+
+**新洞察**: 检测难度与危害性的非单调关系进一步确认 — 最易检的 garbled/template 要么无害要么伤害可解释 (template 的系统性学习), 而难检的 keyword 依旧无害; 真正的"检测价值区"仍是 semantic 级错配 (unrelated)。
+
+---
+
 *本报告由实验流水线自动生成的产物汇总而成; 全部原始数据见 `results/` (评测明细、逐题记录、检测表格与图表) 与 `<data_root>/runs/ratio10|ratio05/` (逐样本指标、逐 token 诊断、层范数、TensorBoard 事件)。*

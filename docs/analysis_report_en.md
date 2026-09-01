@@ -407,5 +407,78 @@ python scripts/compare_ratios.py --tags ratio10,ratio05
 
 ---
 
+## 7. Extended Noise Types (extra10): Consistent Pattern / Information Loss / Near-Duplicate
+
+### 7.1 Construction
+
+Three types added on top of the core four, filling the empty quadrants of the detection-difficulty spectrum (10%, 731 samples each):
+
+| Dataset | Construction | Hypothesized detection difficulty |
+|---|---|---|
+| `template` | response replaced by the **same fixed wrong-answer template** (highly consistent pattern) | opposite of keyword — *consistent* rather than random replacement |
+| `truncation` | response truncated by 40% (information loss) | content looks legal but is incomplete |
+| `near_duplicate` | lightly paraphrased copies (synonym swaps) | like duplicate but not byte-identical |
+
+Plus a 7-way `mixed` (equal 1/7 shares, 10% total). Training/eval/metrics protocol identical to the core experiments.
+
+### 7.2 Detectability (7-way mixed labels)
+
+| Classifier | AUC | acc |
+|---|---|---|
+| LR | 0.836 | 0.935 |
+| RF | **0.887** | 0.953 |
+
+- **7-way detection (0.887) is *better* than ratio10's 4-way (0.850)** — the new types (especially template and near_duplicate) are more detectable than keyword/unrelated, lifting the overall AUC;
+- Best univariate: `text_nn_sim` 0.730 (catches near_duplicate paraphrase similarity), `loss_std` 0.699, `loss_curvature` 0.695 — data-side and training-side features complement each other;
+- Per-category: creative_writing 1.000 / information_extraction 0.960 / general_qa 0.930 / open_qa 0.918 / closed_qa 0.898 / summarization 0.870 / **classification 0.781** / **brainstorming 0.772** (lowest).
+
+### 7.3 Impact on final capability
+
+| Model | MMLU | GSM8K | HellaSwag | ARC | BBH | TruthfulQA | Winogrande |
+|---|---|---|---|---|---|---|---|
+| clean | 0.6295 | 0.5413 | 0.2715 | 0.7995 | 0.0741 | 0.1922 | 0.5383 |
+| template | 0.6314 | **0.4162** | 0.2719 | 0.7901 | **0.0556** | 0.1995 | 0.5359 |
+| truncation | 0.6340 | 0.5118 | 0.2742 | 0.8029 | **0.0963** | 0.1885 | 0.5130 |
+| near_duplicate | 0.6317 | 0.5125 | 0.2722 | 0.8012 | 0.0796 | 0.1885 | 0.5383 |
+| mixed (7-way) | 0.6332 | 0.5254 | 0.2692 | 0.7969 | 0.0815 | 0.1885 | 0.5217 |
+
+**Findings:**
+1. **template is the most harmful of the three new types**: GSM8K **−0.125 (−23%)**, BBH −0.019 — the consistent wrong-answer template is learned as a "rule", hitting reasoning-heavy tasks hardest. This is the *systematic error learning* signature of consistent-pattern noise — in sharp contrast to random keyword swaps (harmless): **random errors get absorbed, systematic errors get learned**;
+2. **truncation (information loss)**: mild overall (GSM8K −0.03), and best BBH (0.0963 vs clean 0.0741) — truncated samples induce more concise answers;
+3. **near_duplicate**: indistinguishable from clean on capability, yet still detectable via `text_nn_sim`;
+4. As with the core four: all noise damage is far smaller than dolly SFT's own impact.
+
+### 7.4 IFD fingerprints (Instruction Following Difficulty)
+
+IFD = L(A\|Q) / L(A) — conditional-over-unconditional answer loss; smaller = easier to follow (on the final model, 1/8 subsample):
+
+| Noise type | Clean samples | Noisy samples | vs clean |
+|---|---|---|---|
+| template | 0.203 | **0.005** | 43× easier |
+| truncation | 0.217 | 0.149 | 1.5× easier |
+| near_duplicate | 0.202 | 0.260 | 0.8× harder |
+| garbled | 0.200 | **0.534** | 2.7× harder |
+| unrelated | 0.200 | 0.303 | 1.5× harder |
+| keyword | 0.200 | 0.280 | 1.4× harder |
+| duplicate | 0.200 | 0.130 | 1.5× easier |
+
+**Reading:** IFD is the **single most discriminative cross-type feature** — template noise has IFD ≈ 0.005 (fixed template fully learned, 43× gap), garbled 0.534 (corrupted input, hardest to follow). IFD complements loss/gradient features for structural noise (template/truncation), where loss-side signals are weak.
+
+### 7.5 Detection-difficulty spectrum update (with the three new types)
+
+```
+detectable ◄──────────────────────────────────────────────────────────────────► undetectable
+garbled      template       duplicate  near_duplicate  unrelated  truncation  keyword
+token-level  consistent     data-side  text_nn_sim    semantic    info loss   sophisticated
+             pattern                  (paraphrase)    mismatch    (detectable) tampering
+easiest      easy           linear     detectable     non-        mild        blind at
+             (IFD≈0,        overfit                   monotonic               both ratios
+              GSM8K damage)                           (worse at 5%)
+```
+
+**New insight:** the non-monotonic relation between detectability and harm is confirmed — the easiest types (garbled, template) are harmless or have explainable damage (template's systematic learning), while undetectable keyword stays harmless; the real detection-value zone remains semantic mismatch (unrelated).
+
+---
+
 *This report is compiled from pipeline artifacts; all raw data lives in `results/` and
 `<data_root>/runs/ratio10|ratio05/` (per-sample metrics, per-token diagnostics, layer norms, TensorBoard events).*
