@@ -40,7 +40,15 @@ METRIC_ORDER = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_ep
                 "loss_rank", "loss_curvature", "grad_norm_mean", "grad_norm_cv",
                 "cos_ref_mean", "cos_ref_trend", "cos_global_mean", "update_contrib_mean",
                 "max_token_loss", "frac_hard", "user_loss", "entropy",
-                "token_loss_skew", "text_nn_sim"]
+                "token_loss_skew", "text_nn_sim",
+                # full-feature exploration additions (see analyze_all_features.py / §3.6)
+                "mean_loss", "mean_loss_std", "mean_loss_curv",
+                "frac_hard_std", "frac_hard_curv", "entropy_std", "entropy_curv",
+                "max_token_loss_std", "max_token_loss_curv",
+                "user_loss_std", "token_loss_skew_std", "token_loss_kurt",
+                "token_loss_kurt_std", "token_loss_kurt_curv",
+                "n_hard", "hard_loss_mean", "hard_loss_max",
+                "hard_pos_peak", "hard_pos_std_mean", "hard_id_uniq", "hard_pos_jaccard"]
 
 
 def _tag(cfg):
@@ -106,8 +114,14 @@ def load_run_metrics(cfg, dataset):
         cols = [c for c in ["max_token_loss", "frac_hard", "mean_loss", "user_loss",
                             "entropy", "token_loss_skew", "token_loss_kurt"]
                 if c in diag.columns]
-        diag = diag.groupby("sample_id")[cols].mean()
-        out = out.join(diag)
+        diag_mean = diag.groupby("sample_id")[cols].mean()
+        out = out.join(diag_mean)
+        for c in cols:
+            s = diag[c]
+            std = s.groupby(level=0).std() if isinstance(s.index, pd.MultiIndex) else diag.groupby("sample_id")[c].std()
+            out[f"{c}_std"] = std
+            out[f"{c}_curv"] = diag.groupby("sample_id")[c].apply(
+                lambda v: np.polyfit(np.arange(len(v)), v, 2)[0] if len(v) >= 3 else np.nan)
     # user_loss was recorded as 0.0 by an early CE bug; use the post-hoc
     # recomputed values (final model) when available
     dfinal = os.path.join(mdir, "diag_final.jsonl")
@@ -116,7 +130,56 @@ def load_run_metrics(cfg, dataset):
         if "user_loss" in d2.columns:
             ul = d2.set_index("sample_id")["user_loss"]
             out["user_loss"] = ul
+    tok = load_token_features(cfg, dataset)
+    if not tok.empty:
+        out = out.join(tok)
     return out
+
+
+def load_token_features(cfg, dataset):
+    """Features from token_diag_epoch*.jsonl (top-k hard label tokens per sample).
+
+    Each record: sample_id -> top_tokens [[pos, token_id, loss], ...] per epoch.
+    Derived (per sample): hard-token count & loss stats, hard-position stats,
+    unique hard-token-ids, adjacent-epoch position-overlap (Jaccard).
+    """
+    mdir = os.path.join(cfg["paths"]["data_root"], "runs", _tag(cfg), dataset, "metrics")
+    rows = []
+    for f in sorted(glob.glob(os.path.join(mdir, "token_diag_epoch*.jsonl"))):
+        ep = int(os.path.basename(f).split("epoch")[-1].split(".")[0])
+        for l in open(f):
+            r = json.loads(l)
+            r["_epoch"] = ep
+            rows.append(r)
+    if not rows:
+        return pd.DataFrame()
+    feats = []
+    for sid, g in pd.DataFrame(rows).groupby("sample_id"):
+        g = g[g["top_tokens"].map(len) > 0]
+        if g.empty:
+            continue
+        ts = [t for row in g["top_tokens"] for t in row]
+        rec = {"sample_id": sid}
+        rec["n_hard"] = float(np.mean([len(x) for x in g["top_tokens"]]))
+        rec["hard_loss_mean"] = float(np.mean([t[2] for t in ts]))
+        rec["hard_loss_max"] = float(np.mean([max(x[2] for x in row) for row in g["top_tokens"]]))
+        rec["hard_pos_peak"] = float(np.mean([np.mean([t[0] for t in row]) for row in g["top_tokens"]]))
+        rec["hard_pos_std_mean"] = float(np.mean([np.std([t[0] for t in row]) for row in g["top_tokens"]]))
+        all_ids = set()
+        for row in g["top_tokens"]:
+            all_ids |= {t[1] for t in row}
+        rec["hard_id_uniq"] = float(len(all_ids))
+        pos_by_epoch = {}
+        for ep, gg in g.groupby("_epoch"):
+            pos_by_epoch[ep] = set(x for row in gg["top_tokens"] for x in [t[0] for t in row])
+        eps = sorted(pos_by_epoch)
+        jac = []
+        for a, b in zip(eps, eps[1:]):
+            pa, pb = pos_by_epoch[a], pos_by_epoch[b]
+            jac.append(len(pa & pb) / max(1, len(pa | pb)))
+        rec["hard_pos_jaccard"] = float(np.mean(jac)) if jac else np.nan
+        feats.append(rec)
+    return pd.DataFrame(feats).set_index("sample_id")
 
 
 def load_text_features(cfg, dataset):

@@ -1,9 +1,9 @@
 category,n,n_noise,rf_auc
-closed_qa,650,44,0.9867
-creative_writing,295,27,0.9786
-information_extraction,488,32,0.9771
-brainstorming,761,37,0.9765
-general_qa,790,56,0.9431
-summarization,527,55,0.9423
-open_qa,1342,102,0.9188
-classification,693,57,0.8696
+information_extraction,488,32,0.9929
+creative_writing,295,27,0.9913
+closed_qa,650,44,0.9839
+summarization,527,55,0.9679
+general_qa,790,56,0.9268
+classification,693,57,0.8916
+open_qa,1342,102,0.8885
+brainstorming,761,37,0.8836

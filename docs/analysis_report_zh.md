@@ -10,7 +10,7 @@
 
 **1. 样本级噪音检测可行性 (两比例一致)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.737 > **keyword 0.464 (盲区)** — 检测力不随比例衰减, 可直接部署到 5% 现实污染场景;
 
-**2. 特征-噪音映射**: garbled 靠输入输出双侧特征 (user_loss/entropy/curvature); duplicate **只能靠数据侧** (text_nn_sim, 训练指标方向反转); unrelated 靠跨 epoch 损失波动; keyword 需实体级手段, 19 维特征全失效;
+**2. 特征-噪音映射**: garbled 靠输入输出双侧特征 (user_loss/entropy/curvature); duplicate **只能靠数据侧** (text_nn_sim, 训练指标方向反转); unrelated 靠跨 epoch 损失波动 (新特征进一步增益); keyword 需实体级手段, 40 维特征全失效;
 
 **3. 检测力随 epoch 单调衰减 (两比例曲线重合)**: 模型逐渐适应噪音 — **数据清洗应在 epoch 0-1 内进行**;
 
@@ -202,15 +202,17 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 ## 3. 样本级噪音检测
 
-### 3.1 多指标分类器 (LR / RF, 19 维特征, 70/30 划分)
+### 3.1 多指标分类器 (LR / RF, 40 维特征, 70/30 划分)
 
 | 噪音类型 | LR AUC (10%) | LR AUC (5%) | 最优单指标 (10%) | 最优单指标 (5%) |
 |---|---|---|---|---|
-| garbled | **0.9996** | **0.999** | loss_curvature 0.985 | loss_curvature 0.986 |
-| duplicate | 0.974 | **0.972** | text_nn_sim 0.939 | text_nn_sim 0.963 |
-| unrelated | 0.923 | **0.956** | loss_curvature 0.830 | loss_curvature 0.846 |
-| mixed | 0.850 | **0.737** | text_nn_sim 0.716 | text_nn_sim 0.716 |
-| keyword | 0.531 | **0.464** | loss_curvature 0.669 | loss_curvature 0.703 |
+| garbled | **0.9987** | **1.0000** | loss_curvature 0.985 | loss_curvature 0.986 |
+| duplicate | 0.971 | **0.976** | text_nn_sim 0.939 | text_nn_sim 0.963 |
+| unrelated | 0.923→**0.945** | 0.956→**0.977** | loss_curvature 0.830 | loss_curvature 0.846 |
+| mixed | 0.850→0.831 | **0.737→0.713** | text_nn_sim 0.716 | text_nn_sim 0.716 |
+| keyword | 0.531→0.497 | **0.464→0.486** | loss_curvature 0.669 | loss_curvature 0.703 |
+
+> 表: 基于扩展特征集 (19+21 新特征, 见 §3.6) 的多变量 LR AUC; 带有"→"的为 v19 → v40 对比。**unrelated 提升最大 (+0.022 / +0.021)**, garbled/duplicate 接近天花板, keyword 依旧盲区, mixed 略降 (稀释)。
 
 ![检测 AUC 按噪音类型 (LR, 双比例对照)](../results/charts/detection_auc_by_type.png)
 
@@ -319,7 +321,11 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 4. `first_step` (step 索引) AUC=0.9999 纯属**顺序泄漏** (噪音样本在数据中位置固定), 已剔除 — 实际管线从未用它, 提示分析时勿引入样本序号类特征;
 5. `mixed` 单特征 AUC 仍不可用 (每类噪音子集 <10 样本), 需靠多变量分类器。
 
-这些新特征可与原 19 维合并 (`analyze_all_features.py` 输出 `results/{tag}/feature_exploration.csv`), 合并后多变量检测的增益有限 (原有 19 维已含主体信号), 但为**归因与特征选择**提供了更细的证据。
+这些新特征已并入主管线 (`analyze_detection.py` 的 40 维特征集; 探索表输出 `results/{tag}/feature_exploration.csv`)。并入后的多变量效果:
+- **unrelated 显著增益**: LR 0.923→0.945 (10%) / 0.956→**0.977** (5%); RF +0.02~0.04 — 这是最需要提升的检测价值区;
+- garbled / duplicate: 已接近天花板 (>0.97), 无明显变化;
+- keyword / mixed: 略降 (新增特征引入噪声), 仍是盲区/稀释;
+- 结论: **新特征的价值集中在语义错配类噪音检测**, 其他类型无增益。
 
 ---
 

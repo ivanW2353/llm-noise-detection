@@ -10,7 +10,7 @@
 
 **1. Sample-level noise detectability (identical at both ratios)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.737 > **keyword 0.464 (blind spot)** — detectability does not decay with the ratio; detectors transfer directly to 5% real-world pollution;
 
-**2. Feature-to-noise mapping**: garbled via input+output-side features (user_loss/entropy/curvature); duplicate **only via the data side** (text_nn_sim; training metrics inverted); unrelated via cross-epoch loss volatility; keyword needs entity-aware tools — all 19 features fail;
+**2. Feature-to-noise mapping**: garbled via input+output-side features (user_loss/entropy/curvature); duplicate **only via the data side** (text_nn_sim; training metrics inverted); unrelated via cross-epoch loss volatility (new features boost it further); keyword needs entity-aware tools — all 40 features fail;
 
 **3. Detectability decays monotonically over epochs (identical curves at both ratios)**: the model adapts to noise — **clean your data within epoch 0-1**;
 
@@ -194,15 +194,17 @@ Nearly identical across ratios: the "never converges vs converges instantly" mir
 
 ## 3. Sample-Level Noise Detection
 
-### 3.1 Multivariate classifiers (LR / RF, 19 features, 70/30 split)
+### 3.1 Multivariate classifiers (LR / RF, 40 features, 70/30 split)
 
 | Noise type | LR AUC (10%) | LR AUC (5%) | best univariate (10%) | best univariate (5%) |
 |---|---|---|---|---|
-| garbled | **0.9996** | **0.999** | loss_curvature 0.985 | loss_curvature 0.986 |
-| duplicate | 0.974 | **0.972** | text_nn_sim 0.939 | text_nn_sim 0.963 |
-| unrelated | 0.923 | **0.956** | loss_curvature 0.830 | loss_curvature 0.846 |
-| mixed | 0.850 | **0.737** | text_nn_sim 0.716 | text_nn_sim 0.716 |
-| keyword | 0.531 | **0.464** | loss_curvature 0.669 | loss_curvature 0.703 |
+| garbled | **0.9987** | **1.0000** | loss_curvature 0.985 | loss_curvature 0.986 |
+| duplicate | 0.971 | **0.976** | text_nn_sim 0.939 | text_nn_sim 0.963 |
+| unrelated | 0.923→**0.945** | 0.956→**0.977** | loss_curvature 0.830 | loss_curvature 0.846 |
+| mixed | 0.850→0.831 | **0.737→0.713** | text_nn_sim 0.716 | text_nn_sim 0.716 |
+| keyword | 0.531→0.497 | **0.464→0.486** | loss_curvature 0.669 | loss_curvature 0.703 |
+
+> Extended feature set (19+21 new, see §3.6) multivariate LR AUC; "→" marks v19 → v40 comparison. **unrelated improves most (+0.022 / +0.021)**, garbled/duplicate near ceiling, keyword still blind, mixed slightly down (dilution).
 
 ![RF ROC curves](../results/charts/roc_multivariate_ratio10.png)
 
@@ -314,10 +316,15 @@ Many new features carry real signal (identical across both ratios; order-leaking
 5. `mixed` single-feature AUC stays unusable (<10 samples per noise subclass) —
    multivariate classifiers only.
 
-The new features can merge with the original 19
-(`results/{tag}/feature_exploration.csv`); the multivariate gain is limited (the
-original set already carries the core signal), but attribution and feature
-selection get a finer, evidence-backed picture.
+The new features are merged into the main pipeline (40-dim feature set in
+`analyze_detection.py`; exploration table at `results/{tag}/feature_exploration.csv`).
+Post-merge multivariate effect:
+- **unrelated gains the most**: LR 0.923→0.945 (10%) / 0.956→**0.977** (5%);
+  RF +0.02~0.04 — exactly the detection-value zone;
+- garbled / duplicate: near ceiling (>0.97), no real change;
+- keyword / mixed: slightly down (new features add noise), still blind / diluted;
+- Conclusion: **the new features help semantic-mismatch detection specifically**;
+  no gain elsewhere.
 
 ---
 
