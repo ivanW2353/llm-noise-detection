@@ -275,6 +275,50 @@ and even harder at 5% (0.710) — short structured responses with tiny noise sub
 Garbled separates cleanly from normal; duplicate along the text_nn_sim axis;
 keyword fully embedded in the normal cluster — consistent with the AUCs.
 
+### 3.6 Full-feature exploration: does the *unused* data help detection?
+
+Every per-sample datum collected during training was pulled into the feature
+table (`scripts/analyze_all_features.py`):
+- **token_diag records** (top-k hard label tokens per sample: position / token id /
+  loss, across 5 epochs) → derived `hard_loss_mean/max`, `hard_id_uniq`, `hard_pos_*`,
+  `hard_pos_jaccard`;
+- **diag cross-epoch statistics** (`mean_loss`, `frac_hard`, `entropy`,
+  `token_loss_skew/kurt` as `*_std` and `*_curv` — i.e. loss_std/curvature applied to
+  diagnostic metrics);
+- **window-level layer norms** (`layer_norms.jsonl`, per optimizer step) — these are
+  step-level only, used as sample-context features, not per-sample.
+
+Many new features carry real signal (identical across both ratios; order-leaking
+`first_step` excluded):
+
+| Noise type | Best existing | Best new | beats existing? |
+|---|---|---|---|
+| garbled | entropy 0.971 | hard_loss_mean **0.859** | close (0.86 vs 0.97) |
+| unrelated | loss_std **0.827** | mean_loss_std **0.850** / frac_hard_std 0.829 / entropy_std 0.823 | ✅ yes |
+| duplicate | loss_curvature 0.758 | max_token_loss_curv 0.670 | moderate |
+| keyword | loss_std 0.649 | mean_loss_std **0.673** / entropy_std 0.663 | ✅ slight |
+| mixed | (<10 samples/class) | same | — |
+
+**Key findings:**
+1. **The `*_std` family (cross-epoch volatility of diag metrics) is the new main
+   feature for unrelated** — 0.850/0.829/0.823 at 10%, beating loss_std 0.827; still
+   strong at 5%;
+2. **`hard_loss_mean` (hard-token loss) is a strong new feature for garbled** —
+   0.859 (10%) and 0.859 / `hard_id_uniq` 0.820 (5%); garbled hard tokens are stable
+   and high-loss;
+3. **keyword remains inseparable** — new features barely nudge (0.673), still far from
+   usable;
+4. `first_step` AUC=0.9999 is pure **order leakage** (noise rows have fixed positions
+   in the data), excluded — a reminder never to feed row-index-like features to
+   detection;
+5. `mixed` single-feature AUC stays unusable (<10 samples per noise subclass) —
+   multivariate classifiers only.
+
+The new features can merge with the original 19
+(`results/{tag}/feature_exploration.csv`); the multivariate gain is limited (the
+original set already carries the core signal), but attribution and feature
+selection get a finer, evidence-backed picture.
+
 ---
 
 ## 4. Token-Level Detection (exact per-token gradient attribution)

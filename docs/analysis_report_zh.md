@@ -295,6 +295,32 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 **解读:** 19 维特征 PCA 前两维上, garbled 与正常样本清晰分离; duplicate 沿 text_nn_sim 方向分离; keyword 完全嵌入正常簇 — 与 AUC 结论一致。
 
+### 3.6 全量特征探索: 未用数据是否有检测价值 (新增)
+
+把训练中**已采集但从未用于检测**的数据全部纳入逐样本特征 (`scripts/analyze_all_features.py`):
+- **token_diag 明细** (每样本 top-k 硬标签 token: 位置/token id/损失, 5 个 epoch) → 派生 `hard_loss_mean/max`、`hard_id_uniq`、`hard_pos_*`、`hard_pos_jaccard`;
+- **diag 跨 epoch 统计** (`mean_loss`、`frac_hard`、`entropy`、`token_loss_skew/kurt` 的 `*_std` 与 `*_curv` — 类似 loss_std/loss_curvature, 但用在诊断指标上);
+- **window 层梯度范数** (`layer_norms.jsonl`, 每优化步) — 仅作用户上下文特征, 非逐样本。
+
+结果显示**大量新特征有真实信号** (两比例一致, 剔除 `first_step` 等顺序泄漏后):
+
+| 噪音类型 | 现有最优 | 新特征最优 | 新特征是否超越现有 |
+|---|---|---|---|
+| garbled | entropy 0.971 | hard_loss_mean **0.859** | 接近 (0.86 vs 0.97) |
+| unrelated | loss_std **0.827** | mean_loss_std **0.850** / frac_hard_std 0.829 / entropy_std 0.823 | ✅ **超越** |
+| duplicate | loss_curvature 0.758 | max_token_loss_curv 0.670 | 中等 |
+| keyword | loss_std 0.649 | mean_loss_std **0.673** / entropy_std 0.663 | ✅ 微超 |
+| mixed | (不足 10 样本) | 同左 | — |
+
+**关键结论:**
+1. **`mean_loss_std` / `frac_hard_std` / `entropy_std` 系列 (diag 指标跨 epoch 波动) 是 unrelated 的新主力** — 10% 时 0.850/0.829/0.823, 超越 loss_std 0.827; 5% 时该组仍强;
+2. **`hard_loss_mean` (硬 token 的平均损失) 是 garbled 的新强特征** — 0.859 (10%) 且 5% 时 0.859 / `hard_id_uniq` 0.820; 说明 garbled 的"硬 token"本身稳定且损失高;
+3. **keyword 仍然不可分** — 新特征微超 (0.673) 但远未突破 ~0.50 盲区;
+4. `first_step` (step 索引) AUC=0.9999 纯属**顺序泄漏** (噪音样本在数据中位置固定), 已剔除 — 实际管线从未用它, 提示分析时勿引入样本序号类特征;
+5. `mixed` 单特征 AUC 仍不可用 (每类噪音子集 <10 样本), 需靠多变量分类器。
+
+这些新特征可与原 19 维合并 (`analyze_all_features.py` 输出 `results/{tag}/feature_exploration.csv`), 合并后多变量检测的增益有限 (原有 19 维已含主体信号), 但为**归因与特征选择**提供了更细的证据。
+
 ---
 
 ## 4. Token 级检测 (精确逐 token 梯度归因)
