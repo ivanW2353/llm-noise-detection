@@ -2,7 +2,7 @@
 
 > 实验日期: 2026-08-12 ~ 2026-08-17
 > 基座模型: Qwen2.5-3B-Instruct (LoRA r=32, 59.9M 可训练参数) · 训练数据: databricks-dolly-15k
-> 实验覆盖: **10% 与 5% 两个噪音比例** · 5 epochs · 每 run 14,611 训练样本 · RTX 5090 单卡
+> 实验覆盖: **10% 与 5% 两个噪音比例** + 扩展噪音 (extra10) · 5 epochs · 每 run 14,611 训练样本 · RTX 5090 单卡
 
 ---
 
@@ -22,8 +22,9 @@
 
 **7. 检测难度与危害不单调相关**: 最易检的 garbled 最无害; 真正的检测价值区是**语义错配 (unrelated)** — 难检且低比例下伤害更大。
 
----
+![检测 AUC 按噪音类型对比](../results/charts/detection_auc_by_type.png)
 
+---
 
 ## 1. 实验设计
 
@@ -103,7 +104,7 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 **6. tokens** — 标签 token 数: 序列长度控制变量, 用于分层分析 (长序列样本的 loss 更稳定)。
 
-**诊断级指标** — 每 epoch 末对 1/8 抽样做前向-only 诊断 (成本 ~30s/epoch, `diag_epoch*.jsonl`), 全部基于全序列 next-token CE ($\\text{ce}[t]$, 目标必须用真实 token id — 用 $-100$ 会被 cross\\_entropy 置 0, 这是 user_loss 曾经恒为 0 的 bug 根因):
+**诊断级指标** — 每 epoch 末对 1/8 抽样做前向-only 诊断 (成本 ~30s/epoch), 全部基于全序列 next-token CE ($\\text{ce}[t]$, 目标必须用真实 token id — 用 $-100$ 会被 cross\\_entropy 置 0, 这是 user_loss 曾经恒为 0 的 bug 根因):
 
 **7. max_token_loss** — $\\max_{t \\in L} \\text{ce}[t]$: 单样本内最大 token 损失, 捕捉"局部极端" — 乱码样本的个别 token 损失极高;
 
@@ -115,7 +116,7 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 **11. token_loss_skew/kurt** — 逐 token 损失分布的偏度/峰度: 反直觉的是乱码使*几乎所有* token 都难 → 分布接近均匀 → 偏度接近 0 (AUC 0.064) — "没有信号的信号";
 
-**12. top-32 硬 token 明细** — 位置/token id/损失 (`token_diag_epoch*.jsonl`): 供离线 token 级定位与归因。
+**12. top-32 硬 token 明细** — 位置/token id/损失: 供离线 token 级定位与归因。
 
 **派生特征** — 训练后从 per-epoch 序列派生 (零成本):
 
@@ -148,7 +149,9 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | mixed | 1.496 | 0.525 | 1.438 | 0.533 |
 | duplicate | 1.349 | **0.425** | 1.358 | **0.467** |
 
-![训练 loss 轨迹](../results/charts/loss_trajectory_ratio10.png)
+![训练 loss 轨迹 (10%)](../results/charts/loss_trajectory_ratio10.png)
+
+![训练 loss 轨迹 (5%)](../results/charts/loss_trajectory_ratio05.png)
 
 **解读:**
 1. **比例差异不改变轨迹形态**: 两个比例下都是 garbled 最高、duplicate 最低、其余接近 clean — 噪音对训练动态的影响是定性的, 与比例无关;
@@ -166,7 +169,9 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | mixed | 1.45 | 1.40 | 0.61 | 14% | 12% |
 | duplicate | **0.32** | **0.34** | 0.60 | 2% | 1% |
 
-**解读:** 收敛速度在两个比例下几乎一致: **garbled 近 60% 永不收敛 vs duplicate 平均 0.33 epoch 即收敛** — "永不收敛 vs 瞬间收敛"的镜像在低比例下依然成立, 是比例无关的稳健判别特征。
+![converge_epoch 分布 (噪音 vs 正常, 10%)](../results/charts/metric_dist/metric_dist_converge_epoch_ratio10.png)
+
+**解读:** 收敛速度在两个比例下几乎一致: **garbled 近 60% 永不收敛 vs duplicate 平均 0.33 epoch 即收敛** — "永不收敛 vs 瞬间收敛"的镜像在低比例下依然成立, 是比例无关的稳健判别特征 (上图: 正常样本集中于低 epoch, garbled 展布到末端)。
 
 ### 2.3 Held-out 干净样本损失 (泛化损伤)
 
@@ -179,13 +184,19 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | mixed | 2.081 | **2.035** | **-0.016** |
 | duplicate | **2.143** | **2.091** | **+0.040** |
 
-![held-out 损失轨迹](../results/charts/tb_heldout_trajectory_ratio10.png)
+![held-out 损失轨迹 (10%)](../results/charts/tb_heldout_trajectory_ratio10.png)
+
+![LoRA 层梯度范数轨迹 (10%)](../results/charts/tb_layer_gradnorm_ratio10.png)
 
 **解读:**
 1. **所有 run (含 clean) 的 held-out 都在上升** — 5 epoch 的 dolly SFT 本身在过拟合 (+0.42 是基线);
 2. **duplicate 的过拟合损伤近似线性**: 相对 clean 的增幅 10% (+0.092) 约是 5% (+0.040) 的两倍 — 重复样本的泛化损害与比例成正比;
 3. **mixed 在 5% 反而低于 clean** (-0.016) — 低比例噪音对过拟合有轻微"正则化"效应, 该效应在 10% 被 duplicate 子集的记忆效应掩盖;
 4. keyword 在两个比例都是损伤最轻的噪音。
+
+![loss_mean 分布 (噪音 vs 正常, 10%)](../results/charts/metric_dist/metric_dist_loss_mean_ratio10.png)
+
+> 上图: garbled 的 loss_mean 分布整体右移 (学不动), duplicate 反而左移 (记忆), 与轨迹图结论互相印证。
 
 ---
 
@@ -201,9 +212,13 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | mixed | 0.850 | **0.737** | text_nn_sim 0.716 | text_nn_sim 0.716 |
 | keyword | 0.531 | **0.464** | loss_curvature 0.669 | loss_curvature 0.703 |
 
-![RF ROC 曲线](../results/charts/roc_multivariate_ratio10.png)
+![检测 AUC 按噪音类型 (LR, 双比例对照)](../results/charts/detection_auc_by_type.png)
 
 **核心结论: 检测力对比例不敏感 (除 mixed)。** garbled / duplicate / unrelated 的检测 AUC 在 5% 与 10% 几乎持平 — 它们的信号机制 (token 级损伤 / 文本重复 / 损失轨迹曲率) 与噪音比例本身无关, 检测器可直接部署到低污染场景。
+
+![RF ROC 曲线 (10%)](../results/charts/roc_multivariate_ratio10.png)
+
+![RF ROC 曲线 (5%)](../results/charts/roc_multivariate_ratio05.png)
 
 ### 3.2 单指标全表 (5%)
 
@@ -229,12 +244,25 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | token_loss_skew | 0.066 | 0.520 | 0.529 | 0.446 | 0.469 |
 | **text_nn_sim** | 0.359 | **0.963** | 0.727 | 0.474 | 0.716 |
 
-**逐噪音解读:**
-- **garbled (最好检)**: `user_loss` (0.979) / `entropy` (0.970) / `loss_curvature` (0.986) 三锁 — 乱码同时污染输入与输出, 两个比例表现一致; `token_loss_skew` ≈ 0.07 依旧无信号 (所有 token 都难, 无偏度);
-- **duplicate**: `text_nn_sim` (0.963) 一枝独秀, 且 5% 时略高于 10% (0.939) — 副本更少时正常样本间相似度更低, 副本更突出; 训练侧指标依旧反向 (loss_mean 0.363);
-- **unrelated**: `loss_curvature` / `loss_std` / `grad_norm` 组合, 5% (0.846) 略强于 10% (0.830);
-- **keyword**: 所有指标 0.47-0.70 — 单指标无法可靠分离, 与 10% 的盲区一致;
-- **mixed**: 特征被稀释, 但 `text_nn_sim` 仍捕获其中的 duplicate 子集。
+**逐噪音解读 (配分布图):**
+
+**garbled (最好检)** — `user_loss` (0.979) / `entropy` (0.970) / `loss_curvature` (0.986) 三锁: 乱码同时污染输入与输出, 两个比例表现一致; `token_loss_skew` ≈ 0.07 依旧无信号 (所有 token 都难, 无偏度):
+
+![user_loss 分布 (garbled)](../results/charts/metric_dist/metric_dist_user_loss_ratio10.png) ![entropy 分布 (garbled)](../results/charts/metric_dist/metric_dist_entropy_ratio10.png)
+
+**duplicate (数据侧一枝独秀)** — `text_nn_sim` (0.963) 仅凭文本相似度即可分离, 且 5% 时略高于 10% (0.939) — 副本更少时正常样本间相似度更低, 副本更突出; 训练侧指标依旧**反向** (loss_mean 0.363 — 副本损失更低):
+
+![text_nn_sim 分布 (duplicate)](../results/charts/metric_dist/metric_dist_text_nn_sim_ratio10.png) ![loss_mean 分布 (duplicate, 反向)](../results/charts/metric_dist/metric_dist_loss_mean_ratio10.png)
+
+**unrelated** — `loss_curvature` / `loss_std` / `grad_norm` 组合, 5% (0.846) 略强于 10% (0.830): 错配样本的损失轨迹剧烈波动, 不平稳下降:
+
+![loss_std 分布 (unrelated)](../results/charts/metric_dist/metric_dist_loss_std_ratio10.png)
+
+**keyword** — 所有指标 0.47-0.70 — 单指标无法可靠分离, 与 10% 的盲区一致:
+
+![loss_curvature 分布 (keyword, 部分重叠)](../results/charts/metric_dist/metric_dist_loss_curvature_ratio10.png)
+
+**mixed** — 特征被稀释, 但 `text_nn_sim` 仍捕获其中的 duplicate 子集。
 
 ### 3.3 检测力随训练进程的演变 (逐 epoch loss AUC, 两比例)
 
@@ -263,7 +291,7 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 ### 3.5 样本特征 PCA 投影
 
-![PCA 投影](../results/charts/pca_metrics_ratio10.png)
+![PCA 投影 (10%)](../results/charts/pca_metrics_ratio10.png)
 
 **解读:** 19 维特征 PCA 前两维上, garbled 与正常样本清晰分离; duplicate 沿 text_nn_sim 方向分离; keyword 完全嵌入正常簇 — 与 AUC 结论一致。
 
@@ -310,6 +338,8 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | keyword | 0.6333 | 0.6295 | 0.5231 | 0.5428 | 0.7986 | 0.7952 | 0.1848 | 0.1995 |
 | mixed | 0.6315 | 0.6330 | 0.5732 | 0.5148 | 0.7952 | 0.7875 | 0.1836 | 0.2020 |
 | **base** | **0.6637** | 0.6637 | **0.7460** | 0.7460 | **0.8311** | 0.8311 | **0.1934** | 0.1934 |
+
+![验证集影响对比 (双比例, 细柱=各噪音模型 vs 黑柱=clean)](../results/charts/eval_impact_comparison.png)
 
 **核心发现:**
 1. **噪音的伤害远小于微调本身的伤害**: 两个比例下 6 个微调模型互相接近 (MMLU 极差 ≤0.022), 而基座在 4/7 验证集全面领先 — dolly SFT 自身的泛化损伤淹没了噪音差异;
@@ -410,7 +440,7 @@ python scripts/make_noise.py && bash run_all.sh && bash run_all_eval.sh
 python scripts/analyze_detection.py && python scripts/analyze_token_level.py
 # 5% 实验 (复用 clean, 自动跳过已完成)
 bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean
-# 剂量-效应对比
+# 剂量-效应对比 (重新生成: docs/comparisons/dose_response_{zh,en}.md)
 python scripts/compare_ratios.py --tags ratio10,ratio05
 ```
 
@@ -436,6 +466,8 @@ python scripts/compare_ratios.py --tags ratio10,ratio05
 |---|---|---|
 | LR | 0.836 | 0.935 |
 | RF | **0.887** | 0.953 |
+
+![loss 轨迹 (extra10 4 数据集)](../results/charts/loss_trajectory_extra10.png)
 
 - **7-way 检测 (0.887) 反而优于 ratio10 的 4-way (0.850)** — 新增三类 (尤其 template 与 near_duplicate) 比 keyword/unrelated 更可检, 拉高了整体 AUC;
 - 最优单指标: `text_nn_sim` 0.730 (捕获 near_duplicate 的改写相似性), `loss_std` 0.699, `loss_curvature` 0.695 — 数据侧与训练侧特征协同;
@@ -473,7 +505,21 @@ IFD = L(A\|Q) / L(A) — 条件回答损失 / 无条件回答损失, 越小越�
 
 **解读:** IFD 是**跨类型区分度最强的单一特征**: template 噪音 IFD ≈ 0.005 (固定模板 → 模型已完全学会, 43 倍差异), garbled IFD 0.534 (输入损坏 → 最难跟随)。IFD 可作为 template/truncation 类"结构噪音"的专用检测特征, 与 loss/梯度特征互补 (这些类型在 loss 侧信号弱)。
 
-### 7.5 检测难度光谱更新 (含三类新噪音)
+### 7.5 Token 级与分布 (extra10)
+
+<center>
+
+| template | truncation |
+|---|---|
+| ![template 逐 token 损失](../results/charts/token_curve/token_curve_extra10_template.png) | ![truncation 逐 token 损失](../results/charts/token_curve/token_curve_extra10_truncation.png) |
+| near_duplicate | mixed (7-way) |
+| ![near_duplicate 逐 token 损失](../results/charts/token_curve/token_curve_extra10_near_duplicate.png) | ![mixed 逐 token 损失](../results/charts/token_curve/token_curve_extra10_mixed.png) |
+
+</center>
+
+![PCA 投影 (extra10)](../results/charts/pca_metrics_extra10.png)
+
+### 7.6 检测难度光谱更新 (含三类新噪音)
 
 ```
 可检测 ◄────────────────────────────────────────────────────────────────────► 不可检测
@@ -488,4 +534,4 @@ token级      一致模式      数据侧     text_nn_sim   语义错配    信�
 
 ---
 
-*本报告由实验流水线自动生成的产物汇总而成; 全部原始数据见 `results/` (评测明细、逐题记录、检测表格与图表) 与 `<data_root>/runs/ratio10|ratio05/` (逐样本指标、逐 token 诊断、层范数、TensorBoard 事件)。*
+*本报告由实验流水线自动生成的产物汇总而成; 全部原始数据见 `results/` (评测明细、逐题记录、检测表格与图表) 与 `<data_root>/runs/ratio10|ratio05|extra10/` (逐样本指标、逐 token 诊断、层范数、TensorBoard 事件)。*

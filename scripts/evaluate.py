@@ -30,7 +30,7 @@ from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-BBH_DIR = "/root/autodl-tmp/noisedetect/data/bbh"
+BBH_DIR = None  # set from config at runtime: <data_root>/data/bbh
 MAX_LEN = 2048          # generation room (long CoT few-shot + output)
 SCORE_MAX_LEN = 1024    # MC scoring cap: [B, L, V] logits are memory-heavy
 
@@ -368,7 +368,7 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--dataset", default="clean")
     ap.add_argument("--tasks", default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
@@ -378,5 +378,6 @@ if __name__ == "__main__":
     cfg = yaml.safe_load(open(args.config))
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
+    globals()["BBH_DIR"] = os.path.join(cfg["paths"]["data_root"], "data", "bbh")
     tasks = args.tasks.split(",") if args.tasks else cfg["eval"]["tasks"]
     evaluate(cfg, args.dataset, tasks, smoke=args.smoke, force=args.force)

@@ -577,7 +577,7 @@ def train(cfg, dataset, smoke=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--dataset", required=True,
                     choices=["clean", "garbled", "duplicate", "unrelated", "keyword",
                              "template", "truncation", "near_duplicate", "mixed"])

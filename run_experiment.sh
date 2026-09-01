@@ -11,7 +11,8 @@
 # and completes an interrupted experiment — safe to run any time, including
 # while GPU time frees up in stages.
 set -e
-cd "$(dirname "$0")"
+REPO="$(cd "$(dirname "$0")" && pwd)"
+cd "$REPO"
 
 RATIO=""
 TAG=""
@@ -37,14 +38,14 @@ if [ -z "$TAG" ]; then
     TAG=$(python3 -c "print('ratio%d' % round(float('$RATIO')*100))")
 fi
 
-DATA="/root/autodl-tmp/noisedetect"
+DATA="$REPO"
 RUNDIR="$DATA/runs/$TAG"
 LOG="$DATA/logs/experiment_${TAG}.log"
 mkdir -p "$(dirname "$LOG")"
 
 has_summary() { [ -f "$RUNDIR/$1/summary.json" ]; }
 eval_complete() {
-    local f="/root/noisedetect/results/eval/eval_${TAG}_$1.json"
+    local f="$REPO/results/eval/eval_${TAG}_$1.json"
     [ -f "$f" ] && python3 -c "
 import json,sys
 r=json.load(open('$f'))
@@ -59,10 +60,10 @@ trained_ds() {  # trained noise datasets (excludes clean)
         echo "$b"
     done
 }
-analysis_done() {  # analysis_done <result-prefix> — all trained datasets have the output
-    local prefix="$1"
+analysis_done() {  # analysis_done <dataset-suffix> — all trained datasets have the output under results/<tag>/
+    local sfx="$1"
     for ds in $(trained_ds); do
-        [ -f "/root/noisedetect/results/${prefix}_${TAG}_${ds}.jsonl" ] || return 1
+        [ -f "$REPO/results/$TAG/${sfx}_${ds}.jsonl" ] || return 1
     done
     return 0
 }
@@ -136,7 +137,7 @@ fi
 
 if [ "$MODE" = "full" ] || [ "$MODE" = "analyze" ]; then
     stage "detection analysis" python3 scripts/analyze_detection.py --tag "$TAG"
-    if [ -n "$(trained_ds)" ] && analysis_done "token_level/token_level"; then
+    if [ -n "$(trained_ds)" ] && analysis_done "token_level"; then
         echo "----- [$TAG] $(date '+%F %T') skip token-level analysis (all datasets done) -----" | tee -a "$LOG"
     else
         stage "token-level analysis" python3 scripts/analyze_token_level.py --tag "$TAG"

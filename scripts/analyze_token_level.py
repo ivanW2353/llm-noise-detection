@@ -88,7 +88,7 @@ def hard_tokens(model, row, params, offsets, ref_buf, k=TOP_K):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--dataset", default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio05)")
     args = ap.parse_args()
@@ -157,9 +157,12 @@ def main():
                     mismatch = sum(1 for p in hard_pos if p < len(cids) and ids[p] != cids[p])
                     entry["loc_mismatch_frac"] = mismatch / max(1, len(hard_pos))
             results.append(entry)
-        tl_dir = os.path.join(res_dir, "token_level")
+        if tag:
+            tl_dir = os.path.join(res_dir, tag)
+        else:
+            tl_dir = os.path.join(res_dir, "token_level")
         os.makedirs(tl_dir, exist_ok=True)
-        out_p = os.path.join(tl_dir, f"token_level_{tag}_{ds}.jsonl" if tag else f"token_level_{ds}.jsonl")
+        out_p = os.path.join(tl_dir, f"token_level_{ds}.jsonl" if tag else f"token_level_{ds}.jsonl")
         with open(out_p, "w") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")

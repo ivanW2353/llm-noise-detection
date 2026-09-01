@@ -1,6 +1,0 @@
-noise_type,loss_mean,loss_last,loss_std,loss_slope,converge_epoch,loss_rank,loss_curvature,grad_norm_mean,grad_norm_cv,cos_ref_mean,cos_ref_trend,cos_global_mean,update_contrib_mean,max_token_loss,frac_hard,user_loss,entropy,token_loss_skew,text_nn_sim
-garbled,,,,,,,,,,,,,,,,,,,
-duplicate,,,,,,,,,,,,,,,,,,,
-unrelated,,,,,,,,,,,,,,,,,,,
-keyword,,,,,,,,,,,,,,,,,,,
-mixed,0.6392,0.558,0.699,0.2955,0.6522,0.6181,0.6947,0.5749,0.4253,0.5245,0.4304,0.5733,0.5755,0.6143,0.6357,0.5737,0.6329,0.4344,0.7295

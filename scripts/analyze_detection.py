@@ -277,7 +277,7 @@ def univariate_auc(df, dataset, pos_types, neg_types=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio20)")
     ap.add_argument("--datasets", type=str, default=None,
                     help="comma-separated dataset list (default: the 6 standard datasets)")
@@ -302,8 +302,10 @@ def main():
     os.makedirs(res_dir, exist_ok=True)
     os.makedirs(chart_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
+    tag_dir = os.path.join(res_dir, tag) if tag else res_dir
+    os.makedirs(tag_dir, exist_ok=True)
     def res_name(name):
-        return f"{name}_{tag}.csv" if tag else f"{name}.csv"
+        return os.path.join(tag_dir, f"{name}.csv") if tag else f"{name}.csv"
     def res_img(name):
         return f"{name}_{tag}.png" if tag else f"{name}.png"
     t0_ana = time.time()
@@ -536,7 +538,7 @@ def main():
             ev_rows.append(row)
     if ev_rows:
         ev_tab = pd.DataFrame(ev_rows)
-        ev_tab.to_csv(os.path.join(eval_dir, res_name("eval_comparison")), index=False)
+        ev_tab.to_csv(os.path.join(tag_dir, f"eval_comparison.csv"), index=False)
         print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
         t_sec = time.time()
         print("\n=== evaluation comparison ===")
@@ -558,7 +560,7 @@ def main():
                         subj_rows.append({"model": ds, **{k: round(x, 4) for k, x in v.items()}})
             if subj_rows:
                 subj_tab = pd.DataFrame(subj_rows)
-                subj_tab.to_csv(os.path.join(eval_dir, res_name(f"eval_{gname}")), index=False)
+                subj_tab.to_csv(os.path.join(tag_dir, f"eval_{gname}.csv"), index=False)
                 print(f"\n=== {gname} ({len(subj_tab.columns)-1} groups) ===")
                 print(subj_tab.to_string(index=False))
 

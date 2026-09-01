@@ -46,7 +46,7 @@ def response_only_loss(model, tokenizer, assistant_text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. extra10)")
     ap.add_argument("--dataset", default=None)
     ap.add_argument("--subsample", type=int, default=8)
@@ -83,7 +83,11 @@ def main():
             if "lora_" in n:
                 p.requires_grad = True
         model.eval()
-        out_p = os.path.join(cfg["paths"]["repo_root"], "results", f"ifd_{tag}_{ds}.jsonl")
+        out_dir = os.path.join(cfg["paths"]["repo_root"], "results")
+        if tag:
+            out_dir = os.path.join(out_dir, tag)
+            os.makedirs(out_dir, exist_ok=True)
+        out_p = os.path.join(out_dir, f"ifd_{ds}.jsonl")
         n = 0
         t0 = time.time()
         with open(out_p, "w") as f:

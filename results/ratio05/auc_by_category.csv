@@ -1,0 +1,8 @@
+category,n,n_noise,rf_auc
+summarization,524,32,0.9707
+information_extraction,488,20,0.9521
+open_qa,1315,47,0.9254
+general_qa,784,34,0.9123
+classification,689,21,0.896
+brainstorming,763,31,0.8854
+closed_qa,637,15,0.8844

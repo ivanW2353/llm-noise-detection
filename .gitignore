@@ -4,3 +4,8 @@ results/per_sample_metrics*.csv
 .ipynb_checkpoints/
 eval_raw_*.jsonl
 layer_norms.jsonl
+
+# large data (local only, never commit)
+data/
+runs/
+logs/

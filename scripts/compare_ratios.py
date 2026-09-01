@@ -29,14 +29,14 @@ def load_eval(repo, tag, ds):
 
 
 def load_auc(repo, tag):
-    p = os.path.join(repo, "results", f"auc_univariate_{tag}.csv")
+    p = os.path.join(repo, "results", tag, f"auc_univariate.csv")
     if not os.path.exists(p):
         return None
     return pd.read_csv(p).set_index("noise_type")
 
 
 def load_multi_auc(repo, tag):
-    p = os.path.join(repo, "results", f"detection_multivariate_{tag}.csv")
+    p = os.path.join(repo, "results", tag, f"detection_multivariate.csv")
     if not os.path.exists(p):
         return None
     d = pd.read_csv(p)
@@ -44,7 +44,7 @@ def load_multi_auc(repo, tag):
 
 
 def load_heldout(repo, tag):
-    p = os.path.join(repo, "results", f"tb_heldout_loss_{tag}.csv")
+    p = os.path.join(repo, "results", tag, f"tb_heldout_loss.csv")
     if not os.path.exists(p):
         return None
     return pd.read_csv(p).set_index("step").apply(lambda c: c.dropna().iloc[-1])
@@ -52,7 +52,7 @@ def load_heldout(repo, tag):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--tags", default="ratio10,ratio05")
     args = ap.parse_args()
     import yaml

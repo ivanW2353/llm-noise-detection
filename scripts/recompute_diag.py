@@ -30,7 +30,7 @@ DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"]
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--dataset", default=None)
     ap.add_argument("--subsample", type=int, default=8)
     args = ap.parse_args()

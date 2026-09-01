@@ -94,7 +94,7 @@ def signals_for_prompt(model, tokenizer, prompts, max_new=64):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="/root/noisedetect/config.yaml")
+    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
     ap.add_argument("--model", default="clean")
     ap.add_argument("--n", type=int, default=20000)
     ap.add_argument("--max-new", type=int, default=64)

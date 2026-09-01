@@ -6,7 +6,7 @@ LLM-noise-detection experiment: 4 noise types injected into dolly-15k at 10% (ta
 
 - `scripts/` pipeline (run in order): `make_noise.py` → `train.py` → `evaluate.py` → `analyze_detection.py` / `analyze_token_level.py`; `recompute_diag.py` is a post-hoc fix script.
 - Orchestrators: `run_all.sh` (6 trainings), `run_all_eval.sh` (7 models), `run_experiment.sh` (one-command full pipeline for a new ratio).
-- **Large data lives OUTSIDE the repo** at `data_root=/root/autodl-tmp/noisedetect`. Paths are tag-based:
+- **Large data lives in the repo dir but OUTSIDE git** at `data_root=/root/noisedetect` (gitignored: `data/`, `runs/`, `logs/`). Paths are tag-based:
   - `data/{tag}/{dataset}/train.jsonl` (no `train/` level) + shared `data/{tag}/heldout.jsonl`
   - `runs/{tag}/{dataset}/{metrics,tb,lora}`
   - `results/eval/` (per-model json + `eval_raw_*.jsonl` per-question), `results/charts/` (png), top-level CSVs (detection tables).
