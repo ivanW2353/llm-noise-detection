@@ -14,12 +14,24 @@ separate noisy samples from clean ones.
 
 ## Analysis reports
 
+```
+docs/
+├── analysis_report_zh.md / en.md    主实验报告 (ratio10 + ratio05 + extra10, 双比例对照)
+├── comparisons/
+│   ├── dose_response_zh.md / en.md       剂量-效应对比 (ratio10 vs ratio05)
+│   └── cross_experiment_synthesis_zh/en  跨实验综合 (与 dynanoise / qa-noise)
+├── methods/
+│   └── detection_algorithms_zh.md / en.md  检测算法规范 (LaTeX 公式)
+└── references/
+    └── literature_review_zh.md             文献综述 (25 篇)
+```
+
 - **[中文详细分析报告](docs/analysis_report_zh.md)** — 训练动态、样本/token 级检测、验证集影响、逐题分析
 - **[English analysis report](docs/analysis_report_en.md)** — training dynamics, sample/token-level detection, benchmark impact, per-question analysis
-- **[检测算法规范](docs/detection_algorithms_zh.md) / [detection algorithms](docs/detection_algorithms_en.md)** — 可复现的噪音检测算法 (LaTeX 公式)
-- **[跨实验综合](docs/cross_experiment_synthesis_zh.md) / [cross-experiment synthesis](docs/cross_experiment_synthesis_en.md)** — 与 dynanoise / qa-noise 的合并结论
-- **[剂量-效应对比](docs/dose_response_zh.md) / [dose response](docs/dose_response_en.md)** — ratio10 vs ratio05
-- **[文献综述](docs/literature_review_zh.md)** — 25 篇相关论文
+- **[检测算法规范](docs/methods/detection_algorithms_zh.md) / [detection algorithms](docs/methods/detection_algorithms_en.md)** — 可复现的噪音检测算法 (LaTeX 公式)
+- **[跨实验综合](docs/comparisons/cross_experiment_synthesis_zh.md) / [cross-experiment synthesis](docs/comparisons/cross_experiment_synthesis_en.md)** — 与 dynanoise / qa-noise 的合并结论
+- **[剂量-效应对比](docs/comparisons/dose_response_zh.md) / [dose response](docs/comparisons/dose_response_en.md)** — ratio10 vs ratio05
+- **[文献综述](docs/references/literature_review_zh.md)** — 25 篇相关论文
 
 ## Datasets (6 core, +3 optional with `--with-extra`)
 
@@ -162,7 +174,7 @@ Config: `config.yaml` (paths, noise ratio, hyper-parameters).
 ## Layout
 
 - `scripts/` – data construction, training, evaluation, analysis
-- `docs/` – 9 reports: analysis (zh/en), detection algorithms, cross-experiment synthesis, dose-response, literature review
+- `docs/` – analysis report (zh/en) + subfolders: `comparisons/` (dose-response, cross-experiment), `methods/` (detection algorithms), `references/` (literature review)
 - `results/eval/` – per-model evaluation results + raw per-question records + comparison tables (per tag)
 - `results/charts/` – main figures; `metric_dist/` (38), `token_curve/` (8) subfolders
 - `results/token_level/` – per-token attribution records (per tag)
