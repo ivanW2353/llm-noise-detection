@@ -9,7 +9,7 @@ LLM-noise-detection experiment: 4 noise types injected into dolly-15k at 10% (ta
 - **Large data lives in the repo dir but OUTSIDE git** at `data_root=/root/noisedetect` (gitignored: `data/`, `runs/`, `logs/`). Paths are tag-based:
   - `data/{tag}/{dataset}/train.jsonl` (no `train/` level) + shared `data/{tag}/heldout.jsonl`
   - `runs/{tag}/{dataset}/{metrics,tb,lora}`
-  - `results/eval/` (per-model json + `eval_raw_*.jsonl` per-question), `results/charts/` (png), top-level CSVs (detection tables).
+  - `results/{tag}/` (per experiment: AUC/detection/tb CSVs, `ifd_{ds}.jsonl`, `token_level_{ds}.jsonl`, `eval_*` tables), `results/eval/` (per-model json + gitignored `eval_raw_*.jsonl`), `results/charts/` (png + `metric_dist/`, `token_curve/`).
 - `experiment_tag` defaults to `ratio10` in `config.yaml`; every script takes `--tag`.
 - GPU (since 2026-09-01): **NVIDIA RTX PRO 6000 Blackwell Server Edition, 96GB**, sm_120; previously RTX 5090 32GB. torch 2.8.0+cu128, transformers 5.13.1, peft 0.19.1, datasets 5.x, pandas 3.x. Measured train speed ~2.1 s/step (vs 2.6 s/step on the 5090); bs=1 training still latency-bound (GPU util 40-65%).
 

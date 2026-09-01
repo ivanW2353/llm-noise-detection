@@ -177,10 +177,8 @@ Config: `config.yaml` (paths, noise ratio, hyper-parameters).
 
 - `scripts/` – data construction, training, evaluation, analysis
 - `docs/` – analysis report (zh/en) + subfolders: `comparisons/` (dose-response, cross-experiment), `methods/` (detection algorithms), `references/` (literature review)
-- `results/eval/` – per-model evaluation results + raw per-question records + comparison tables (per tag)
-- `results/charts/` – main figures; `metric_dist/` (38), `token_curve/` (8) subfolders
-- `results/token_level/` – per-token attribution records (per tag)
-- `results/` – detection-analysis tables (AUC, multivariate, per-category, per tag)
+- `results/{tag}/` – per-experiment analysis tables (AUC, multivariate, per-category, held-out/diag/layer trajectories, IFD, token-level, eval comparison) under `results/ratio10|ratio05|extra10/`; cross-tag figures in `results/charts/` (`metric_dist/`, `token_curve/`)
+- `results/eval/` – per-model evaluation results + raw per-question records (raw `*.jsonl` gitignored)
 - `<data_root>/logs/` – pipeline logs (train / eval / experiment)
-- `<data_root>/data/` – the 6 datasets (tagged dirs for other ratios)
-- `<data_root>/runs/<dataset>/` – per-sample metrics, tensorboard, LoRA weights
+- `<data_root>/data/` – the 6 datasets + BBH data (tagged dirs for other ratios; gitignored)
+- `<data_root>/runs/<tag>/<dataset>/` – per-sample metrics, tensorboard, LoRA weights (gitignored)
