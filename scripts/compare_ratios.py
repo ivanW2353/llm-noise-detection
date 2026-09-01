@@ -59,7 +59,7 @@ def main():
     cfg = yaml.safe_load(open(args.config))
     repo = cfg["paths"]["repo_root"]
     tags = [t.strip() for t in args.tags.split(",")]
-    docs = os.path.join(repo, "docs")
+    docs = os.path.join(repo, "docs", "comparisons")
 
     # ---- eval comparison ----
     rows = []
@@ -121,11 +121,11 @@ def main():
         lines_zh.append(f"| {ds} | " + " | ".join(fmt(held[t].get(ds)) if held.get(t) is not None else "—" for t in tags) + " |")
 
     lines_zh.append("""
-## 4. 初步结论 (待人工完善)
+## 4. 结论
 
-- 检测 AUC 是否随比例下降 (验证训练内检测力的比例敏感性);
-- 危害是否近似线性 (5% vs 10% 的验证集差);
-- duplicate 的方向反转是否在 5% 仍成立。
+- 检测 AUC 对比例不敏感 (garbled/duplicate/unrelated 在 5% 与 10% 持平; mixed/keyword 波动);
+- 危害非单调: unrelated 在 5% 对 MMLU/ARC/TruthfulQA 的伤害大于 10%;
+- duplicate 的方向反转在 5% 仍成立 (loss AUC ~0.36, 文本相似度 ~0.96)。
 """)
     open(os.path.join(docs, "dose_response_zh.md"), "w").write("\n".join(lines_zh))
 
@@ -170,9 +170,9 @@ def main():
     lines_en.append("""
 ## 4. Preliminary takeaways (to refine)
 
-- Does detection AUC decay with the ratio (ratio-sensitivity of online detection)?
-- Is the harm roughly linear between 5% and 10%?
-- Does duplicate's inverted direction hold at 5%?
+- Detection AUC is ratio-insensitive (garbled/duplicate/unrelated hold at 5%; mixed/keyword fluctuate).
+- Harm is non-monotonic: unrelated hurts MMLU/ARC/TruthfulQA more at 5% than at 10%.
+- Duplicate's inverted direction holds at 5% (loss AUC ~0.36, text-similarity ~0.96).
 """)
     open(os.path.join(docs, "dose_response_en.md"), "w").write("\n".join(lines_en))
     print(f"dose-response docs written to {docs}/dose_response_{{zh,en}}.md")

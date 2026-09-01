@@ -16,9 +16,8 @@ separate noisy samples from clean ones.
 
 ```
 docs/
-├── analysis_report_zh.md / en.md    主实验报告 (ratio10 + ratio05 + extra10, 双比例对照)
+├── analysis_report_zh.md / en.md    主实验报告 (§0 核心结论速览 + ratio10/ratio05/extra10)
 ├── comparisons/
-│   ├── dose_response_zh.md / en.md       剂量-效应对比 (ratio10 vs ratio05)
 │   └── cross_experiment_synthesis_zh/en  跨实验综合 (与 dynanoise / qa-noise)
 ├── methods/
 │   └── detection_algorithms_zh.md / en.md  检测算法规范 (LaTeX 公式)
@@ -26,12 +25,13 @@ docs/
     └── literature_review_zh.md             文献综述 (25 篇)
 ```
 
-- **[中文详细分析报告](docs/analysis_report_zh.md)** — 训练动态、样本/token 级检测、验证集影响、逐题分析
-- **[English analysis report](docs/analysis_report_en.md)** — training dynamics, sample/token-level detection, benchmark impact, per-question analysis
+- **[中文详细分析报告](docs/analysis_report_zh.md)** — §0 核心结论速览; 训练动态、样本/token 级检测、验证集影响、逐题分析
+- **[English analysis report](docs/analysis_report_en.md)** — §0 executive summary; training dynamics, sample/token-level detection, benchmark impact, per-question analysis
 - **[检测算法规范](docs/methods/detection_algorithms_zh.md) / [detection algorithms](docs/methods/detection_algorithms_en.md)** — 可复现的噪音检测算法 (LaTeX 公式)
 - **[跨实验综合](docs/comparisons/cross_experiment_synthesis_zh.md) / [cross-experiment synthesis](docs/comparisons/cross_experiment_synthesis_en.md)** — 与 dynanoise / qa-noise 的合并结论
-- **[剂量-效应对比](docs/comparisons/dose_response_zh.md) / [dose response](docs/comparisons/dose_response_en.md)** — ratio10 vs ratio05
 - **[文献综述](docs/references/literature_review_zh.md)** — 25 篇相关论文
+
+> 剂量-效应对比已并入主报告 (§2.3/§3.1/§5.1 双比例对照); 如需独立生成表可运行 `python scripts/compare_ratios.py --tags ratio10,ratio05` (输出 `docs/comparisons/dose_response_{zh,en}.md`)。
 
 ## Datasets (6 core, +3 optional with `--with-extra`)
 

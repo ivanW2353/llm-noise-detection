@@ -6,6 +6,25 @@
 
 ---
 
+## 0. Executive Summary (TL;DR)
+
+**1. Sample-level noise detectability (identical at both ratios)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.737 > **keyword 0.464 (blind spot)** — detectability does not decay with the ratio; detectors transfer directly to 5% real-world pollution;
+
+**2. Feature-to-noise mapping**: garbled via input+output-side features (user_loss/entropy/curvature); duplicate **only via the data side** (text_nn_sim; training metrics inverted); unrelated via cross-epoch loss volatility; keyword needs entity-aware tools — all 19 features fail;
+
+**3. Detectability decays monotonically over epochs (identical curves at both ratios)**: the model adapts to noise — **clean your data within epoch 0-1**;
+
+**4. Harm is non-monotonic**: unrelated hurts MMLU/ARC/TruthfulQA *more* at 5% than at 10% (MMLU −0.019 vs −0.005), with a confidence inversion (correct-margin 4.75→2.45, "both wrong and hesitant"); duplicate's overfitting damage is roughly linear (10% ≈ 2× 5%);
+
+**5. Absolute noise impact is small**: the 6 fine-tuned models are close to each other and all worse than base — dolly SFT's own damage swamps the noise differences;
+
+**6. Extended noise (extra10)**: 7-way mixed detection RF 0.887 (better than 4-way 0.850); **template (consistent wrong-answer pattern) is the most harmful** (GSM8K −23%) — "random errors get absorbed, systematic errors get learned"; IFD is the strongest cross-type fingerprint (template 43× easier to follow, garbled 2.7× harder);
+
+**7. Detectability and harm are not monotonically related**: the easiest type (garbled) is the least harmful; the true detection-value zone is **semantic mismatch (unrelated)** — hard to detect and more harmful at low ratios.
+
+---
+
+
 ## 1. Experimental Setup
 
 ### 1.1 Research questions
