@@ -30,7 +30,7 @@ from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-BBH_DIR = "/root/autodl-tmp/less/data/eval/bbh"
+BBH_DIR = "/root/autodl-tmp/noisedetect/data/bbh"
 MAX_LEN = 2048          # generation room (long CoT few-shot + output)
 SCORE_MAX_LEN = 1024    # MC scoring cap: [B, L, V] logits are memory-heavy
 
@@ -51,7 +51,7 @@ def load_model(cfg, dataset):
 
 
 @torch.no_grad()
-def score_options(model, tokenizer, samples, bs=24):
+def score_options(model, tokenizer, samples, bs=48):
     """samples: list of (prompt, options); returns per-sample nll list."""
     flat = [(p, " " + o) for p, opts in samples for o in opts]
     all_nll = []
@@ -61,7 +61,7 @@ def score_options(model, tokenizer, samples, bs=24):
         if s % (bs * 500) == 0:
             rate = s / max(1, time.time() - t0)
             print(f"    [{time.strftime('%H:%M:%S')}] ... {s}/{len(flat)} options "
-                  f"({rate:.0f} opts/s, ETA {max(0, (len(flat)-s)/rate)/60:.1f} min)", flush=True)
+                  f"({rate:.0f} opts/s, ETA {max(0, (len(flat)-s)/max(rate, 1e-9))/60:.1f} min)", flush=True)
         pids = [tokenizer(p, add_special_tokens=False)["input_ids"] for p, _ in chunk]
         cids = [tokenizer(c, add_special_tokens=False)["input_ids"] for _, c in chunk]
         maxl = min(SCORE_MAX_LEN, max(len(p) + len(c) for p, c in zip(pids, cids)))
@@ -95,7 +95,7 @@ def _per_row_nll(logits, labels, mask):
 
 
 @torch.no_grad()
-def generate(model, tokenizer, prompts, max_new_tokens=256, bs=16):
+def generate(model, tokenizer, prompts, max_new_tokens=256, bs=32):
     model.config.use_cache = True
     tokenizer.padding_side = "left"  # flash-attn generation is broken with right padding
     outs = []
@@ -104,7 +104,7 @@ def generate(model, tokenizer, prompts, max_new_tokens=256, bs=16):
         if s % (bs * 50) == 0:
             rate = s / max(1, time.time() - t0)
             print(f"    [{time.strftime('%H:%M:%S')}] ... generated {s}/{len(prompts)} "
-                  f"({rate:.1f} prompts/s, ETA {max(0, (len(prompts)-s)/rate)/60:.1f} min)", flush=True)
+                  f"({rate:.1f} prompts/s, ETA {max(0, (len(prompts)-s)/max(rate, 1e-9))/60:.1f} min)", flush=True)
         enc = tokenizer(prompts[s:s + bs], return_tensors="pt", padding=True,
                         truncation=True, max_length=MAX_LEN - max_new_tokens)
         gen = model.generate(

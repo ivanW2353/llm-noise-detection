@@ -10,7 +10,7 @@ separate noisy samples from clean ones.
 |---|---|---|---|---|
 | `ratio10` (default tag) | garbled, duplicate, unrelated, keyword + mixed (4-way) | 10% | **COMPLETE** | detection garbled 0.9996 / duplicate 0.974 / unrelated 0.923 / keyword 0.531 (blind spot); noise harm << SFT harm; detectability decays with epochs |
 | `ratio05` | same 4 types + mixed | 5% | **COMPLETE** | detection is ratio-insensitive (garbled 0.999); unrelated harms MMLU *more* at 5% than 10% |
-| `extra10` | + template, truncation, near_duplicate + mixed (7-way) | 10% | **data built; training pending GPU** | fills the "consistent-pattern / info-loss / near-duplicate" quadrants |
+| `extra10` | + template, truncation, near_duplicate + mixed (7-way) | 10% | **COMPLETE** | fills the "consistent-pattern / info-loss / near-duplicate" quadrants; 7-way mixed detection RF 0.887 (LR 0.836); template = consistent pattern (fix wrong answer), truncation = information loss, near_duplicate = light paraphrase |
 
 ## Analysis reports
 

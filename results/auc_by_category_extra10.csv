@@ -1,0 +1,9 @@
+category,n,n_noise,rf_auc
+creative_writing,193,21,1.0
+information_extraction,321,25,0.9595
+general_qa,517,41,0.9298
+open_qa,875,71,0.9185
+closed_qa,423,27,0.8978
+summarization,346,46,0.8702
+classification,458,50,0.7809
+brainstorming,504,32,0.772

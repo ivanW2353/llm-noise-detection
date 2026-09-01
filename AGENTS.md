@@ -74,6 +74,8 @@ bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean  # full pipeline
 - GSM8K needs chat-template prompts + `max_new_tokens=512` + parse `####`/`\boxed{...}`/last-number fallback.
 - `nlls` from `score_options` are torch tensors → `float()` before `round()`/math.
 - Eval is resumable (per-task save); results dict is nested `{task: {acc, n, subjects/raw}}` — analysis must read `r["mmlu"]["subjects"]`, not `r["subjects"]`.
+- **BBH data lives at `data/{data_root}/bbh/{test,cot-prompts}`** (re-downloaded from `suzgunmirac/BIG-Bench-Hard` on 2026-09-01 after the server migration lost `/root/autodl-tmp/less`; keep `BBH_DIR` in evaluate.py pointing there). Verify data integrity via fingerprints: causal_judgement 0.55, navigate 0.50 across all models.
+- **Two div-by-zero bugs in evaluate.py fixed 2026-09-01**: ETA prints at s=0 divided by rate=0 (`max(rate, 1e-9)` guards); a crash on the 5th task (bbh) means BBH_DIR data is missing (eval looks "stuck" otherwise).
 
 **Analysis**
 - `PEFT from_pretrained` sets `requires_grad=False` → re-enable `lora_` params before any backward (token-level analysis).
