@@ -109,6 +109,10 @@ def main():
                     print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {k}/{len(rows)} samples "
                           f"({(time.time()-t0)/k:.2f}s/sample)", flush=True)
         print(f"  [{time.strftime('%H:%M:%S')}] {ds}: {n} samples in {time.time()-t0:.0f}s -> {out_p}")
+        # a fresh 3B+LoRA is loaded per dataset; free it before the next one so
+        # the loop fits on smaller cards (32GB) as well as the 96GB one
+        del model
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
