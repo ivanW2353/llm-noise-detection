@@ -1,0 +1,13 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-ZcleQCfGh5fwtzzlAqhj8QAMQkpv0eDtj5QyRcmGBpBm83GX",
+    "ANTHROPIC_BASE_URL": "https://cf.api.fan",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "claude-haiku-4-5-20251001",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5[1M]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1M]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "claude-opus-5",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5[1M]"
+  }
+}

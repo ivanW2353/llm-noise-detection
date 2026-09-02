@@ -67,6 +67,7 @@ analysis_done() {  # analysis_done <dataset-suffix> — all trained datasets hav
     done
     return 0
 }
+table_done() { [ -f "$REPO/results/$TAG/$1" ]; }  # single-table analyses
 stage() {  # stage <name> <cmd...>
     echo "===== [$TAG] $(date '+%F %T') $1 =====" | tee -a "$LOG"
     shift
@@ -147,6 +148,25 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "analyze" ]; then
     else
         stage "IFD analysis" python3 scripts/compute_ifd.py --tag "$TAG"
     fi
+    # CPU-only analyses. Previously these had to be remembered by hand, which is
+    # how extra10 ended up without feature_exploration.csv while its numbers were
+    # already cited in the reports. Cheap enough (minutes) to always run.
+    for spec in \
+        "feature_exploration.csv:full-feature exploration:analyze_all_features" \
+        "detector_precision_at_k.csv:early detection / precision@k:analyze_early_detection" \
+        "unsupervised_detection.csv:label-free scorers:analyze_unsupervised" \
+        "memorization_detection.csv:signed hyper-typicality rule:analyze_memorization_score" \
+        "token_concentration.csv:true token_loss_top20 concentration:analyze_token_concentration"
+    do
+        out="${spec%%:*}"; rest="${spec#*:}"; name="${rest%%:*}"; script="${rest##*:}"
+        if table_done "$out"; then
+            echo "----- [$TAG] $(date '+%F %T') skip $name ($out exists) -----" | tee -a "$LOG"
+        else
+            stage "$name" python3 "scripts/$script.py" --tag "$TAG"
+        fi
+    done
+    echo "----- [$TAG] $(date '+%F %T') cross-tag analyses (analyze_transfer / compare_ratios) are"
+    echo "      multi-tag by nature — run them manually once >1 tag exists, see README step 5 -----"
 fi
 
 echo "===== [$TAG] $(date '+%F %T') ALL DONE =====" | tee -a "$LOG"
