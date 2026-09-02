@@ -1,0 +1,9 @@
+category,near_duplicate,template,truncation
+brainstorming,0.375,1.0,0.5417
+classification,0.8958,1.0,0.7292
+closed_qa,0.5759,0.9062,0.6071
+creative_writing,1.0,1.0,0.9615
+general_qa,0.9352,1.0,0.7963
+information_extraction,0.8696,1.0,1.0
+open_qa,0.3944,0.9944,0.7972
+summarization,0.5521,1.0,0.8333

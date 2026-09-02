@@ -7,9 +7,16 @@ and epoch-end token diagnostics) with noise labels from the datasets, then:
   2. univariate detection: AUC per metric per noise type
   3. multivariate detection: logistic regression / random forest + ROC +
      feature importance + confusion matrix
+  3b. dilution check: per-subtype detectability inside the `mixed` run vs the
+     same noise type's own single-type run (trajectory features only, so all
+     samples count, not just the 1/8 diagnostic subsample)
   4. PCA scatter of samples colored by noise type
   5. loss trajectories across epochs per noise type
   6. aggregates evaluation tables (results/eval_*.json)
+
+Detection targets are derived from the data (`noise_spec`): every trained
+noise dataset is scored individually, and `mixed` aggregates whatever subtypes
+its own labels contain (4-way or 7-way) — no hardcoded noise-type list.
 
 Outputs everything into <repo>/results/.
 """
@@ -49,6 +56,15 @@ METRIC_ORDER = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_ep
                 "token_loss_kurt_std", "token_loss_kurt_curv",
                 "n_hard", "hard_loss_mean", "hard_loss_max",
                 "hard_pos_peak", "hard_pos_std_mean", "hard_id_uniq", "hard_pos_jaccard"]
+
+# Features available for EVERY training sample (per-epoch tracking, micro-batch 1)
+# as opposed to the diagnostic/token features that only exist for the 1/8
+# subsample. Needed for the mixed-run per-subtype analysis: a subtype has
+# 200-730 samples in a mixed run, but only ~30-90 of them are in the diag
+# subsample, so dropna over the full METRIC_ORDER would collapse it.
+TRAJ_METRICS = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_epoch",
+                "loss_rank", "loss_curvature", "grad_norm_mean", "grad_norm_cv",
+                "cos_ref_mean", "cos_ref_trend", "update_contrib_mean", "text_nn_sim"]
 
 
 def _tag(cfg):
@@ -230,11 +246,12 @@ def tb_dynamics(cfg, df=None):
     """Compare training-dynamics trajectories across runs (from TensorBoard)."""
     repo = cfg["paths"]["repo_root"]
     tag = _tag(cfg)
-    res_dir = os.path.join(repo, "results")
+    res_dir = os.path.join(repo, "results", tag) if tag else os.path.join(repo, "results")
     chart_dir = os.path.join(repo, "results", "charts")
+    os.makedirs(res_dir, exist_ok=True)
     os.makedirs(chart_dir, exist_ok=True)
     def res_name(name):
-        return f"{name}_{tag}.csv" if tag else f"{name}.csv"
+        return f"{name}.csv"
     def res_img(name):
         return f"{name}_{tag}.png" if tag else f"{name}.png"
     series = {}
@@ -338,6 +355,47 @@ def univariate_auc(df, dataset, pos_types, neg_types=None):
     return res
 
 
+def noise_spec(df):
+    """(name, dataset, pos_types) per detection target, derived from the data.
+
+    Any trained noise dataset gets its own single-type row (so extended noise
+    types like template/truncation/near_duplicate are evaluated individually,
+    not only inside `mixed`), and `mixed` aggregates whatever subtypes its own
+    labels contain (4-way or 7-way).
+    """
+    spec = []
+    for ds in sorted(df["dataset"].unique()):
+        if ds in ("clean", "mixed"):
+            continue
+        types = sorted(set(df[df["dataset"] == ds]["noise_type"]) - {"none"})
+        if types:
+            spec.append((ds, ds, types))
+    if "mixed" in set(df["dataset"]):
+        sub_types = sorted(set(df[df["dataset"] == "mixed"]["noise_type"]) - {"none"})
+        if sub_types:
+            spec.append(("mixed", "mixed", sub_types))
+    return spec
+
+
+def fit_eval(X, y, seed=0, models=("LR", "RF")):
+    """70/30 split fit; returns per-model (auc, acc, cm, proba, y_test, clf)."""
+    sc = StandardScaler().fit(X)
+    Xs = sc.transform(X)
+    idx = np.random.RandomState(seed).permutation(len(y))
+    n_tr = int(0.7 * len(y))
+    tr, te = idx[:n_tr], idx[n_tr:]
+    out = {}
+    for name in models:
+        clf = (LogisticRegression(max_iter=2000) if name == "LR"
+               else RandomForestClassifier(n_estimators=200, random_state=seed))
+        clf.fit(Xs[tr], y[tr])
+        proba = clf.predict_proba(Xs[te])[:, 1]
+        pred = (proba > 0.5).astype(int)
+        out[name] = (roc_auc_score(y[te], proba), accuracy_score(y[te], pred),
+                     confusion_matrix(y[te], pred), proba, y[te], clf)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
@@ -386,13 +444,12 @@ def main():
     tb_dynamics(cfg)
 
     # ---- 1. univariate AUC table -------------------------------------------
-    noise_types = ["garbled", "duplicate", "unrelated", "keyword", "mixed"]
+    spec = noise_spec(df)
+    print(f"detection targets: {[(n, len(t)) for n, _, t in spec]}")
     auc_rows = []
-    for nt in noise_types:
-        pos = [nt] if nt != "mixed" else ["garbled", "duplicate", "unrelated", "keyword"]
-        ds = nt if nt != "mixed" else "mixed"
+    for name, ds, pos in spec:
         res = univariate_auc(df, ds, pos)
-        auc_rows.append({"noise_type": nt, **{k: round(v, 4) if v == v else None for k, v in res.items()}})
+        auc_rows.append({"noise_type": name, **{k: round(v, 4) if v == v else None for k, v in res.items()}})
     auc_tab = pd.DataFrame(auc_rows)
     auc_tab.to_csv(os.path.join(res_dir, res_name("auc_univariate")), index=False)
     print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
@@ -416,36 +473,26 @@ def main():
     # ---- 3. multivariate detection per noise type --------------------------
     det_rows = []
     fig_roc, ax_roc = plt.subplots(figsize=(6, 6))
-    for nt in noise_types:
-        ds = nt if nt != "mixed" else "mixed"
+    for name, ds, pos in spec:
         sub = df[df["dataset"] == ds].dropna(subset=METRIC_ORDER)
         if sub.empty:
-            print(f"  skip {nt}: no data")
+            print(f"  skip {name}: no data")
             continue
-        sub["label"] = (sub["noise_type"] != "none").astype(int)
-        X = sub[METRIC_ORDER].values
-        y = sub["label"].values
-        sc = StandardScaler().fit(X)
-        Xs = sc.transform(X)
-        rng = np.random.RandomState(0)
-        idx = rng.permutation(len(y))
-        n_tr = int(0.7 * len(y))
-        tr, te = idx[:n_tr], idx[n_tr:]
-        for name, clf in [("LR", LogisticRegression(max_iter=2000)),
-                          ("RF", RandomForestClassifier(n_estimators=200, random_state=0))]:
-            clf.fit(Xs[tr], y[tr])
-            proba = clf.predict_proba(Xs[te])[:, 1]
-            a = roc_auc_score(y[te], proba)
-            acc = accuracy_score(y[te], (proba > 0.5).astype(int))
-            cm = confusion_matrix(y[te], (proba > 0.5).astype(int))
-            det_rows.append({"noise_type": nt, "model": name, "auc": round(a, 4),
-                             "acc": round(acc, 4), "cm": str(cm.tolist()), "n_test": len(te)})
-            if name == "RF":
-                fpr, tpr, _ = roc_curve(y[te], proba)
-                ax_roc.plot(fpr, tpr, label=f"{nt} (AUC={a:.3f})")
-            if name == "LR":
+        sub = sub[sub["noise_type"].isin(["none"] + list(pos))]
+        y = (sub["noise_type"] != "none").astype(int).values
+        if len(set(y)) < 2 or y.sum() < 10:
+            print(f"  skip {name}: {y.sum()} noise samples with full features")
+            continue
+        fits = fit_eval(sub[METRIC_ORDER].values, y)
+        for mname, (a, acc, cm, proba, y_te, clf) in fits.items():
+            det_rows.append({"noise_type": name, "model": mname, "auc": round(a, 4),
+                             "acc": round(acc, 4), "cm": str(cm.tolist()), "n_test": len(y_te)})
+            if mname == "RF":
+                fpr, tpr, _ = roc_curve(y_te, proba)
+                ax_roc.plot(fpr, tpr, label=f"{name} (AUC={a:.3f})")
+            if mname == "LR":
                 importances = pd.Series(clf.coef_[0], index=METRIC_ORDER).abs().sort_values(ascending=False)
-                print(f"\n[LR] {nt}: top features: {dict(importances.head(3))}")
+                print(f"\n[LR] {name}: top features: {dict(importances.head(3))}")
     det_tab = pd.DataFrame(det_rows)
     det_tab.to_csv(os.path.join(res_dir, res_name("detection_multivariate")), index=False)
     print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
@@ -492,8 +539,9 @@ def main():
     # noise-type × category AUC matrix
     mat_rows = []
     for cat in sorted(df["category"].dropna().unique()):
-        for nt in ["garbled", "duplicate", "unrelated", "keyword"]:
-            ds = nt
+        for name, ds, pos in spec:
+            if name == "mixed":
+                continue
             sub = df[(df["category"] == cat) & (df["dataset"] == ds)].dropna(subset=METRIC_ORDER)
             if sub.empty or sub["noise_label"].sum() < 5:
                 continue
@@ -510,30 +558,87 @@ def main():
             clf = RandomForestClassifier(n_estimators=200, random_state=0)
             clf.fit(sc.transform(X)[tr], y[tr])
             proba = clf.predict_proba(sc.transform(X)[te])[:, 1]
-            mat_rows.append({"category": cat, "noise_type": nt,
+            mat_rows.append({"category": cat, "noise_type": name,
                              "rf_auc": round(roc_auc_score(y[te], proba), 4),
                              "n": len(y)})
     if mat_rows:
         mat_tab = pd.DataFrame(mat_rows).pivot(index="category", columns="noise_type", values="rf_auc")
-        mat_tab.to_csv(os.path.join(res_dir, res_name("auc_category_x_noise")), index=False)
+        mat_tab.to_csv(os.path.join(res_dir, res_name("auc_category_x_noise")))
         print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
         t_sec = time.time()
         print("\n=== RF AUC: category x noise type ===")
         print(mat_tab.to_string())
 
+    # ---- 3.6 dilution: per-subtype detectability inside the mixed run ------
+    # Does mixing noise types dilute each type's signal? The mixed run has
+    # 200-730 samples per subtype for the always-tracked trajectory features
+    # (TRAJ_METRICS), so each subtype can be scored against the SAME run's
+    # normal samples and compared with its own single-type run.
+    if "mixed" in set(df["dataset"]):
+        dil_rows = []
+        mx = df[df["dataset"] == "mixed"]
+        mx_neg = mx[mx["noise_type"] == "none"]
+        for nt in sorted(set(mx["noise_type"]) - {"none"}):
+            pos = mx[mx["noise_type"] == nt]
+            row = {"noise_type": nt, "n_noise_mixed": len(pos)}
+            # univariate AUC of each trajectory feature, mixed run vs own run
+            for m in TRAJ_METRICS:
+                p, n = pos[m].dropna(), mx_neg[m].dropna()
+                if len(p) < 10 or len(n) < 10:
+                    row[f"mixed_{m}"] = None
+                    continue
+                row[f"mixed_{m}"] = round(roc_auc_score(
+                    np.r_[np.ones(len(p)), np.zeros(len(n))], np.r_[p, n]), 4)
+            own = df[(df["dataset"] == nt)] if nt in set(df["dataset"]) else None
+            if own is not None and not own.empty:
+                own_neg = own[own["noise_type"] == "none"]
+                own_pos = own[own["noise_type"] == nt]
+                for m in TRAJ_METRICS:
+                    p, n = own_pos[m].dropna(), own_neg[m].dropna()
+                    if len(p) < 10 or len(n) < 10:
+                        row[f"own_{m}"] = None
+                        continue
+                    row[f"own_{m}"] = round(roc_auc_score(
+                        np.r_[np.ones(len(p)), np.zeros(len(n))], np.r_[p, n]), 4)
+            # multivariate RF/LR on the trajectory features only
+            sub = mx[mx["noise_type"].isin(["none", nt])].dropna(subset=TRAJ_METRICS)
+            y = (sub["noise_type"] != "none").astype(int).values
+            if len(set(y)) == 2 and y.sum() >= 10:
+                fits = fit_eval(sub[TRAJ_METRICS].values, y)
+                row["mixed_rf_auc"] = round(fits["RF"][0], 4)
+                row["mixed_lr_auc"] = round(fits["LR"][0], 4)
+            if own is not None and not own.empty:
+                sub = own[own["noise_type"].isin(["none", nt])].dropna(subset=TRAJ_METRICS)
+                y = (sub["noise_type"] != "none").astype(int).values
+                if len(set(y)) == 2 and y.sum() >= 10:
+                    fits = fit_eval(sub[TRAJ_METRICS].values, y)
+                    row["own_rf_auc"] = round(fits["RF"][0], 4)
+                    row["own_lr_auc"] = round(fits["LR"][0], 4)
+            dil_rows.append(row)
+        if dil_rows:
+            dil_tab = pd.DataFrame(dil_rows)
+            dil_tab.to_csv(os.path.join(res_dir, res_name("mixed_subtype_dilution")), index=False)
+            print(f"[{time.strftime('%H:%M:%S')}] section done in {time.time()-t_sec:.0f}s", flush=True)
+            t_sec = time.time()
+            print("\n=== dilution: subtype AUC inside mixed vs its own run "
+                  "(trajectory features, all samples) ===")
+            show = ["noise_type", "n_noise_mixed", "mixed_rf_auc", "own_rf_auc",
+                    "mixed_lr_auc", "own_lr_auc",
+                    "mixed_loss_curvature", "own_loss_curvature",
+                    "mixed_text_nn_sim", "own_text_nn_sim"]
+            print(dil_tab[[c for c in show if c in dil_tab.columns]].to_string(index=False))
+
     # ---- 4. distribution comparison (one figure per metric) ----------------
     for m in METRIC_ORDER:
         data = []
         labels = []
-        for nt in noise_types:
-            ds = nt if nt != "mixed" else "mixed"
+        for name, ds, pos_types in spec:
             sub = df[(df["dataset"] == ds)]
-            pos = sub[(sub["noise_type"] != "none") & (sub["noise_type"].isin(
-                ["garbled", "duplicate", "unrelated", "keyword"] if nt == "mixed" else [nt]))]
+            pos = sub[sub["noise_type"].isin(pos_types)]
             neg = sub[sub["noise_label"] == 0]
             data.append(pos[m].dropna().values)
             data.append(neg[m].dropna().values)
-            labels += [f"{nt}\nnoise", f"{nt}\nnormal"]
+            labels += [f"{name}\nnoise", f"{name}\nnormal"]
         if all(len(d) == 0 for d in data):
             continue
         fig, ax = plt.subplots(figsize=(12, 4.5))
@@ -552,15 +657,13 @@ def main():
                      key=lambda c: int(c.split("_ep")[1]))
     if ep_cols:
         fig2, ax2 = plt.subplots(figsize=(8, 5))
-        for nt in noise_types:
-            ds = nt if nt != "mixed" else "mixed"
+        for name, ds, pos_types in spec:
             sub = df[(df["dataset"] == ds)]
-            pos = sub[(sub["noise_type"] != "none") & (sub["noise_type"].isin(
-                ["garbled", "duplicate", "unrelated", "keyword"] if nt == "mixed" else [nt]))]
+            pos = sub[sub["noise_type"].isin(pos_types)]
             if pos.empty:
                 continue
             vals = pos[ep_cols].mean(axis=0)
-            ax2.plot(range(len(ep_cols)), vals, marker="o", label=f"{nt} noise")
+            ax2.plot(range(len(ep_cols)), vals, marker="o", label=f"{name} noise")
         clean = df[df["dataset"] == "clean"]
         if not clean.empty:
             ax2.plot(range(len(ep_cols)), clean[ep_cols].mean(axis=0),
@@ -579,7 +682,9 @@ def main():
         pca = PCA(n_components=2).fit_transform(feats)
         fig3, ax3 = plt.subplots(figsize=(8, 6))
         colors = {"none": "#bbbbbb", "garbled": "#e41a1c", "duplicate": "#377eb8",
-                  "unrelated": "#4daf4a", "keyword": "#984ea3"}
+                  "unrelated": "#4daf4a", "keyword": "#984ea3",
+                  "template": "#ff7f00", "truncation": "#a65628",
+                  "near_duplicate": "#f781bf"}
         for nt, c in colors.items():
             m = sub["noise_type"] == nt
             if m.sum():

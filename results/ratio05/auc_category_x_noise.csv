@@ -1,7 +1,7 @@
-duplicate,garbled,keyword,unrelated
-,1.0,0.1757,0.8919
-0.9355,,,
-0.9507,1.0,0.4392,0.9868
-0.8068,,,
-0.9129,0.9758,0.7641,0.9294
-0.8696,,,
+category,duplicate,garbled,keyword,unrelated
+brainstorming,,1.0,0.1757,0.8919
+closed_qa,0.9355,,,
+general_qa,0.9507,1.0,0.4392,0.9868
+information_extraction,0.8068,,,
+open_qa,0.9129,0.9758,0.7641,0.9294
+summarization,0.8696,,,
