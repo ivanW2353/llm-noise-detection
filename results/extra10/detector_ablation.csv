@@ -1,0 +1,17 @@
+dataset,features,samples,n,n_noise,lr_auc,rf_auc
+mixed,40dim,diag_subsample,919,88,0.8791,0.9041
+mixed,40dim,all_samples,919,88,0.8791,0.9041
+mixed,13traj,diag_subsample,919,88,0.7884,0.8253
+mixed,13traj,all_samples,14819,1669,0.7958,0.8598
+near_duplicate,40dim,diag_subsample,906,75,0.763,0.7569
+near_duplicate,40dim,all_samples,906,75,0.763,0.7569
+near_duplicate,13traj,diag_subsample,906,75,0.6825,0.7319
+near_duplicate,13traj,all_samples,14611,1461,0.6711,0.676
+template,40dim,diag_subsample,906,75,0.991,0.9996
+template,40dim,all_samples,906,75,0.991,0.9996
+template,13traj,diag_subsample,906,75,0.9427,0.9674
+template,13traj,all_samples,14611,1461,0.9671,0.9884
+truncation,40dim,diag_subsample,906,75,0.8581,0.8287
+truncation,40dim,all_samples,906,75,0.8581,0.8287
+truncation,13traj,diag_subsample,906,75,0.7756,0.7605
+truncation,13traj,all_samples,14611,1461,0.7674,0.7885
