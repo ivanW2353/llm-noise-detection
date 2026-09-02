@@ -237,13 +237,12 @@ and high-ratio semantic noise (hard to detect AND starting to hurt).
   cite dynanoise.
 - Cost: 2 runs + 2 evals (~10h).
 
-### 4.6 Natural-data signal validation (reproduce Phase 6) — script written but **never run**
-- `scripts/natural_signal_validation.py` is implemented; lmsys-chat-1m is
-  cached locally.
-- Compute token-level signals with the trained clean model, Spearman-correlate
-  against loss_mu.
-- Cost: ~1h GPU, purely confirmatory; gives external validity to the
-  "deployable on real unlabeled data" claim.
+### 4.6 Natural-data signal validation (reproduce Phase 6) — ✅ done (2026-09-02 evening)
+- **dynanoise Phase 6**: lmsys-chat-1m (50K), Spearman(token_loss_top20, loss_mu) = **−0.78**
+- **This project §3.14**: lmsys-chat-1m (n=15,404), ratio10 clean model, Spearman = **−0.839** (stronger), p < 1e-300
+- **Two independent experiments** on different models/data both observe: token-level concentration negatively correlates with sample difficulty
+- **But this only proves "signal correlation direction transfers," not "can detect noise without labels"** — both dynanoise Phase 6 and our §3.14 are **pure correlation measurements**; natural data has no ground truth and no AUC can be computed; §3.9/§3.13's label-free detection is a separate question, with a U-shaped spectrum (both ends detectable, middle not)
+- Side finding: token_top20 and loss_cv are **nearly perfectly colinear** (ρ=+0.982) — they measure the same thing; keep only one in a feature set
 
 ### 4.7 RHO-style reference comparison
 - dynanoise uses a holdout model as the RHO baseline; this repo uses

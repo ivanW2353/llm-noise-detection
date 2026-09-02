@@ -2,6 +2,27 @@
 
 LLM-noise-detection experiment: 4 noise types injected into dolly-15k at 10% (tag `ratio10`), LoRA SFT with per-sample metric tracking, noise-detection analysis. All experiments already ran; new work = other ratios / detection improvements.
 
+## Code structure (Phase 1 + Phase 2 refactoring completed 2026-09-02)
+
+**Shared libraries** (`src/`, ~590 lines extracted from 15+ scripts):
+- `src/config.py` — configuration loading, `get_tag()`, `get_results_dir()`
+- `src/metrics.py` — feature constants (`METRIC_ORDER`, `TRAJ_METRICS`, `DATASETS`)
+- `src/data.py` — data loading (`load_metrics()`, `filter_features()`, `get_noise_spec()`)
+- `src/detection.py` — supervised detection (`univariate_auc()`, `fit_eval()`, `get_feature_importance()`)
+- `src/scorers.py` — label-free scorers (`robust_z()`, `memo_scores()`, `unsupervised_scores()`)
+- `src/eval_utils.py` — evaluation metrics (`precision_at_k()`, `safe_auc()`, `lift_at_k()`)
+
+**Analysis scripts** (all migrated to use `src/` modules):
+- `analyze_detection.py` — supervised detection (LR/RF), univariate AUCs, feature importance
+- `analyze_unsupervised.py` — label-free scorers (IsolationForest, Mahalanobis, z-score)
+- `analyze_memorization_score.py` — signed hyper-typicality rule for memorized noise (§3.13)
+- `analyze_transfer.py` — cross-ratio and cross-type detector transfer
+- `analyze_token_concentration.py` — true token_loss_top20 concentration (§3.12)
+- `analyze_early_detection.py` — early-epoch detection (precision@k by epoch)
+- `analyze_all_features.py` — feature exploration using ALL per-sample data
+
+See `REFACTOR_PROGRESS.md` for details (eliminated ~350 lines of duplicated code).
+
 ## Layout & data flow
 
 - `scripts/` pipeline (run in order): `make_noise.py` → `train.py` → `evaluate.py` → `analyze_detection.py` / `analyze_token_level.py`; `recompute_diag.py` is a post-hoc fix script.
@@ -31,6 +52,9 @@ python scripts/analyze_memorization_score.py  --tags ratio10,ratio05,extra10  # 
 python scripts/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio + cross-type transfer
 python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20 (§3.12)
 python scripts/analyze_all_features.py        --tag ratio10                   # full-feature exploration
+
+# 6. external validity: natural-data signal validation (GPU ~2h, uses clean model)
+python scripts/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv (§3.14)
 ```
 
 - No test suite; verification = `--smoke` flags + CPU-only loader checks.

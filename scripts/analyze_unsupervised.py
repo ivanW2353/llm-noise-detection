@@ -45,17 +45,16 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyze_detection import TRAJ_METRICS, _tag
-from analyze_early_detection import precision_at_k
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag
+from src.metrics import TRAJ_METRICS
+from src.scorers import robust_z
+from src.eval_utils import precision_at_k
 
 
-def robust_z(X):
-    """Median/MAD z-scores — a few extreme noise samples must not define the scale."""
-    med = np.median(X, axis=0)
-    mad = np.median(np.abs(X - med), axis=0)
-    scale = np.where(mad > 0, mad * 1.4826, np.std(X, axis=0) + 1e-9)
-    return (X - med) / scale
+def _tag(cfg):
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 
 def unsupervised_scores(X, seed=0):

@@ -41,9 +41,15 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyze_detection import TRAJ_METRICS, _tag
-from analyze_early_detection import precision_at_k
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag, load_config
+from src.metrics import TRAJ_METRICS
+from src.eval_utils import precision_at_k
+
+
+def _tag(cfg):
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 
 def load(repo, tag):

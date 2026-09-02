@@ -25,7 +25,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag, load_config
+
 try:
     from sklearn.metrics import roc_auc_score
 except ImportError:
@@ -33,7 +35,8 @@ except ImportError:
 
 
 def _tag(cfg):
-    return cfg["paths"].get("experiment_tag", "")
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 
 def load_labels(cfg, dataset):

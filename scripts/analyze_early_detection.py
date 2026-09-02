@@ -44,8 +44,15 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyze_detection import METRIC_ORDER, TRAJ_METRICS, _tag
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag, load_config
+from src.metrics import METRIC_ORDER, TRAJ_METRICS
+from src.eval_utils import precision_at_k
+
+
+def _tag(cfg):
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 # Features derivable from the first `n_ep` epochs alone. Anything needing a
 # trajectory shape (std / curvature / slope / rank / convergence) is only
@@ -98,14 +105,6 @@ def cv_scores(X, y, seed=0, n_splits=5):
             clf.fit(Xs[tr], y[tr])
             oof[name][te] = clf.predict_proba(Xs[te])[:, 1]
     return {n: (roc_auc_score(y, s), s) for n, s in oof.items()}
-
-
-def precision_at_k(y, score, k_frac):
-    """Precision / recall if the top k_frac of scored samples are dropped."""
-    n_drop = max(1, int(round(k_frac * len(y))))
-    top = np.argsort(-score)[:n_drop]
-    hit = int(y[top].sum())
-    return hit / n_drop, hit / max(1, int(y.sum())), n_drop
 
 
 def main():

@@ -43,8 +43,13 @@ import pandas as pd
 import yaml
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyze_detection import _tag
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag, load_config
+
+
+def _tag(cfg):
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 # Reference signals already in the feature set, for a like-for-like comparison.
 BASELINE_FEATS = ["frac_hard", "max_token_loss", "hard_loss_mean", "entropy"]

@@ -97,6 +97,33 @@ are saved in each `eval_<model>.json` and aggregated into
 Evaluation is resumable: results are written after every task, and re-running
 skips already-completed models/tasks (`--force` redoes a model).
 
+## Code structure
+
+### Core modules (`src/`)
+
+Shared libraries extracted from 15+ analysis scripts (~590 lines of reusable code):
+
+- **`src/config.py`** — configuration loading, `get_tag()`, `get_results_dir()`
+- **`src/metrics.py`** — feature constants (`METRIC_ORDER`, `TRAJ_METRICS`, `DATASETS`)
+- **`src/data.py`** — data loading (`load_metrics()`, `filter_features()`, `get_noise_spec()`)
+- **`src/detection.py`** — supervised detection (`univariate_auc()`, `fit_eval()`, `get_feature_importance()`)
+- **`src/scorers.py`** — label-free scorers (`robust_z()`, `memo_scores()`, `unsupervised_scores()`)
+- **`src/eval_utils.py`** — evaluation metrics (`precision_at_k()`, `safe_auc()`, `lift_at_k()`)
+
+### Analysis scripts (`scripts/`)
+
+All scripts use the shared `src/` modules and support `--tag` / `--tags` for cross-experiment analysis:
+
+- **`analyze_detection.py`** — supervised detection (LR/RF), univariate AUCs, feature importance
+- **`analyze_unsupervised.py`** — label-free scorers (IsolationForest, Mahalanobis, z-score)
+- **`analyze_memorization_score.py`** — signed hyper-typicality rule for memorized noise
+- **`analyze_transfer.py`** — cross-ratio and cross-type detector transfer
+- **`analyze_token_concentration.py`** — true token_loss_top20 concentration from stored token detail
+- **`analyze_early_detection.py`** — early-epoch detection (precision@k by epoch)
+- **`analyze_all_features.py`** — feature exploration using ALL per-sample data
+
+See `REFACTOR_PROGRESS.md` for the refactoring details.
+
 ## Detection analysis
 
 Combines per-sample metrics with noise labels; per noise type:
@@ -175,6 +202,9 @@ python scripts/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # 
 python scripts/analyze_memorization_score.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule
 python scripts/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio / cross-type
 python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20
+
+# 6. external validity: natural-data signal validation (GPU ~2h, uses clean model)
+python scripts/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv
 ```
 
 Config: `config.yaml` (paths, noise ratio, hyper-parameters).

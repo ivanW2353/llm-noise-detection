@@ -747,6 +747,71 @@ absolute-loss features.
 
 Output table: `results/{tag}/memorization_detection.csv`.
 
+### 3.14 Natural-data signal validation: do controlled signals hold on real data? (new)
+
+§2.6 (cross-experiment finding 6) cites dynanoise Phase 6's claim that
+"controlled-experiment signal directions hold on natural data," but until now that link
+has been purely citation. This section uses lmsys-chat-1m real conversation data
+(n=15,404) with the ratio10 clean model to test whether the claim holds for this
+project's signal/model combination (`scripts/natural_signal_validation.py`, GPU ~2h).
+
+**Method**: Use the ratio10 clean LoRA model (never exposed to any noise) to run
+autoregressive rollout on the first 20K samples from lmsys-chat-1m (16,919 unique
+prompts after dedup, 15,404 valid). For each sample, compute `loss_mu` (mean token
+loss), `loss_cv` (coefficient of variation), and `token_loss_top20` (top-20% token loss
+share), then measure the three pairwise Spearman correlations. **No labels, no
+training** — purely post-hoc correlation measurement.
+
+| Signal pair | Our result | dynanoise Phase 6 | Interpretation |
+|---|---|---|---|
+| token_top20 ↔ loss_mu | **−0.839** | −0.78 | Concentration **anti-correlates** with difficulty (stronger than literature) |
+| loss_cv ↔ loss_mu | **−0.861** | (not reported) | Variation anti-correlates with difficulty |
+| token_top20 ↔ loss_cv | **+0.982** | (not reported) | Near-perfect colinearity — measuring the same thing |
+
+> All p < 1e-300 (effectively zero), n=15,404. Data: `results/natural_validation.csv`.
+
+**Finding 1: controlled-experiment signal directions do hold on real unlabeled data.**
+This confirms the transferability claim in §2.6 — dynanoise and this project, **two
+independent experiments** on different models/data, both observe that token-level
+concentration negatively correlates with sample difficulty (our −0.839 is even stronger,
+possibly due to larger n, a different base model Qwen2.5-3B, or multi-turn conversation
+data). This supports the "deployable to real-world data-quality monitoring" application
+positioning.
+
+**Finding 2: concentration (`token_top20`) and coefficient-of-variation (`loss_cv`) are
+almost entirely redundant (ρ=+0.982).** Both measure the **same phenomenon** from
+different angles — some samples have a few catastrophically hard tokens, others are
+uniformly easy. Practical implication: keep **only one** in a feature set. This report's
+default detection features (`entropy` / `frac_hard` / `max_token_loss`) are semantically
+close to concentration but **exclude** `loss_cv`, so there is no redundancy; §3.12's
+newly-added `top20_share` is a **ratio (scale-free)** rather than an absolute dispersion
+measure, so it is orthogonal to CV.
+
+**Finding 3: but "signal correlation transfers" ≠ "can detect noise without labels".**
+This is the subtle distinction §2.7 (cross-experiment finding 7, added 2026-09-02)
+explicitly separates:
+
+- ✅ What we just confirmed: Spearman(signal_A, signal_B) has the same **sign** on
+  natural data as on controlled data;
+- ❌ What does **not** follow: "outliers on signal_A in natural data are noisy samples."
+
+Why? Because **natural data has no ground truth**; we cannot compute AUC. We can only
+say "high-concentration samples and low-loss samples are the same samples" (via the
+correlation), but we do not know whether those samples are **good** (learned because
+they are clean and common) or **bad** (learned because they are memorizable noise).
+§3.9/§3.13's label-free detection is a **separate question**, and its conclusions are:
+
+- Generic outlier detection works for surface corruption (garbled 0.955) and fails on
+  memorized noise (template 0.633 → needs signed hyper-typicality → 0.9994);
+- The correlation we just measured is consistent with **both**: surface corruption is an
+  **outlier** on concentration (very high), and memorized noise is **hyper-typical**
+  (very low, at the distribution center).
+
+So this section gives **external validity** to the signal *discovery* (§2.6 / finding
+6), not a substitute for **label-free detection** (§3.9/§3.13 / finding 7). The two
+support each other without replacing each other.
+
+
 ---
 
 ## 4. Token-Level Detection (exact per-token gradient attribution)

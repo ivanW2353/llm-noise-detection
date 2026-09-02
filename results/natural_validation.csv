@@ -1,0 +1,4 @@
+signal_a,signal_b,spearman_r,p_value,n_samples,dataset,model,date
+token_top20,loss_mu,-0.839,0.0,15404,lmsys-chat-1m,ratio10_clean,2026-09-02
+loss_cv,loss_mu,-0.861,0.0,15404,lmsys-chat-1m,ratio10_clean,2026-09-02
+token_top20,loss_cv,0.982,0.0,15404,lmsys-chat-1m,ratio10_clean,2026-09-02

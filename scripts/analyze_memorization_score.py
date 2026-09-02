@@ -47,33 +47,16 @@ import pandas as pd
 import yaml
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyze_detection import _tag
-from analyze_early_detection import precision_at_k
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.config import get_tag
+from src.scorers import robust_z, memo_scores, MEMO_FEATS
+from src.eval_utils import precision_at_k
 from analyze_token_concentration import concentration_feats
-from analyze_unsupervised import robust_z
-
-# Learnability features and the sign that makes "more memorized" score higher.
-# All are available for EVERY sample (not just the diagnostic subsample).
-MEMO_FEATS = {
-    "loss_mean": -1,        # memorized -> lower loss
-    "loss_last": -1,        # ... and it stays low
-    "loss_std": -1,         # ... with little epoch-to-epoch movement
-    "loss_curvature": -1,   # ... and no late-training struggle
-    "converge_epoch": -1,   # ... reached its floor early
-    "grad_norm_mean": -1,   # ... contributing little gradient
-}
 
 
-def memo_scores(df, feats_sign):
-    """Signed hyper-typicality score. Direction is fixed a priori, not fitted."""
-    cols = [c for c in feats_sign if c in df.columns]
-    sub = df.dropna(subset=cols)
-    if sub.empty:
-        return None, None, None
-    Z = robust_z(sub[cols].values.astype(float))
-    signs = np.array([feats_sign[c] for c in cols], dtype=float)
-    return sub, (Z * signs).mean(axis=1), cols
+def _tag(cfg):
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 
 def two_tailed_precision(y, s, budget=0.10):

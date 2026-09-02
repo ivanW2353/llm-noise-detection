@@ -38,37 +38,25 @@ import yaml
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (auc, confusion_matrix, roc_auc_score, roc_curve,
-                             accuracy_score)
+from sklearn.metrics import auc, roc_auc_score, roc_curve
 from sklearn.preprocessing import StandardScaler
 
-DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"]
-METRIC_ORDER = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_epoch",
-                "loss_rank", "loss_curvature", "grad_norm_mean", "grad_norm_cv",
-                "cos_ref_mean", "cos_ref_trend", "cos_global_mean", "update_contrib_mean",
-                "max_token_loss", "frac_hard", "user_loss", "entropy",
-                "token_loss_skew", "text_nn_sim",
-                # full-feature exploration additions (see analyze_all_features.py / §3.6)
-                "mean_loss", "mean_loss_std", "mean_loss_curv",
-                "frac_hard_std", "frac_hard_curv", "entropy_std", "entropy_curv",
-                "max_token_loss_std", "max_token_loss_curv",
-                "user_loss_std", "token_loss_skew_std", "token_loss_kurt",
-                "token_loss_kurt_std", "token_loss_kurt_curv",
-                "n_hard", "hard_loss_mean", "hard_loss_max",
-                "hard_pos_peak", "hard_pos_std_mean", "hard_id_uniq", "hard_pos_jaccard"]
+# Add src to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Features available for EVERY training sample (per-epoch tracking, micro-batch 1)
-# as opposed to the diagnostic/token features that only exist for the 1/8
-# subsample. Needed for the mixed-run per-subtype analysis: a subtype has
-# 200-730 samples in a mixed run, but only ~30-90 of them are in the diag
-# subsample, so dropna over the full METRIC_ORDER would collapse it.
-TRAJ_METRICS = ["loss_mean", "loss_last", "loss_std", "loss_slope", "converge_epoch",
-                "loss_rank", "loss_curvature", "grad_norm_mean", "grad_norm_cv",
-                "cos_ref_mean", "cos_ref_trend", "update_contrib_mean", "text_nn_sim"]
+# Import from refactored modules
+from src.config import load_config, get_tag, get_results_dir
+from src.metrics import METRIC_ORDER, TRAJ_METRICS, DATASETS
+from src.detection import univariate_auc, fit_eval_single_split, get_feature_importance
+from src.data import get_noise_spec
+
+# Alias for backward compatibility
+fit_eval = fit_eval_single_split
 
 
 def _tag(cfg):
-    return cfg["paths"].get("experiment_tag", "")
+    """Legacy helper, use get_tag() for new code."""
+    return get_tag(cfg)
 
 
 def load_labels(cfg, dataset):
@@ -335,65 +323,21 @@ def build_table(cfg):
     return pd.DataFrame(all_rows)
 
 
-def univariate_auc(df, dataset, pos_types, neg_types=None):
-    sub = df[df["dataset"] == dataset]
-    if neg_types is None:
-        neg = sub[sub["noise_label"] == 0]
-    else:
-        neg = sub[sub["noise_type"].isin(neg_types)]
-    pos = sub[sub["noise_type"].isin(pos_types)]
-    res = {}
-    for m in METRIC_ORDER:
-        vals_pos, vals_neg = pos[m].dropna(), neg[m].dropna()
-        if len(vals_pos) < 10 or len(vals_neg) < 10:
-            res[m] = np.nan
-            continue
-        y = np.concatenate([np.ones(len(vals_pos)), np.zeros(len(vals_neg))])
-        x = np.concatenate([vals_pos, vals_neg])
-        # direction: higher metric -> more likely noise
-        res[m] = roc_auc_score(y, x)
-    return res
-
-
 def noise_spec(df):
     """(name, dataset, pos_types) per detection target, derived from the data.
 
-    Any trained noise dataset gets its own single-type row (so extended noise
-    types like template/truncation/near_duplicate are evaluated individually,
-    not only inside `mixed`), and `mixed` aggregates whatever subtypes its own
-    labels contain (4-way or 7-way).
+    This is a compatibility wrapper around src.data.get_noise_spec.
+    Returns the format expected by the rest of analyze_detection.py.
     """
-    spec = []
-    for ds in sorted(df["dataset"].unique()):
-        if ds in ("clean", "mixed"):
-            continue
-        types = sorted(set(df[df["dataset"] == ds]["noise_type"]) - {"none"})
-        if types:
-            spec.append((ds, ds, types))
-    if "mixed" in set(df["dataset"]):
-        sub_types = sorted(set(df[df["dataset"] == "mixed"]["noise_type"]) - {"none"})
-        if sub_types:
-            spec.append(("mixed", "mixed", sub_types))
-    return spec
+    spec_dict = get_noise_spec(df)
+    result = []
+    for ds, noise_types in spec_dict.items():
+        result.append((ds, ds, noise_types))
+    return result
 
 
-def fit_eval(X, y, seed=0, models=("LR", "RF")):
-    """70/30 split fit; returns per-model (auc, acc, cm, proba, y_test, clf)."""
-    sc = StandardScaler().fit(X)
-    Xs = sc.transform(X)
-    idx = np.random.RandomState(seed).permutation(len(y))
-    n_tr = int(0.7 * len(y))
-    tr, te = idx[:n_tr], idx[n_tr:]
-    out = {}
-    for name in models:
-        clf = (LogisticRegression(max_iter=2000) if name == "LR"
-               else RandomForestClassifier(n_estimators=200, random_state=seed))
-        clf.fit(Xs[tr], y[tr])
-        proba = clf.predict_proba(Xs[te])[:, 1]
-        pred = (proba > 0.5).astype(int)
-        out[name] = (roc_auc_score(y[te], proba), accuracy_score(y[te], pred),
-                     confusion_matrix(y[te], pred), proba, y[te], clf)
-    return out
+# Remove duplicate univariate_auc and fit_eval definitions
+# (now imported from src.detection)
 
 
 def main():
