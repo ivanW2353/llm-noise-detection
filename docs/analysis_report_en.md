@@ -22,9 +22,17 @@
 
 **7. Absolute noise impact is small**: the 6 fine-tuned models are close to each other and all worse than base — dolly SFT's own damage swamps the noise differences;
 
-**8. Extended noise (extra10)**: **template (consistent wrong-answer pattern) is both the most detectable (RF 0.9995) and the most harmful** (GSM8K −23%) — "random errors get absorbed, systematic errors get learned" — and *all* of its loss/entropy features are **direction-inverted** (loss_mean AUC 0.101 = 0.90 once flipped; same family as duplicate but more extreme); truncation 0.888 is easy to detect; **near_duplicate 0.733 is the second-hardest type after keyword**, and `text_nn_sim` fails on it (0.492 — WordNet-level paraphrase escapes TF-IDF); IFD is the strongest cross-type fingerprint (template 43× easier to follow, garbled 2.7× harder);
+**8. Extended noise (extra10)**: **template (consistent wrong-answer pattern) is both the most detectable (RF 0.9995) and the most harmful** (GSM8K −23%) — "random errors get absorbed, systematic errors get learned" — and *all* of its loss/entropy features are **direction-inverted** (loss_mean AUC 0.101 = 0.90 once flipped; same family as duplicate but more extreme); truncation 0.888 is easy to detect; **near_duplicate 0.733 is the second-hardest type after keyword**, and `text_nn_sim` fails on it (0.492 — WordNet-level paraphrase escapes TF-IDF);
 
-**9. Detectability and harm are not monotonically related**: the easiest type (garbled) is the least harmful; the true detection-value zone is **semantic mismatch (unrelated)** — hard to detect and more harmful at low ratios.
+**9. Detectability and harm are not monotonically related**: the easiest type (garbled) is the least harmful; the true detection-value zone is **semantic mismatch (unrelated)** — hard to detect and more harmful at low ratios;
+
+**10. Label-free detection works at both ends of the spectrum, not in the middle**: points 1-9 all rest on **supervised** detectors, i.e. on having labeled examples of that noise type. Switch to label-free **generic outlier** scorers (IsolationForest / bidirectional z-scores / Mahalanobis) and only garbled survives (0.996→0.955), while **the two direction-inverted types collapse** — duplicate 0.982→0.699 and template 0.988→**0.633 with P@10% = 0.059, below the 0.10 random baseline**. This is mechanically inevitable: memorized noise is not an outlier but *hyper-typical*, sitting at the centre of the distribution. **But that diagnosis is also the way out**: a **signed hyper-typicality rule** (low loss + fast convergence + low gradient, direction fixed a priori by hypothesis rather than fitted) brings template back to 0.887, and adding the scale-free concentration feature reaches **0.9994 / P@10% 0.836 — close to the 0.988 supervised ceiling**; and the **multi-family case needs no sign at all** (two-tailed budget, P@10% 0.293 vs 0.122 random on the 4-way mixed run). The real label-free gap is the **semantic middle** (unrelated / keyword / near_duplicate all ≤0.77 under either rule);
+
+**11. Cross-ratio transfer is lossless; cross-type transfer mostly fails**: swapping ratios between train and test retains 0.995-1.156 (prevalence shift is a non-issue; keyword even gains 0.11 from the 2× larger training noise set), but cross-noise-type off-diagonal AUC averages only 0.688 vs 0.899 on the diagonal, and duplicate↔garbled are **mutually anti-predictive** (0.46/0.48) — **label, score, and union per noise type**;
+
+**12. IFD's value is incremental, not standalone**: IFD's univariate AUC is only 0.55-0.80 (below the same type's loss/entropy features), but adding its numerator and denominator `L(A|Q)` / `L(A)` as two separate features gives template +0.028 (0.967→0.995) and unrelated +0.024 — the ratio collapses two useful degrees of freedom into one;
+
+**13. The true `token_loss_top20` is template's strongest feature** (0.9994, and its only *non*-inverted one): a memorized template concentrates its loss into the few positions where it diverges, and a concentration **ratio is scale-free**, so it survives the collapse of every absolute loss level. It is also the **only non-surface signal that approaches the supervised ceiling without labels** (see point 10) — but it works **only for the consistent-pattern family**; on the other 6 types it loses to the existing entropy / frac_hard.
 
 ---
 
@@ -448,6 +456,297 @@ classifier.
 
 Output table: `results/{tag}/mixed_subtype_dilution.csv`.
 
+### 3.9 Label-free detection: what survives without labels? (new)
+
+**Every AUC above comes from a supervised classifier** (LR/RF trained on ground-truth
+noise labels) — but that is not the deployment setting: if you already had the labels
+you would not need a detector. This section scores the 13 trajectory features with four
+scorers that use **no labels at all** (labels are used only to evaluate afterwards)
+— `scripts/analyze_unsupervised.py`:
+
+- `zscore_max` / `zscore_mean`: per-feature bidirectional robust z-scores (median/MAD),
+  scored as max|z| or mean|z| — this is exactly the "explicit bidirectional signals"
+  item the cross-experiment synthesis §4.4 lists as open;
+- `iforest`: IsolationForest, the standard unsupervised outlier model;
+- `mahalanobis`: distance from the robust centre (accounts for feature correlation).
+
+| Noise type | supervised RF (ceiling) | best label-free | label-free AUC | supervised P@10% | label-free P@10% |
+|---|---|---|---|---|---|
+| garbled | 0.996 | iforest | **0.955** | 0.937 | 0.640 |
+| duplicate | 0.982 | mahalanobis | 0.699 | 0.721 | 0.083 |
+| unrelated | 0.933 | iforest | 0.722 | 0.631 | 0.243 |
+| mixed | 0.923 | iforest | 0.763 | 0.811 | 0.380 |
+| keyword | 0.687 | iforest | 0.572 | 0.251 | 0.170 |
+| **template** (extra10) | **0.988** | mahalanobis | **0.633** | **0.819** | **0.059** |
+
+**Finding 1: only garbled survives without labels** (0.996 → 0.955). Every other type
+loses most of its signal.
+
+**Finding 2: the worst losses are exactly the two direction-inverted types** —
+duplicate 0.982→0.699 and template 0.988→**0.633**, the latter with P@10% = **0.059,
+*below* the 0.10 random baseline** (cleaning by that score is worse than dropping at
+random). The reason is structural: outlier detection ranks by *atypicality*, but
+**memorized noise is not atypical, it is hyper-typical** (lower loss, lower entropy,
+more concentrated loss). It sits at the *centre* of the distribution, where no
+single-population outlier model can find it.
+
+**Finding 3: the bidirectional |z| scheme is refuted *for single-type runs*.**
+`zscore_max` is the worst of the four scorers almost everywhere (template 0.418,
+duplicate 0.598). Taking the absolute value does buy direction-invariance, but at the
+cost of **discarding the direction that carries the signal**. A threshold-based detector
+needs the *signed* direction, and the sign must be calibrated per noise type — which
+requires labels. (§3.13 qualifies this: when several noise families contaminate the same
+run, spending the budget two-tailed *does* beat a single-signed rule, because the
+families sit at opposite tails.)
+
+> **This section requires softening §3.7's deployability framing**: all of §3.7's
+> precision@k figures assume a supervised detector, i.e. that labeled examples of that
+> noise type already exist. In a genuinely label-free setting only surface corruption
+> (garbled) is cleanable.
+
+> **But "only garbled" is partly overturned by §3.13**: all four scorers above are
+> **generic outlier** models, and Finding 2's own mechanism points to the way out —
+> switching to a **signed hyper-typicality rule** lifts template from 0.633 to 0.887,
+> and adding §3.12's scale-free concentration reaches **0.9994 (P@10% 0.836)**. What is
+> label-free-detectable is the **two ends** of the spectrum; what is not is the
+> **semantic middle**. See §3.13.
+
+Output table: `results/{tag}/unsupervised_detection.csv`.
+
+### 3.10 Detector transfer: across ratios and across noise types (new)
+
+Every AUC so far trains and tests **within the same run** (same noise ratio, same noise
+type), whereas deployment means "train on whatever labeled noise you have, apply it to
+data whose contamination rate and noise family are unknown". Two transfer axes
+(`scripts/analyze_transfer.py`; standardization uses the **training** run's scaler to
+avoid leakage):
+
+**(1) Cross-ratio transfer: lossless.**
+
+| Noise type | ratio10→ratio05 | ratio05→ratio10 | target's own CV | retention |
+|---|---|---|---|---|
+| garbled | 0.996 | 0.995 | 0.993 / 0.996 | 1.003 / 0.999 |
+| duplicate | 0.991 | 0.985 | 0.986 / 0.982 | 1.005 / 1.003 |
+| unrelated | 0.955 | 0.929 | 0.948 / 0.933 | 1.007 / 0.995 |
+| mixed | 0.956 | 0.933 | 0.932 / 0.923 | 1.026 / 1.011 |
+| **keyword** | **0.806** | 0.726 | 0.697 / 0.687 | **1.156** / 1.058 |
+
+Retention 0.995-1.156 — **prevalence shift is a non-issue**. keyword actually *gains*
+0.11 (0.697 → 0.806, trained on ratio10's 2× larger noise set), reinforcing §3.7's
+reading that keyword's ceiling is partly a **sample-size** problem, not purely a signal
+problem.
+
+**(2) Cross-type transfer: mostly fails, and asymmetrically.** 10% experiment, rows =
+trained on, columns = tested on (diagonal = within-run 5-fold CV):
+
+| train ↓ / test → | duplicate | garbled | keyword | unrelated |
+|---|---|---|---|---|
+| duplicate | *0.982* | 0.461 | 0.487 | 0.722 |
+| garbled | 0.484 | *0.996* | 0.646 | 0.799 |
+| keyword | 0.569 | 0.954 | *0.687* | 0.859 |
+| unrelated | 0.700 | 0.915 | 0.663 | *0.933* |
+
+Off-diagonal mean 0.688 vs diagonal 0.899 (5% experiment likewise: 0.715 vs 0.906).
+Three patterns:
+
+1. **garbled is detectable from almost any detector** (off-diagonal 0.915-0.954) —
+   surface corruption is the one type that looks anomalous under any model;
+2. **duplicate and garbled are mutually anti-predictive** (0.461 / 0.484, i.e. only
+   0.52-0.54 once flipped): training on one actively **mis-ranks** the other — the
+   direction inversion again;
+3. **template is the worst transfer target of all** (extra10 off-diagonal 0.172-0.438):
+   a detector trained on any other type ranks template samples at the **cleanest** end.
+
+**Deployment implication**: together with §3.8 (mixing does not dilute) this yields one
+consistent rule — **each noise family needs its own labeled examples; score per type and
+take the union**. A single generic detector, supervised or not, reliably catches only
+surface corruption. (§3.13 adds the label-free counterpart of the same rule: with no
+labels at all, spend the budget *two-tailed* rather than trying to find one universal
+direction — the families sit at opposite tails, which is why the union framing keeps
+reappearing.)
+
+Output tables: `results/transfer_cross_ratio.csv` · `results/transfer_cross_type.csv`.
+
+### 3.11 Is IFD worth adding to the feature set? (new)
+
+`compute_ifd.py` has now been run over every dataset of all three tags (1/8 diagnostic
+subsample). The question that matters is not "can IFD separate noise?" but "**how much
+does IFD add on top of the 13 trajectory features?**":
+
+| Noise type | 13 trajectory | +IFD | +IFD/L(A\|Q)/L(A) | gain |
+|---|---|---|---|---|
+| template (extra10) | 0.967 | 0.971 | **0.995** | **+0.028** |
+| unrelated (10%) | 0.899 | 0.901 | **0.923** | **+0.024** |
+| mixed (extra10, 7-way) | 0.839 | 0.844 | **0.861** | **+0.022** |
+| keyword (10%) | 0.679 | 0.690 | 0.688 | +0.009 |
+| truncation (extra10) | 0.773 | 0.771 | 0.783 | +0.009 |
+| near_duplicate (extra10) | 0.738 | 0.734 | 0.743 | +0.005 |
+| duplicate (10%) | 0.976 | 0.976 | 0.979 | +0.003 |
+| garbled (10%) | 0.997 | 0.998 | 0.995 | -0.003 |
+| mixed (10%) | 0.931 | 0.926 | 0.929 | -0.002 |
+
+**Conclusions:**
+
+1. **The IFD ratio itself adds almost nothing** (+0.000 to +0.012), but **adding its
+   numerator and denominator L(A|Q) and L(A) as two separate features does** — template
+   +0.028 (0.967→0.995), unrelated +0.024, 7-way mixed +0.022. The ratio collapses two
+   useful degrees of freedom into one and loses information;
+2. **The beneficiaries are the structural/semantic types** (template / unrelated);
+   garbled and duplicate are already near ceiling on the loss side with no room left;
+3. **Cost**: one extra forward pass per sample (0.12s/sample, 6 datasets × 1827 samples
+   ≈ 4 min/tag), covering only the diagnostic subsample — full coverage would be 8× that;
+4. **Recommendation**: expose `L_AQ` / `L_A` (not the IFD ratio) as optional feature
+   columns for template/unrelated-style noise; do not add them to the default
+   `METRIC_ORDER`, since the benefit is concentrated in a few types while the cost is
+   global.
+
+Output: `results/{tag}/ifd_{dataset}.jsonl` (all three tags).
+
+### 3.12 The true `token_loss_top20` concentration (new)
+
+dynanoise's most model-stable signal is `token_loss_top20` — the share of a sample's
+total loss that sits in its hardest 20% of tokens. This repo only ever had
+approximations: `frac_hard` (an absolute threshold of 4.0, therefore
+**scale-dependent**) and `max_token_loss`. The real ratio can be computed **offline**
+from data already on disk (each sample-epoch stored the top-32 hardest label tokens as
+`[pos, token_id, loss]`, and `mean_loss × tokens` gives the total) — **zero GPU cost, no
+retraining** (`scripts/analyze_token_concentration.py`).
+
+Univariate AUC (direction-corrected `auc_dir`, single-type runs):
+
+| Noise type | top20_share | top20_share_std | hard_gini | top1_over_top8 | best existing token feature |
+|---|---|---|---|---|---|
+| **template** (extra10) | **0.9994** | 0.9968 | 0.967 | 0.967 | hard_loss_mean 0.904 |
+| garbled (10%) | 0.890 | 0.601 | 0.841 | 0.828 | **entropy 0.971** |
+| unrelated (10%) | 0.513 | **0.727** | 0.543 | 0.569 | frac_hard 0.719 |
+| keyword (10%) | 0.565 | 0.540 | 0.552 | 0.557 | **entropy 0.638** |
+| duplicate (10%) | 0.525 | 0.563 | 0.515 | 0.522 | **max_token_loss 0.648** |
+| near_duplicate (extra10) | 0.519 | 0.523 | 0.508 | 0.510 | **max_token_loss 0.680** |
+| truncation (extra10) | 0.514 | 0.543 | 0.574 | 0.610 | frac_hard 0.575 (n_tokens 0.651) |
+
+**Finding 1: it is template's strongest single feature (0.9994) and template's only
+*non*-inverted one.** Compare §7.2: template's loss / entropy / hard_loss features all
+invert (raw AUC 0.09–0.14) because a fixed template is memorized outright and **every
+absolute loss level collapses together**. A concentration is a **ratio, hence
+scale-free** — whatever loss remains is concentrated on the few positions where the
+template diverges from the real answer, so it survives the collapse. This is a
+*structural* answer to the direction-inversion problem: replace absolute-level features
+with scale-free shape features.
+
+**Finding 2: but it is not a general signal.** On the other 6 types, concentration
+**loses** to the existing entropy / frac_hard / max_token_loss. dynanoise's
+"most model-stable signal" **reproduces here but is type-specific** — it is essentially
+a *consistent-pattern detector*, not a general noise signal. That agrees with §3.10's
+cross-type transfer result: there is no single universal signal.
+
+**Finding 3: two by-products.** (a) `top20_share_std` (the cross-epoch std of the
+concentration) is unrelated's best token-level feature (0.727 > frac_hard's 0.719) — for
+semantically mismatched samples the *location* of the concentrated loss **drifts** during
+training; (b) `n_tokens` is truncation's strongest single feature (0.651, inverted),
+which is a direct consequence of the construction (truncating makes samples shorter) —
+**construction leakage**, not a transferable signal. It is *not* in `METRIC_ORDER`, so
+truncation's reported 0.888 is unaffected (that comes from loss dynamics: loss_std
+0.759, loss_slope 0.758, mean_loss_std 0.745), and `n_tokens` should stay out of the
+feature set.
+
+**Coverage measured, not assumed**: an exact top-20% needs
+`ceil(0.2·n_tokens) ≤ 32`, i.e. `n_tokens ≤ 160`, which holds for **86–89%** of samples
+(median length 41–49 tokens). So the script also emits `top20_share` (truncated for long
+samples → **understates** concentration), `top20_share_ok` (NaN when too long: unbiased
+but fewer rows), and the truncation-free `top32_share` / `top8_share`. **On template the
+first two agree to 4 decimals** (both 0.9994), so truncation is not the source of the
+result.
+
+Output table: `results/{tag}/token_concentration.csv`.
+
+### 3.13 Memorization as a *positive* signal: partly closing the label-free gap (new)
+
+§3.9 named label-free detection the largest capability gap and gave the mechanism:
+generic outlier detection ranks by *atypicality*, but memorized noise **is not
+atypical — it is hyper-typical**, sitting at the centre of the distribution. §6.3
+point 9 turned that into a hypothesis: stop asking "is this an outlier?" and ask
+"**is this sample too easy?**" — a **signed** rule instead of a two-sided |z|. This
+section tests it directly (`scripts/analyze_memorization_score.py`).
+
+The scorer still uses **no labels at all**, and its direction is fixed **a priori** by
+the memorization hypothesis rather than fitted: robust z-scores over 6 learnability
+features, averaged with the sign that makes "easier than typical" score high
+(`loss_mean` / `loss_last` / `loss_std` / `loss_curvature` / `converge_epoch` /
+`grad_norm_mean`, all negated). That matters — the identical sign vector is applied
+unchanged to every dataset; a rule that had to be re-signed per dataset would need
+labels and would defeat the purpose.
+
+| Noise type | supervised ceiling | generic outlier (§3.9 best) | **signed memorization rule** | label-free P@10% |
+|---|---|---|---|---|
+| **template** (extra10) | 0.988 | 0.633 | **0.887** | **0.355** (was 0.059) |
+| **template** + concentration (`conc_only`)¹ | 0.988 | 0.633 | **0.9994** | **0.836** |
+| duplicate (10%) | 0.982 | 0.699 | 0.625 | 0.163 |
+| garbled (10%) | 0.996 | **0.955** | 0.015 (**inverted**) | 0.000 |
+| unrelated (10%) | 0.933 | 0.722 | 0.225 (inverted) | 0.000 |
+| keyword (10%) | 0.687 | 0.572 | 0.346 (inverted) | 0.024 |
+
+> ¹ The concentration feature only exists for the 1/8 diagnostic subsample, so that row
+> is scored on n=1827 where the random baseline is 0.085 rather than 0.100 (its P@10%
+> lift is 9.9× random). Every other row uses all 14611 samples. The comparison is still
+> meaningful — the supervised ceiling and the outlier scorers are far below it on either
+> sample — but the two P@10% columns are not measured on identical row sets.
+
+**Finding 1: the hypothesis holds, and the effect is large.** template goes
+0.633 → **0.887**, and precision@10% goes from **0.059 (below random)** to **0.355
+(3.6× random)**. Adding §3.12's scale-free concentration goes further: **`top20_share`
+alone, as a label-free scorer, reaches AUC 0.9994, P@10% 0.836 and recall@10% 0.987** —
+essentially matching the 0.988 supervised ceiling. This is the **only non-surface noise
+type in this report where label-free approaches supervised performance**.
+
+**Finding 2: the price is that the sign must match the noise family, and that price is
+real.** The same rule scores AUC **0.015** on garbled — not "useless" but **fully
+inverted** (corrupting the input makes samples *harder*, not easier). unrelated (0.225)
+and keyword (0.346) invert too. Two rules together cover the two ends of the spectrum:
+
+- the **hyper-typicality rule** (low loss + fast convergence + low gradient) catches
+  consistent-pattern / memorizable noise;
+- the **outlier rule** (§3.9's iforest) catches surface corruption.
+
+And **you do not know in advance which one to use.** The two-tailed compromise (5% from
+each end) was measured, and the result splits by scenario:
+
+| run | one-sided P@10% (memo sign) | two-tailed P@10% | random |
+|---|---|---|---|
+| template (single type) | **0.355** | 0.093 | 0.100 |
+| garbled (single type) | 0.000 | **0.483** | 0.100 |
+| **mixed (10%, 4-way)** | 0.083 | **0.293** | 0.122 |
+| **mixed (extra10, 7-way)** | 0.098 | **0.249** | 0.113 |
+
+For a **single** noise family the two tails waste half the budget on pure clean data
+(template 0.093, *below* the 0.10 random baseline) — a wrong-signed one-sided rule is
+even worse (garbled 0.000), and the correct sign is 3.6× better than two-tailed. But for
+**realistically mixed contamination the two-tailed rule wins** (0.293 vs 0.083 at 10%,
+2.4× random), precisely because a mixed run has noise at *both* tails: garbled sits at
+the hard end and duplicate/template at the easy end. So the practical label-free recipe
+is **two-tailed when you expect several noise families, one-sided when you are hunting
+one and know its sign** — and the earlier §3.9 conclusion that |z| is simply "the worst
+scorer" holds only for the single-type case.
+
+**Finding 3: the single feature `-loss_mean` already achieves most of it** (template
+0.899, marginally above the 6-feature 0.887). The active ingredient is simply "low
+loss"; aggregating six absolute-loss features adds nothing — consistent with §3.12,
+where the real increment came from the **scale-free concentration**, not from more
+absolute-loss features.
+
+> **Revision to §3.9 and §6.3**: "only surface corruption is detectable without labels"
+> should read — **what is detectable without labels is the two ends of the spectrum
+> (hyper-typical consistent patterns + outlying surface corruption); what is not is the
+> middle** (unrelated / keyword / near_duplicate all stay ≤0.77 under either rule). The
+> real label-free gap is **semantic** noise, not "everything but garbled" as first
+> judged. The remaining precondition is weaker than it first appears: hunting *one*
+> family needs its sign (a prior hypothesis, not annotations), while the realistic
+> **multi-family case needs no sign at all** — two-tailed spending reaches P@10% 0.293
+> on the 4-way mixed run and 0.249 on the 7-way (2.2-2.4× random), because the families
+> populate both tails. What remains genuinely unavailable label-free is a mid-spectrum
+> semantic detector.
+
+Output table: `results/{tag}/memorization_detection.csv`.
+
 ---
 
 ## 4. Token-Level Detection (exact per-token gradient attribution)
@@ -567,7 +866,11 @@ dolly SFT makes answers markedly more concise.
 7. **Harm is non-monotonic**: unrelated is *more* harmful at 5% than 10%, quantified by its confidence inversion (margin 4.75 → 2.45);
 8. **duplicate's overfitting damage is roughly linear in the ratio**;
 9. **Absolute noise impact is small** at both ratios — dolly SFT's own damage swamps the noise differences;
-10. The method is robust across task types (0.71-0.99); classification is hardest and worse at 5%.
+10. The method is robust across task types (0.71-0.99); classification is hardest and worse at 5%;
+11. **All of the above depends on having labels** — with label-free **generic outlier** scorers only garbled survives (0.955), while duplicate/template collapse *because* they are hyper-typical (0.699 / 0.633, the latter's P@10% 0.059 falling below random) (§3.9); but a **signed hyper-typicality rule brings template back to 0.887, and 0.9994 (P@10% 0.836) with the scale-free concentration** — **what is label-free-detectable is the two ends of the spectrum; the real gap is the semantic middle** (§3.13);
+12. **Cross-ratio transfer is lossless (retention 0.995-1.156); cross-type transfer mostly fails** (off-diagonal 0.688 vs diagonal 0.899, with duplicate↔garbled mutually anti-predictive) — together with point 6: **label, score, and union per noise type** (§3.10);
+13. **IFD is incremental, not standalone** (univariate 0.55-0.80, but `L(A|Q)`/`L(A)` as two features give template +0.028 and unrelated +0.024) (§3.11, §7.4);
+14. **Scale-free shape features are the structural answer to direction inversion**: the true `token_loss_top20` concentration is template's strongest feature (0.9994) and its **only non-inverted** one — a ratio survives the wholesale collapse of absolute loss levels under memorization. But it works **only for the consistent-pattern family**; on the other 6 types it loses to the existing entropy / frac_hard (§3.12).
 
 ### 6.2 Detection difficulty spectrum (both ratios)
 
@@ -590,6 +893,15 @@ more harmful at low ratios.
 > reclassified from the earlier reports' "blind spot / undetectable" to "hardest to
 > detect" (see §3.7).
 
+> **A second necessary qualification (§3.9, §3.13)**: this spectrum is the *supervised*
+> spectrum. Removing labels changes its shape entirely — but it **polarizes rather than
+> collapses**: garbled stays at the detectable end (generic outlier 0.955) and template
+> also stays there under the signed hyper-typicality rule (0.9994 / P@10% 0.836), while
+> the **middle band (unrelated / keyword / near_duplicate) is ≤0.77 under either rule**.
+> The label-free spectrum is a **U shape — high at both ends, low in the middle** —
+> not the supervised spectrum's monotone ordering. The price is that you must know which
+> end you are aiming at, in order to pick the rule's sign.
+
 ### 6.3 Limitations & future work
 
 1. **keyword precision is insufficient** — an AUC of 0.70-0.73 corresponds to P@10% of only 0.281, far from cleanable; entity-aware tools needed (NER consistency / counterfactual perturbation / base-model reference scoring);
@@ -599,7 +911,9 @@ more harmful at low ratios.
 5. extreme ratios (1%/20%) unverified; the 5% vs 10% non-monotonicity suggests a richer dose-response curve;
 6. single dataset/model — dolly-15k + Qwen2.5-3B + LoRA;
 7. eval protocol — absolute HellaSwag/TruthfulQA scores are low; between-model comparisons valid;
-8. question-level flips (10-15% at both ratios) — attributing how noisy models err differently is a promising follow-up.
+8. question-level flips (10-15% at both ratios) — attributing how noisy models err differently is a promising follow-up;
+9. **the label-free gap has narrowed to *semantic* noise** (§3.9 → §3.13) — two of the directions this section previously proposed have now been measured: "use memorization itself as a positive signal" **works** (a signed rule takes template 0.633→0.887, and 0.9994 / P@10% 0.836 with the scale-free concentration, approaching the supervised ceiling), and the realistic **multi-family case needs no sign at all** (two-tailed spending reaches P@10% 0.293 on the 4-way mixed run vs 0.122 random). But unrelated / keyword / near_duplicate stay **≤0.77 under both the outlier and the hyper-typicality rule**, which is the **remaining real gap**. The third direction is still untested: calibrating each feature's sign against a clean seed set (semi-supervised);
+10. **cross-type transfer failure means unknown noise families are not covered** (§3.10) — real pollution need not fall within these 7 types, and detectors score near-random (or inverted) on unseen ones. An open-set evaluation protocol is needed.
 
 ### 6.4 Reproduction
 
@@ -697,7 +1011,9 @@ IFD = L(A\|Q) / L(A) — conditional-over-unconditional answer loss; smaller = e
 | keyword | 0.200 | 0.280 | 1.4× harder |
 | duplicate | 0.200 | 0.130 | 1.5× easier |
 
-**Reading:** IFD is the **single most discriminative cross-type feature** — template noise has IFD ≈ 0.005 (fixed template fully learned, 43× gap), garbled 0.534 (corrupted input, hardest to follow). IFD complements loss/gradient features for structural noise (template/truncation), where loss-side signals are weak.
+**Reading:** template noise has IFD ≈ 0.005 (fixed template fully learned) and garbled 0.534 (corrupted input, hardest to follow) — over a 100× spread between the extremes, which makes IFD an intuitive **mechanism diagnostic**.
+
+> ⚠️ **But the claim that "IFD is the single most discriminative cross-type feature" does not survive the follow-up measurement** (2026-09-02; IFD now computed for the core four types as well — see §3.11). The table above compares **means**, and a large mean gap is not the same as separability. IFD's actual univariate AUCs are garbled 0.800, template 0.761 (inverted), duplicate 0.618 (inverted), keyword 0.580, unrelated 0.553 — **all below** the same type's loss/entropy features. IFD's real value is **incremental**, not standalone; see §3.11.
 
 ### 7.5 Token level & distributions (extra10)
 

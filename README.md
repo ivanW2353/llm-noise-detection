@@ -169,6 +169,12 @@ bash run_all_eval.sh                    # -> results/eval_*.json
 # 4. analysis
 python scripts/analyze_detection.py     # -> results/*.csv + *.png
 python scripts/analyze_token_level.py   # -> token-level attribution + AUCs
+
+# 5. deployability / robustness analyses (CPU-only, no retraining)
+python scripts/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # label-free scorers
+python scripts/analyze_memorization_score.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule
+python scripts/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio / cross-type
+python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20
 ```
 
 Config: `config.yaml` (paths, noise ratio, hyper-parameters).
