@@ -8,19 +8,23 @@
 
 ## 0. Executive Summary (TL;DR)
 
-**1. Sample-level noise detectability (identical at both ratios)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.737 > **keyword 0.464 (blind spot)** — detectability does not decay with the ratio; detectors transfer directly to 5% real-world pollution;
+**1. Sample-level noise detectability (identical at both ratios)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.900 > **keyword 0.70-0.73 (hardest, but not random)** — detectability does not decay with the ratio; detectors transfer directly to 5% real-world pollution;
 
-**2. Feature-to-noise mapping**: garbled via input+output-side features (user_loss/entropy/curvature); duplicate **only via the data side** (text_nn_sim; training metrics inverted); unrelated via cross-epoch loss volatility (new features boost it further); keyword needs entity-aware tools — all 40 features fail;
+**2. Feature-to-noise mapping**: garbled via input+output-side features (user_loss/entropy/curvature); duplicate **only via the data side** (text_nn_sim; training metrics inverted); unrelated via cross-epoch loss volatility; keyword's signal is weak and **only emerges with enough samples** (40 features on the diagnostic subsample 0.65 → 13 features on all samples 0.70/0.73);
 
-**3. Detectability decays monotonically over epochs (identical curves at both ratios)**: the model adapts to noise — **clean your data within epoch 0-1**;
+**3. Detectability decays monotonically over epochs (identical curves at both ratios)**: the model adapts to noise — **clean your data within epoch 0-1**; and **epoch-0 features alone already reach 95%+ of the full-trajectory detector** (garbled 0.980/0.987, unrelated 0.881/0.916), so early cleaning is almost free;
 
-**4. Harm is non-monotonic**: unrelated hurts MMLU/ARC/TruthfulQA *more* at 5% than at 10% (MMLU −0.019 vs −0.005), with a confidence inversion (correct-margin 4.75→2.45, "both wrong and hesitant"); duplicate's overfitting damage is roughly linear (10% ≈ 2× 5%);
+**4. AUC overstates usable precision**: evaluated as a real cleaning operation (drop the top-scoring 10%), unrelated's AUC 0.945 corresponds to a **precision of only 0.631** — 37% of the dropped samples are clean; garbled 0.937 / duplicate 0.721 / keyword 0.281 (random 0.10);
 
-**5. Absolute noise impact is small**: the 6 fine-tuned models are close to each other and all worse than base — dolly SFT's own damage swamps the noise differences;
+**5. Mixed noise does not dilute per-type signal**: mixed's low overall AUC (0.82-0.85) is purely a label-aggregation artifact — every subtype is at least as detectable inside the mixed run as in its own single-type run (duplicate 0.998/0.981, keyword 0.773/0.688); multi-type pollution in real data does not weaken detectors;
 
-**6. Extended noise (extra10)**: 7-way mixed detection RF 0.887 (better than 4-way 0.850); **template (consistent wrong-answer pattern) is the most harmful** (GSM8K −23%) — "random errors get absorbed, systematic errors get learned"; IFD is the strongest cross-type fingerprint (template 43× easier to follow, garbled 2.7× harder);
+**6. Harm is non-monotonic**: unrelated hurts MMLU/ARC/TruthfulQA *more* at 5% than at 10% (MMLU −0.019 vs −0.005), with a confidence inversion (correct-margin 4.75→2.45, "both wrong and hesitant"); duplicate's overfitting damage is roughly linear (10% ≈ 2× 5%);
 
-**7. Detectability and harm are not monotonically related**: the easiest type (garbled) is the least harmful; the true detection-value zone is **semantic mismatch (unrelated)** — hard to detect and more harmful at low ratios.
+**7. Absolute noise impact is small**: the 6 fine-tuned models are close to each other and all worse than base — dolly SFT's own damage swamps the noise differences;
+
+**8. Extended noise (extra10)**: **template (consistent wrong-answer pattern) is both the most detectable (RF 0.9995) and the most harmful** (GSM8K −23%) — "random errors get absorbed, systematic errors get learned" — and *all* of its loss/entropy features are **direction-inverted** (loss_mean AUC 0.101 = 0.90 once flipped; same family as duplicate but more extreme); truncation 0.888 is easy to detect; **near_duplicate 0.733 is the second-hardest type after keyword**, and `text_nn_sim` fails on it (0.492 — WordNet-level paraphrase escapes TF-IDF); IFD is the strongest cross-type fingerprint (template 43× easier to follow, garbled 2.7× harder);
+
+**9. Detectability and harm are not monotonically related**: the easiest type (garbled) is the least harmful; the true detection-value zone is **semantic mismatch (unrelated)** — hard to detect and more harmful at low ratios.
 
 ---
 
@@ -204,7 +208,9 @@ Nearly identical across ratios: the "never converges vs converges instantly" mir
 | mixed | 0.850→0.831 | **0.737→0.713** | text_nn_sim 0.716 | text_nn_sim 0.716 |
 | keyword | 0.531→0.497 | **0.464→0.486** | loss_curvature 0.669 | loss_curvature 0.703 |
 
-> Extended feature set (19+21 new, see §3.6) multivariate LR AUC; "→" marks v19 → v40 comparison. **unrelated improves most (+0.022 / +0.021)**, garbled/duplicate near ceiling, keyword still blind, mixed slightly down (dilution).
+> Extended feature set (19+21 new, see §3.6) multivariate LR AUC; "→" marks v19 → v40 comparison. **unrelated improves most (+0.022 / +0.021)**, garbled/duplicate near ceiling, mixed slightly down (dilution).
+
+> ⚠️ **The keyword / mixed numbers in this table are deflated by two methodological artifacts; see the corrected values in §3.7** (keyword is actually 0.70-0.73, mixed 0.90): the 40-feature table includes diagnostic-subsample features, so after `dropna` the training set shrinks to ~900 rows (75 noisy samples), and the test fold of a single 70/30 split retains only ~16 noisy samples. garbled/duplicate/unrelated are unaffected (their signal is strong enough on its own).
 
 ![RF ROC curves](../results/charts/roc_multivariate_ratio10.png)
 
@@ -240,7 +246,7 @@ low-pollution scenarios.
 **Per-noise reading:** garbled locked by user_loss/entropy/loss_curvature (input+output corrupted);
 duplicate's text_nn_sim even *improves* at 5% (0.963) while training-side metrics stay inverted;
 unrelated via loss volatility/curvature (slightly stronger at 5%);
-keyword: no single metric works (0.47-0.70), the blind spot persists;
+keyword: no single metric works (0.47-0.70), same as at 10% (multivariate + full-sample coverage reaches 0.70-0.73, see §3.7);
 mixed diluted, text_nn_sim still catches its duplicate subset.
 
 ### 3.3 Detectability over training time (per-epoch loss AUC, both ratios)
@@ -274,8 +280,10 @@ and even harder at 5% (0.710) — short structured responses with tiny noise sub
 
 ![PCA projection](../results/charts/pca_metrics_ratio10.png)
 
-Garbled separates cleanly from normal; duplicate along the text_nn_sim axis;
-keyword fully embedded in the normal cluster — consistent with the AUCs.
+On the first two principal components of the 40 features, garbled separates cleanly
+from normal; duplicate along the text_nn_sim axis; keyword fully embedded in the
+normal cluster — consistent with the AUCs (the PCA uses only the diagnostic
+subsample, since it includes diagnostic features).
 
 ### 3.6 Full-feature exploration: does the *unused* data help detection?
 
@@ -299,7 +307,7 @@ Many new features carry real signal (identical across both ratios; order-leaking
 | unrelated | loss_std **0.827** | mean_loss_std **0.850** / frac_hard_std 0.829 / entropy_std 0.823 | ✅ yes |
 | duplicate | loss_curvature 0.758 | max_token_loss_curv 0.670 | moderate |
 | keyword | loss_std 0.649 | mean_loss_std **0.673** / entropy_std 0.663 | ✅ slight |
-| mixed | (<10 samples/class) | same | — |
+| mixed | (<10 samples per subclass in the diagnostic subsample) | same | see §3.8 (208-730 samples per subclass once full-sample trajectory features are used) |
 
 **Key findings:**
 1. **The `*_std` family (cross-epoch volatility of diag metrics) is the new main
@@ -308,13 +316,16 @@ Many new features carry real signal (identical across both ratios; order-leaking
 2. **`hard_loss_mean` (hard-token loss) is a strong new feature for garbled** —
    0.859 (10%) and 0.859 / `hard_id_uniq` 0.820 (5%); garbled hard tokens are stable
    and high-loss;
-3. **keyword remains inseparable** — new features barely nudge (0.673), still far from
-   usable;
+3. **keyword remains weak on any single feature** — new features barely nudge (0.673);
+   its multivariate ceiling of 0.70-0.73 comes from full-sample coverage, not from the
+   new features (see §3.7);
 4. `first_step` AUC=0.9999 is pure **order leakage** (noise rows have fixed positions
    in the data), excluded — a reminder never to feed row-index-like features to
    detection;
-5. `mixed` single-feature AUC stays unusable (<10 samples per noise subclass) —
-   multivariate classifiers only.
+5. `mixed` **per-subtype** single-feature AUC is unusable on the diagnostic subsample
+   (<10 samples per subclass) — but switching to trajectory features available for
+   every sample gives 208-730 samples per subclass, making per-subtype analysis
+   possible (see §3.8).
 
 The new features are merged into the main pipeline (40-dim feature set in
 `analyze_detection.py`; exploration table at `results/{tag}/feature_exploration.csv`).
@@ -322,9 +333,120 @@ Post-merge multivariate effect:
 - **unrelated gains the most**: LR 0.923→0.945 (10%) / 0.956→**0.977** (5%);
   RF +0.02~0.04 — exactly the detection-value zone;
 - garbled / duplicate: near ceiling (>0.97), no real change;
-- keyword / mixed: slightly down (new features add noise), still blind / diluted;
+- keyword / mixed: slightly down (new features add noise); note that the absolute
+  values of these two are deflated by the artifacts described in §3.7;
 - Conclusion: **the new features help semantic-mismatch detection specifically**;
   no gain elsewhere.
+
+### 3.7 Deployability: epoch budget / sample coverage / cleaning precision (new)
+
+§3.1's AUC answers "does the signal exist"; this section answers "can you actually
+use it to clean data" — unpacking the three dimensions that a single AUC conflates
+(`scripts/analyze_early_detection.py`, 5-fold stratified cross-validation throughout).
+
+**(1) Sample coverage: half of the keyword "blind spot" is a methodological artifact.**
+The 40-feature table includes diagnostic-subsample (1/8) and token-detail features, so
+after `dropna` the training set shrinks from 14,611 to ~900 rows (75 noisy samples);
+the 13 trajectory features (`TRAJ_METRICS`: per-epoch loss/grad/cos aggregates +
+text_nn_sim) are available for **every** sample:
+
+| Noise type | 40 features / diagnostic subsample | 13 features / all samples | Δ 10% | Δ 5% |
+|---|---|---|---|---|
+| garbled | 0.999 | 0.988 | — | — |
+| duplicate | 0.969 | 0.964 | — | — |
+| unrelated | 0.939 | 0.922 | — | — |
+| mixed | 0.891 | 0.900 | +0.009 | +0.020 |
+| **keyword** | **0.650** | **0.704** | **+0.054** | **+0.120** (0.612→0.732) |
+
+> 5-fold CV LR AUC. **Only keyword is materially sample-size-limited** — the other
+> types have strong enough signal that 900 rows suffice.
+
+A second artifact stacks on top: a single 70/30 split vs 5-fold CV. The keyword 0.497
+reported in §3.1 becomes **0.650** under CV, and mixed 0.831 becomes **0.900** — the
+test fold of a single split retains only ~16 noisy samples, so its variance is huge.
+Combining both artifacts:
+
+> **Corrected conclusion**: keyword is still the **hardest type** (0.70-0.73 vs
+> 0.92-0.999 for the others), but "AUC ≈ 0.50, no better than random" does not hold —
+> it is a **weak signal that needs sample size**, not a total feature failure. The
+> earlier "absolute blind spot" characterization must be downgraded to "hardest to
+> detect + precision insufficient for cleaning".
+
+**(2) Epoch budget: epoch 0 alone already reaches 95%+ of the full trajectory.** §3.3
+recommends "clean within epoch 0-1", but loss_std / loss_curvature / converge_epoch all
+need 5 epochs — that recommendation previously had no matching detector. Rebuilding the
+detector using only features visible in the first N epochs (RF AUC, all samples, 10%):
+
+| Noise type | epoch 0 only (3 features) | epoch 0-1 (5 features) | all 5 epochs (6 features) | epoch-0 attainment |
+|---|---|---|---|---|
+| garbled | **0.980** | 0.986 | 0.987 | 99% |
+| duplicate | 0.922 | 0.945 | 0.957 | 96% |
+| unrelated | 0.881 | 0.909 | 0.916 | 96% |
+| mixed | 0.879 | 0.902 | 0.908 | 97% |
+| keyword | 0.605 | 0.665 | 0.649 | 93% |
+| template (extra10) | 0.934 | 0.959 | 0.963 | 97% |
+| truncation (extra10) | 0.626 | 0.726 | 0.753 | 83% |
+
+**This is a stronger claim than the original**: early cleaning is not merely "advisable",
+it is **almost free** — 96-99% of the detectability is available as soon as the first
+epoch ends, and epoch 0-1 closes most of the remaining gap. The one exception is
+truncation (83%): information-loss noise needs more epochs to surface.
+
+**(3) Cleaning precision: AUC substantially overstates usability.** Real cleaning means
+"drop the top-scoring k%", so the decisive metric is precision@k, not AUC (10%,
+full-sample 13-feature detector):
+
+| Noise type | AUC | P@5% | P@10% | R@10% | random precision | lift@10% |
+|---|---|---|---|---|---|---|
+| garbled | 0.996 | **1.000** | 0.937 | 0.937 | 0.10 | 9.4× |
+| mixed | 0.922 | 0.976 | 0.811 | 0.665 | 0.12 | 6.7× |
+| duplicate | 0.982 | 0.841 | 0.721 | 0.793 | 0.09 | 7.9× |
+| unrelated | 0.931 | 0.728 | **0.631** | 0.631 | 0.10 | 6.3× |
+| template (extra10) | — | 0.959 | 0.819 | 0.819 | 0.10 | 8.2× |
+| truncation (extra10) | — | 0.408 | 0.340 | 0.340 | 0.10 | 3.4× |
+| near_duplicate (extra10) | — | 0.358 | 0.266 | 0.266 | 0.10 | 2.7× |
+| **keyword** | 0.687 | 0.354 | **0.281** | 0.281 | 0.10 | 2.8× |
+
+**Reading:** unrelated's AUC of 0.945 sounds high, but cleaning at a 10% budget means
+**37% of the dropped samples are clean** while only 63% of the noise is caught — that
+is the number a data-cleaning decision actually needs, and AUC hides it. garbled is the
+only genuinely "cleanable" type (P@5% = 1.000, zero collateral damage). keyword /
+near_duplicate lift only 2.7-2.8×, of limited practical value.
+
+Output tables: `results/{tag}/detector_{ablation,epoch_budget,precision_at_k}.csv`.
+
+### 3.8 Does mixed noise dilute per-type signal? (new)
+
+mixed's low AUC (0.82-0.85) previously could not distinguish two explanations: (a) the
+coexisting noise types interfere with each other's signal, or (b) it is purely a
+label-aggregation effect. Using the 13 trajectory features (each subtype has 208-730
+samples inside the mixed run, vs only 30-90 in the diagnostic subsample — the real
+source of the "<10 samples" limitation mentioned in §3.6), we score each subtype
+separately against the normal samples of the *same* run:
+
+| Subtype | RF AUC inside the mixed run | RF AUC in its single-type run | Δ |
+|---|---|---|---|
+| duplicate | **0.998** | 0.981 | +0.017 |
+| garbled | 0.997 | 0.995 | +0.002 |
+| unrelated | 0.933 | 0.931 | +0.002 |
+| keyword | **0.773** | 0.688 | +0.085 |
+| template (extra10, 7-way) | 0.980 | 0.989 | -0.009 |
+| truncation (extra10, 7-way) | 0.733 | 0.775 | -0.042 |
+| near_duplicate (extra10, 7-way) | 0.731 | 0.675 | +0.056 |
+
+**Conclusion: mixing does not dilute the signal.** Every subtype is **at least as
+detectable** in the mixed environment as in its own single-type run (keyword is even
+0.085 higher, because the mixed run carries more total noise, giving the weak signal
+more sample support). mixed's low overall AUC is therefore **purely an artifact of
+label aggregation** — forcing 4-7 mechanistically different noise types into a single
+binary target — not of mutual interference.
+
+**Deployment implication**: real-world pollution is necessarily multi-type, and this
+result shows detectors do not degrade because of it — you should **score each noise
+type separately and take the union**, rather than training one unified "is it noise"
+classifier.
+
+Output table: `results/{tag}/mixed_subtype_dilution.csv`.
 
 ---
 
@@ -431,37 +553,53 @@ dolly SFT makes answers markedly more concise.
 
 ### 6.1 Core conclusions
 
-1. **Sample-level detectability ranking (identical at both ratios)**: garbled (0.999) > duplicate (0.972) > unrelated (0.956) > mixed (0.737) > **keyword (0.464, infeasible)**;
-2. **Feature-to-noise mapping**: garbled via input/output-side features; duplicate *only* via the data side (training dynamics inverted); unrelated via loss volatility; keyword needs entity-aware tools;
+1. **Sample-level detectability ranking (identical at both ratios)**: garbled (0.999) > duplicate (0.972) > unrelated (0.956) > mixed (0.900) > **keyword (0.70-0.73, hardest)**;
+2. **Feature-to-noise mapping**:
+   - garbled → input+output-side features (user_loss / entropy / loss_curvature); training dynamics alone suffice;
+   - duplicate → **the data side is mandatory** (text_nn_sim); training dynamics are not just useless but inverted (loss AUC 0.36);
+   - unrelated → cross-epoch loss volatility and curvature, moderate strength;
+   - keyword → weak signal that **only emerges with full-sample coverage** (diagnostic subsample 0.65 → all samples 0.70/0.73); precision still too low to clean with (P@10% = 0.281), entity-level tools needed;
+   - template (extra10) → **signal direction fully inverted** (loss/entropy far *below* normal samples); same family as duplicate but more extreme;
 3. **Detectability does not decay with the ratio** — the detector transfers directly to 5% real-world pollution;
-4. **Detectability decays over epochs (identical at both ratios)** — clean within epoch 0-1;
-5. **Harm is non-monotonic**: unrelated is *more* harmful at 5% than 10%, quantified by its confidence inversion (margin 4.75 → 2.45);
-6. **duplicate's overfitting damage is roughly linear in the ratio**;
-7. **Absolute noise impact is small** at both ratios — dolly SFT's own damage swamps the noise differences;
-8. The method is robust across task types (0.71-0.99); classification is hardest and worse at 5%.
+4. **Detectability decays over epochs, but early cleaning is almost free**: **epoch-0 features alone reach 96-99% of the full-trajectory detector** (garbled 0.980/0.987, unrelated 0.881/0.916) — clean within epoch 0-1, where detectability is already saturated;
+5. **AUC overstates usable precision**: at a 10% cleaning budget, unrelated's AUC 0.945 corresponds to a precision of 0.631 (37% of what you drop is clean); only garbled reaches "no collateral damage" (P@5% = 1.000);
+6. **Mixed noise does not dilute per-type signal**: every subtype is at least as detectable inside the mixed run as in its own single-type run — mixed's low AUC is pure label aggregation; deployments should **score per type and take the union**;
+7. **Harm is non-monotonic**: unrelated is *more* harmful at 5% than 10%, quantified by its confidence inversion (margin 4.75 → 2.45);
+8. **duplicate's overfitting damage is roughly linear in the ratio**;
+9. **Absolute noise impact is small** at both ratios — dolly SFT's own damage swamps the noise differences;
+10. The method is robust across task types (0.71-0.99); classification is hardest and worse at 5%.
 
 ### 6.2 Detection difficulty spectrum (both ratios)
 
 ```
-detectable ◄──────────────────────────────────────────────────► undetectable
-duplicate          garbled              unrelated              keyword
-data-side only     training dynamics    partial                nearly impossible
-(linear overfit)   (mildest harm)       (harm non-monotonic,   (blind at both ratios)
-                                         worse at 5%)
+detectable ◄──────────────────────────────────────────────────────► hard to detect
+duplicate            garbled              unrelated            keyword
+data-side only       training dynamics    partial              hardest
+AUC 0.98 P@10% 0.72  AUC 0.996 P@5% 1.0   AUC 0.93 P@10% 0.63  AUC 0.70 P@10% 0.28
+(linear overfit)     (mildest harm)       (non-monotonic,      (weak signal,
+                                           worse at 5%)         precision too low)
 ```
 
 **Key insight**: detectability and harm are not monotonically related — the true
 detection-value zone is *semantic mismatch noise* (unrelated): hard to detect AND
 more harmful at low ratios.
 
+> Note: the spectrum is annotated with precision@k rather than AUC alone — the gap
+> in actual cleaning usability between AUC 0.93 (unrelated) and AUC 0.996 (garbled)
+> is 0.63 vs 1.00, far wider than the AUC values suggest. keyword has been
+> reclassified from the earlier reports' "blind spot / undetectable" to "hardest to
+> detect" (see §3.7).
+
 ### 6.3 Limitations & future work
 
-1. keyword blind spot — entity-aware detection needed;
-2. garbled localization — position-based comparison fails, sequence alignment needed;
-3. extreme ratios (1%/20%) unverified; the 5% vs 10% non-monotonicity suggests a richer dose-response curve;
-4. single dataset/model — dolly-15k + Qwen2.5-3B + LoRA;
-5. eval protocol — absolute HellaSwag/TruthfulQA scores are low; between-model comparisons valid;
-6. question-level flips (10-15% at both ratios) — attributing how noisy models err differently is a promising follow-up.
+1. **keyword precision is insufficient** — an AUC of 0.70-0.73 corresponds to P@10% of only 0.281, far from cleanable; entity-aware tools needed (NER consistency / counterfactual perturbation / base-model reference scoring);
+2. **near_duplicate is a newly identified detection gap** — 0.733, and `text_nn_sim` fails on it (0.492); WordNet-level paraphrase escapes TF-IDF, so semantic-embedding similarity is needed;
+3. garbled localization — position-based comparison fails, sequence alignment needed;
+4. **cleaning gain unverified** — this report establishes detection rate and cleaning precision, but not whether cleaning actually yields a better model (drop top-k% by score vs random drop vs no cleaning); cross-experiment evidence (dynanoise) suggests a ceiling;
+5. extreme ratios (1%/20%) unverified; the 5% vs 10% non-monotonicity suggests a richer dose-response curve;
+6. single dataset/model — dolly-15k + Qwen2.5-3B + LoRA;
+7. eval protocol — absolute HellaSwag/TruthfulQA scores are low; between-model comparisons valid;
+8. question-level flips (10-15% at both ratios) — attributing how noisy models err differently is a promising follow-up.
 
 ### 6.4 Reproduction
 
@@ -491,16 +629,43 @@ Three types added on top of the core four, filling the empty quadrants of the de
 
 Plus a 7-way `mixed` (equal 1/7 shares, 10% total). Training/eval/metrics protocol identical to the core experiments.
 
-### 7.2 Detectability (7-way mixed labels)
+### 7.2 Detectability
 
-| Classifier | AUC | acc |
-|---|---|---|
-| LR | 0.836 | 0.935 |
-| RF | **0.887** | 0.953 |
+**Per-type detection (new — previously only the aggregated 7-way mixed result existed)**:
 
-- **7-way detection (0.887) is *better* than ratio10's 4-way (0.850)** — the new types (especially template and near_duplicate) are more detectable than keyword/unrelated, lifting the overall AUC;
-- Best univariate: `text_nn_sim` 0.730 (catches near_duplicate paraphrase similarity), `loss_std` 0.699, `loss_curvature` 0.695 — data-side and training-side features complement each other;
-- Per-category: creative_writing 1.000 / information_extraction 0.960 / general_qa 0.930 / open_qa 0.918 / closed_qa 0.898 / summarization 0.870 / **classification 0.781** / **brainstorming 0.772** (lowest).
+| Noise type | LR AUC | RF AUC | best univariate | P@5% | P@10% |
+|---|---|---|---|---|---|
+| **template** | 0.998 | **0.9995** | hard_loss_mean 0.096→**0.904** / loss_mean 0.101→0.899 (inverted) | **0.959** | 0.819 |
+| truncation | **0.888** | 0.818 | loss_std 0.759 / mean_loss_std 0.745 | 0.408 | 0.340 |
+| near_duplicate | **0.733** | 0.687 | max_token_loss / hard_loss_max 0.680 / mean_loss_std 0.650 | 0.358 | 0.266 |
+| mixed (7-way) | 0.844 | **0.911** | mean_loss_std 0.679 / text_nn_sim 0.678 | 0.881 | 0.630 |
+
+**Key finding 1: template's signal direction is fully inverted.** Its univariate AUCs
+are hard_loss_mean **0.096**, loss_mean 0.101, loss_curvature 0.102, entropy 0.139 —
+0.90 / 0.90 / 0.90 / 0.86 once flipped. Loss and entropy on fixed-template samples
+are far *below* normal samples, because the model has completely memorized the
+template. This is the same "memorizable noise" family as duplicate (loss AUC 0.37),
+but more extreme. **The phenomenon was entirely hidden while extra10 only had an
+aggregated `mixed` row** — template is now the strongest example of the direction
+trap described in the cross-experiment synthesis §2.1. Additionally
+`hard_pos_jaccard` 0.808 (hard-token positions overlap heavily across epochs) and
+`loss_slope` 0.868 are strong template features: a fixed template pins the hard
+positions and distorts the loss-descent trajectory.
+
+**Key finding 2: near_duplicate is the second-hardest type after keyword, and
+`text_nn_sim` fails on it (0.492).** This confirms the cross-experiment synthesis's
+prediction — WordNet-level light paraphrase is enough to escape TF-IDF
+nearest-neighbor similarity (compare: byte-identical duplicate scores 0.939).
+Detecting it needs semantic embeddings rather than surface-form similarity, which is
+a genuine gap in the current feature set.
+
+**7-way mixed**: RF 0.911 (5-fold CV; 0.887 with a single split) — better than
+ratio10's 4-way, because template among the new types is extremely detectable and
+lifts the aggregate.
+
+![loss trajectories (extra10, 4 datasets)](../results/charts/loss_trajectory_extra10.png)
+
+- Per-category (40 features): summarization 0.975 / information_extraction 0.954 / general_qa 0.928 / open_qa 0.926 / classification 0.925 / brainstorming 0.890 / closed_qa 0.857 / **creative_writing 0.781** (lowest).
 
 ### 7.3 Impact on final capability
 
@@ -534,21 +699,40 @@ IFD = L(A\|Q) / L(A) — conditional-over-unconditional answer loss; smaller = e
 
 **Reading:** IFD is the **single most discriminative cross-type feature** — template noise has IFD ≈ 0.005 (fixed template fully learned, 43× gap), garbled 0.534 (corrupted input, hardest to follow). IFD complements loss/gradient features for structural noise (template/truncation), where loss-side signals are weak.
 
-### 7.5 Detection-difficulty spectrum update (with the three new types)
+### 7.5 Token level & distributions (extra10)
+
+<center>
+
+| template | truncation |
+|---|---|
+| ![template per-token loss](../results/charts/token_curve/token_curve_extra10_template.png) | ![truncation per-token loss](../results/charts/token_curve/token_curve_extra10_truncation.png) |
+| near_duplicate | mixed (7-way) |
+| ![near_duplicate per-token loss](../results/charts/token_curve/token_curve_extra10_near_duplicate.png) | ![mixed per-token loss](../results/charts/token_curve/token_curve_extra10_mixed.png) |
+
+</center>
+
+![PCA projection (extra10)](../results/charts/pca_metrics_extra10.png)
+
+### 7.6 Detection-difficulty spectrum update (with the three new types)
 
 ```
-detectable ◄──────────────────────────────────────────────────────────────────► undetectable
-garbled      template       duplicate  near_duplicate  unrelated  truncation  keyword
-token-level  consistent     data-side  text_nn_sim    semantic    info loss   sophisticated
-             pattern                  (paraphrase)    mismatch    (detectable) tampering
-easiest      easy           linear     detectable     non-        mild        blind at
-             (IFD≈0,        overfit                   monotonic               both ratios
-              GSM8K damage)                           (worse at 5%)
+detectable ◄──────────────────────────────────────────────────────────────► hard to detect
+template  garbled   duplicate  unrelated  truncation  near_duplicate  keyword
+RF 0.9995 RF 0.996  RF 0.982   RF 0.931   LR 0.888    LR 0.733        LR 0.70-0.73
+P@5% 0.96 P@5% 1.00 P@5% 0.84  P@5% 0.73  P@5% 0.41   P@5% 0.36       P@5% 0.35
+consistent surface   data-side  semantic   info loss   light           sophisticated
+pattern    corruption           mismatch               paraphrase      tampering
+inverted   easiest   linear     non-       late        text_nn_sim     weak
+signal               overfit    monotonic  signal      fails           signal
+GSM8K -23% mildest   (easy)     (worse@5%) (mild)      (no harm)       (harmless@low)
 ```
 
-**New insight:** the non-monotonic relation between detectability and harm is confirmed — the easiest types (garbled, template) are harmless or have explainable damage (template's systematic learning), while undetectable keyword stays harmless; the real detection-value zone remains semantic mismatch (unrelated).
+**New insights:**
+1. **The non-monotonic relation between detectability and harm is further confirmed** — the most detectable type (template) is the most harmful (GSM8K −23%), while the second-most detectable (garbled) is nearly harmless; hard-to-detect keyword remains harmless. "Detectability" and "harm" are two independent dimensions;
+2. **The true detection-value zone is still semantic mismatch (unrelated)**: hard to detect (P@10% 0.63) and more harmful at low ratios;
+3. **The newly identified methodological gap is near_duplicate**: 0.733 with the data-side feature failing — the only type with no positive answer in the current feature set (keyword at least has a weak signal; near_duplicate defeats even `text_nn_sim`, the feature that should have worked).
 
 ---
 
 *This report is compiled from pipeline artifacts; all raw data lives in `results/` and
-`<data_root>/runs/ratio10|ratio05/` (per-sample metrics, per-token diagnostics, layer norms, TensorBoard events).*
+`<data_root>/runs/ratio10|ratio05|extra10/` (per-sample metrics, per-token diagnostics, layer norms, TensorBoard events).*

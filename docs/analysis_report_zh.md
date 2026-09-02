@@ -8,19 +8,23 @@
 
 ## 0. 核心结论速览 (TL;DR)
 
-**1. 样本级噪音检测可行性 (两比例一致)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.737 > **keyword 0.464 (盲区)** — 检测力不随比例衰减, 可直接部署到 5% 现实污染场景;
+**1. 样本级噪音检测可行性 (两比例一致)**: garbled 0.999 > duplicate 0.972 > unrelated 0.956 > mixed 0.900 > **keyword 0.70-0.73 (最难, 但非随机)** — 检测力不随比例衰减, 可直接部署到 5% 现实污染场景;
 
-**2. 特征-噪音映射**: garbled 靠输入输出双侧特征 (user_loss/entropy/curvature); duplicate **只能靠数据侧** (text_nn_sim, 训练指标方向反转); unrelated 靠跨 epoch 损失波动 (新特征进一步增益); keyword 需实体级手段, 40 维特征全失效;
+**2. 特征-噪音映射**: garbled 靠输入输出双侧特征 (user_loss/entropy/curvature); duplicate **只能靠数据侧** (text_nn_sim, 训练指标方向反转); unrelated 靠跨 epoch 损失波动; keyword 信号弱且**需要足够样本量才显现** (40 维诊断子样本 0.65 → 13 维全样本 0.70/0.73);
 
-**3. 检测力随 epoch 单调衰减 (两比例曲线重合)**: 模型逐渐适应噪音 — **数据清洗应在 epoch 0-1 内进行**;
+**3. 检测力随 epoch 单调衰减 (两比例曲线重合)**: 模型逐渐适应噪音 — **数据清洗应在 epoch 0-1 内进行**; 且**只用 epoch 0 的特征已能达到全轨迹检测器的 95%+** (garbled 0.980/0.987, unrelated 0.881/0.916), 早期清洗代价极低;
 
-**4. 伤害非单调**: unrelated 在 5% 时对 MMLU/ARC/TruthfulQA 的伤害反而大于 10% (MMLU -0.019 vs -0.005), 伴随置信度反转 (答对 margin 4.75→2.45, "既错又犹豫"); duplicate 的过拟合损伤近似线性 (10% ≈ 2× 5%);
+**4. AUC 高估可用精度**: 按真实清洗操作 (丢弃打分最高的 10%) 评估, unrelated 的 AUC 0.945 只对应 **precision 0.631** — 丢掉的样本里 37% 是干净的; garbled 0.937 / duplicate 0.721 / keyword 0.281 (随机 0.10);
 
-**5. 噪音绝对影响小**: 6 个微调模型成绩互相接近且全部劣于基座 — dolly SFT 自身的泛化损伤淹没了噪音差异;
+**5. 混合噪音不稀释单类型信号**: mixed 整体 AUC 低 (0.82-0.85) 纯属标签聚合, 每个子类型在混合 run 中的可检性 ≥ 其单类型 run (duplicate 0.998/0.981, keyword 0.773/0.688) — 真实数据的多类混合污染不会削弱检测器;
 
-**6. 扩展噪音 (extra10)**: 7-way mixed 检测 RF 0.887 (优于 4-way 0.850); **template (一致错误模板) 伤害最大** (GSM8K -23%) — "随机错误被吸收, 系统性错误被学习"; IFD 是跨类型最强指纹 (template 43× 更易跟随, garbled 2.7× 更难);
+**6. 伤害非单调**: unrelated 在 5% 时对 MMLU/ARC/TruthfulQA 的伤害反而大于 10% (MMLU -0.019 vs -0.005), 伴随置信度反转 (答对 margin 4.75→2.45, "既错又犹豫"); duplicate 的过拟合损伤近似线性 (10% ≈ 2× 5%);
 
-**7. 检测难度与危害不单调相关**: 最易检的 garbled 最无害; 真正的检测价值区是**语义错配 (unrelated)** — 难检且低比例下伤害更大。
+**7. 噪音绝对影响小**: 6 个微调模型成绩互相接近且全部劣于基座 — dolly SFT 自身的泛化损伤淹没了噪音差异;
+
+**8. 扩展噪音 (extra10)**: **template (一致错误模板) 最易检 (RF 0.9995) 且伤害最大** (GSM8K -23%) — "随机错误被吸收, 系统性错误被学习", 且其全部损失/熵特征**方向反转** (loss_mean AUC 0.101 = 翻转后 0.90, 与 duplicate 同族但更极端); truncation 0.888 易检; **near_duplicate 0.733 是 keyword 之后第二难检**, 且 `text_nn_sim` 对其失效 (0.492, WordNet 改写躲过 TF-IDF); IFD 是跨类型最强指纹 (template 43× 更易跟随, garbled 2.7× 更难);
+
+**9. 检测难度与危害不单调相关**: 最易检的 garbled 最无害; 真正的检测价值区是**语义错配 (unrelated)** — 难检且低比例下伤害更大。
 
 ![检测 AUC 按噪音类型对比](../results/charts/detection_auc_by_type.png)
 
@@ -212,7 +216,9 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | mixed | 0.850→0.831 | **0.737→0.713** | text_nn_sim 0.716 | text_nn_sim 0.716 |
 | keyword | 0.531→0.497 | **0.464→0.486** | loss_curvature 0.669 | loss_curvature 0.703 |
 
-> 表: 基于扩展特征集 (19+21 新特征, 见 §3.6) 的多变量 LR AUC; 带有"→"的为 v19 → v40 对比。**unrelated 提升最大 (+0.022 / +0.021)**, garbled/duplicate 接近天花板, keyword 依旧盲区, mixed 略降 (稀释)。
+> 表: 基于扩展特征集 (19+21 新特征, 见 §3.6) 的多变量 LR AUC; 带有"→"的为 v19 → v40 对比。**unrelated 提升最大 (+0.022 / +0.021)**, garbled/duplicate 接近天花板, mixed 略降 (稀释)。
+
+> ⚠️ **这张表的 keyword / mixed 数值受两个方法学伪影压低, 见 §3.7 的修正值** (keyword 实际 0.70-0.73, mixed 0.90): 40 维特征表因含诊断子样本特征, `dropna` 后训练集缩到 ~900 行 (75 个噪音样本), 且单次 70/30 划分的测试折只剩 ~16 个噪音样本。garbled/duplicate/unrelated 不受影响 (信号本身够强)。
 
 ![检测 AUC 按噪音类型 (LR, 双比例对照)](../results/charts/detection_auc_by_type.png)
 
@@ -260,7 +266,7 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 ![loss_std 分布 (unrelated)](../results/charts/metric_dist/metric_dist_loss_std_ratio10.png)
 
-**keyword** — 所有指标 0.47-0.70 — 单指标无法可靠分离, 与 10% 的盲区一致:
+**keyword** — 所有单指标 0.47-0.70 — 单指标无法可靠分离, 与 10% 一致 (多变量 + 全样本可达 0.70-0.73, 见 §3.7):
 
 ![loss_curvature 分布 (keyword, 部分重叠)](../results/charts/metric_dist/metric_dist_loss_curvature_ratio10.png)
 
@@ -295,7 +301,7 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 
 ![PCA 投影 (10%)](../results/charts/pca_metrics_ratio10.png)
 
-**解读:** 19 维特征 PCA 前两维上, garbled 与正常样本清晰分离; duplicate 沿 text_nn_sim 方向分离; keyword 完全嵌入正常簇 — 与 AUC 结论一致。
+**解读:** 40 维特征 PCA 前两维上, garbled 与正常样本清晰分离; duplicate 沿 text_nn_sim 方向分离; keyword 完全嵌入正常簇 — 与 AUC 结论一致 (PCA 只用诊断子样本, 因其含诊断特征)。
 
 ### 3.6 全量特征探索: 未用数据是否有检测价值 (新增)
 
@@ -312,20 +318,91 @@ $$\\text{update\\_contrib} = \\frac{\\|\\delta_B\\|_2}{\\big\\|\\sqrt{\\mathbf{v
 | unrelated | loss_std **0.827** | mean_loss_std **0.850** / frac_hard_std 0.829 / entropy_std 0.823 | ✅ **超越** |
 | duplicate | loss_curvature 0.758 | max_token_loss_curv 0.670 | 中等 |
 | keyword | loss_std 0.649 | mean_loss_std **0.673** / entropy_std 0.663 | ✅ 微超 |
-| mixed | (不足 10 样本) | 同左 | — |
+| mixed | (诊断子样本每子类 <10) | 同左 | 见 §3.8 (改用全样本轨迹特征后每子类 208-730 样本) |
 
 **关键结论:**
 1. **`mean_loss_std` / `frac_hard_std` / `entropy_std` 系列 (diag 指标跨 epoch 波动) 是 unrelated 的新主力** — 10% 时 0.850/0.829/0.823, 超越 loss_std 0.827; 5% 时该组仍强;
 2. **`hard_loss_mean` (硬 token 的平均损失) 是 garbled 的新强特征** — 0.859 (10%) 且 5% 时 0.859 / `hard_id_uniq` 0.820; 说明 garbled 的"硬 token"本身稳定且损失高;
-3. **keyword 仍然不可分** — 新特征微超 (0.673) 但远未突破 ~0.50 盲区;
+3. **keyword 单特征仍然很弱** — 新特征微超 (0.673); 其多变量 0.70-0.73 的上限来自全样本覆盖而非新特征 (见 §3.7);
 4. `first_step` (step 索引) AUC=0.9999 纯属**顺序泄漏** (噪音样本在数据中位置固定), 已剔除 — 实际管线从未用它, 提示分析时勿引入样本序号类特征;
-5. `mixed` 单特征 AUC 仍不可用 (每类噪音子集 <10 样本), 需靠多变量分类器。
+5. `mixed` 的**逐子类型**单特征 AUC 在诊断子样本上不可用 (每子类 <10 样本) — 但改用全样本可得的轨迹特征后每子类有 208-730 个样本, 逐子类型分析成为可能 (见 §3.8)。
 
 这些新特征已并入主管线 (`analyze_detection.py` 的 40 维特征集; 探索表输出 `results/{tag}/feature_exploration.csv`)。并入后的多变量效果:
 - **unrelated 显著增益**: LR 0.923→0.945 (10%) / 0.956→**0.977** (5%); RF +0.02~0.04 — 这是最需要提升的检测价值区;
 - garbled / duplicate: 已接近天花板 (>0.97), 无明显变化;
-- keyword / mixed: 略降 (新增特征引入噪声), 仍是盲区/稀释;
+- keyword / mixed: 略降 (新增特征引入噪声); 注意这两类的绝对值受 §3.7 所述伪影压低;
 - 结论: **新特征的价值集中在语义错配类噪音检测**, 其他类型无增益。
+
+### 3.7 可部署性: epoch 预算 / 样本覆盖 / 清洗精度 (新增)
+
+§3.1 的 AUC 回答"信号存不存在", 本节回答"能不能真的用它清洗数据" —— 拆开被单个 AUC 混在一起的三个维度 (`scripts/analyze_early_detection.py`, 全程 5 折分层交叉验证)。
+
+**(1) 样本覆盖: keyword"盲区"有一半是方法学伪影。** 40 维特征表含诊断子样本 (1/8) 与 token 明细特征, `dropna` 后训练集从 14,611 缩到 ~900 行 (75 个噪音样本); 而 13 维轨迹特征 (`TRAJ_METRICS`: 逐 epoch loss/grad/cos 聚合 + text_nn_sim) 对**每个**样本都可得:
+
+| 噪音类型 | 40 维 / 诊断子样本 | 13 维 / 全样本 | 10% 变化 | 5% 变化 |
+|---|---|---|---|---|
+| garbled | 0.999 | 0.988 | — | — |
+| duplicate | 0.969 | 0.964 | — | — |
+| unrelated | 0.939 | 0.922 | — | — |
+| mixed | 0.891 | 0.900 | +0.009 | +0.020 |
+| **keyword** | **0.650** | **0.704** | **+0.054** | **+0.120** (0.612→0.732) |
+
+> 5 折 CV 的 LR AUC。**只有 keyword 受样本量显著影响** — 其余类型信号本身够强, 900 行足够。
+
+叠加第二个伪影: 单次 70/30 划分 vs 5 折 CV。§3.1 报的 keyword 0.497 在 CV 下是 **0.650**, mixed 0.831 在 CV 下是 **0.900** —— 单次划分的测试折只剩 ~16 个噪音样本, 方差极大。两个伪影合计:
+
+> **修正结论**: keyword 依然是**最难检的类型** (0.70-0.73 vs 其他 0.92-0.999), 但"AUC≈0.50, 与随机无异"的表述不成立 —— 它是**弱信号 + 需要样本量**, 不是特征完全失效。原先的"绝对盲区"定性需要下调为"最难检 + 精度不足以清洗"。
+
+**(2) epoch 预算: 只用 epoch 0 已达全轨迹的 95%+。** §3.3 建议"epoch 0-1 内清洗", 但 loss_std / loss_curvature / converge_epoch 都需要 5 个 epoch —— 该建议此前没有对应的检测器。仅用前 N 个 epoch 可见的特征重建检测器 (RF AUC, 全样本, 10%):
+
+| 噪音类型 | 仅 epoch 0 (3 特征) | epoch 0-1 (5 特征) | 全 5 epoch (6 特征) | epoch 0 达成率 |
+|---|---|---|---|---|
+| garbled | **0.980** | 0.986 | 0.987 | 99% |
+| duplicate | 0.922 | 0.945 | 0.957 | 96% |
+| unrelated | 0.881 | 0.909 | 0.916 | 96% |
+| mixed | 0.879 | 0.902 | 0.908 | 97% |
+| keyword | 0.605 | **0.665** | 0.649 | 93% (非单调) |
+| template (extra10) | 0.934 | 0.959 | 0.963 | 97% |
+| truncation (extra10) | 0.626 | 0.726 | 0.753 | 83% |
+
+**这条比原结论更强**: 早期清洗不只是"应该做", 而是**几乎不付代价** —— 第一个 epoch 结束就能拿到 96-99% 的检测力, 且 epoch 0-1 补齐绝大部分剩余差距。两个例外: truncation 仅 83% (信息缺失类噪音需要更多 epoch 才显现), keyword 的曲线非单调 (epoch 0-1 的 0.665 反而高于全轨迹的 0.649 —— 弱信号下多加 epoch 反而引入噪声)。
+
+**(3) 清洗精度: AUC 显著高估可用性。** 真实清洗是"丢弃打分最高的 k%", 关键指标是 precision@k 而非 AUC (10%, 全样本 13 维检测器):
+
+| 噪音类型 | AUC | P@5% | P@10% | R@10% | 随机 precision | lift@10% |
+|---|---|---|---|---|---|---|
+| garbled | 0.996 | **1.000** | 0.937 | 0.937 | 0.10 | 9.4× |
+| mixed | 0.922 | 0.976 | 0.811 | 0.665 | 0.12 | 6.7× |
+| duplicate | 0.982 | 0.841 | 0.721 | 0.793 | 0.09 | 7.9× |
+| unrelated | 0.931 | 0.728 | **0.631** | 0.631 | 0.10 | 6.3× |
+| template (extra10) | — | 0.959 | 0.819 | 0.819 | 0.10 | 8.2× |
+| truncation (extra10) | — | 0.408 | 0.340 | 0.340 | 0.10 | 3.4× |
+| near_duplicate (extra10) | — | 0.358 | 0.266 | 0.266 | 0.10 | 2.7× |
+| **keyword** | 0.687 | 0.354 | **0.281** | 0.281 | 0.10 | 2.8× |
+
+**解读:** unrelated 的 AUC 0.945 听起来很高, 但按 10% 预算清洗时**丢掉的样本中 37% 是干净的**, 且只捞到 63% 的噪音 —— 这正是数据清洗决策需要的数字, 而 AUC 掩盖了它。garbled 是唯一真正"可清洗"的类型 (P@5% = 1.000, 零误伤)。keyword / near_duplicate 的 lift 仅 2.7-2.8×, 实用价值有限。
+
+输出表: `results/{tag}/detector_{ablation,epoch_budget,precision_at_k}.csv`。
+
+### 3.8 混合噪音是否稀释单类型信号 (新增)
+
+此前 mixed 的低 AUC (0.82-0.85) 无法区分两种解释: (a) 多类噪音共存导致信号互相干扰, 还是 (b) 单纯是标签聚合的结果。用 13 维轨迹特征 (每个子类型在 mixed run 中有 208-730 个样本, 而诊断子样本只剩 30-90 个, 这是 §3.6 所说"<10 样本"限制的真正来源) 把每个子类型单独对同一 run 的正常样本打分:
+
+| 子类型 | mixed run 内 RF AUC | 其单类型 run RF AUC | 差值 |
+|---|---|---|---|
+| duplicate | **0.998** | 0.981 | +0.017 |
+| garbled | 0.997 | 0.995 | +0.002 |
+| unrelated | 0.933 | 0.931 | +0.002 |
+| keyword | **0.773** | 0.688 | +0.085 |
+| template (extra10, 7-way) | 0.980 | 0.989 | -0.009 |
+| truncation (extra10, 7-way) | 0.733 | 0.775 | -0.042 |
+| near_duplicate (extra10, 7-way) | 0.731 | 0.675 | +0.056 |
+
+**结论: 混合不稀释信号。** 每个子类型在混合环境中的可检性都**不低于**其单类型 run 的水平 (keyword 甚至高 0.085, 因为混合 run 的噪音总量更大, 弱信号获得更多样本支持)。因此 mixed 整体 AUC 低**纯粹是标签聚合造成的** —— 把 4-7 种机制完全不同的噪音强行当作一个二分类目标, 而不是它们互相干扰。
+
+**部署意义**: 真实数据的污染必然是多类混合的, 而这个结果说明检测器不会因此变差 —— 应当**按噪音类型分别打分再取并集**, 而非训练一个统一的"是否噪音"分类器。
+
+输出表: `results/{tag}/mixed_subtype_dilution.csv`。
 
 ---
 
@@ -431,38 +508,46 @@ base 平均 109 token/题 vs 微调模型 ~54 token — dolly SFT 使回答显�
 
 ### 6.1 核心结论
 
-1. **样本级检测可行性排序 (两比例一致)**: garbled (0.999) > duplicate (0.972) > unrelated (0.956) > mixed (0.737) > **keyword (0.464, 不可行)**;
+1. **样本级检测可行性排序 (两比例一致)**: garbled (0.999) > duplicate (0.972) > unrelated (0.956) > mixed (0.900) > **keyword (0.70-0.73, 最难)**;
 2. **特征-噪音映射**:
    - garbled → 输入输出双侧特征 (user_loss / entropy / loss_curvature), 训练动态即可锁定;
    - duplicate → **必须用数据侧特征** (text_nn_sim); 训练动态不仅无效且方向相反 (loss AUC 0.36);
    - unrelated → 跨 epoch 损失波动与曲率, 中等强度;
-   - keyword → 需要实体级检测手段, 19 维特征全部失效;
+   - keyword → 弱信号, **需要全样本覆盖才显现** (诊断子样本 0.65 → 全样本 0.70/0.73); 精度仍不足以清洗 (P@10% = 0.281), 需实体级手段;
+   - template (extra10) → **信号方向全面反转** (loss/entropy 显著低于正常样本), 与 duplicate 同族但更极端;
 3. **检测力不随比例衰减**: 关键信号机制与比例无关, 检测器可直接部署到 5% 的现实污染场景;
-4. **检测力随 epoch 单调衰减 (两比例一致)**: 数据清洗应在 epoch 0-1 内进行;
-5. **伤害非单调**: unrelated 在 5% 时对 MMLU/ARC/TruthfulQA 的伤害反而大于 10% — 低比例下语义错配样本更被信任; 其置信度反转 (margin 4.75→2.45) 是该机制的量化证据;
-6. **duplicate 过拟合损伤近似线性** (held-out 相对增幅 10% ≈ 2× 5%);
-7. **噪音绝对影响小**: 两比例下 6 个微调模型成绩互相接近, 且全部劣于基座 — dolly SFT 本身的伤害淹没了 10%/5% 噪音的边际差异;
-8. 方法跨任务类型稳健 (7-8 类别 AUC 0.71-0.99), classification 是最难类别且低比例下更难。
+4. **检测力随 epoch 衰减, 但早期清洗几乎不付代价**: **仅用 epoch 0 的特征已达全轨迹检测器的 96-99%** (garbled 0.980/0.987, unrelated 0.881/0.916) — 数据清洗应在 epoch 0-1 内进行, 且此时检测力已基本饱和;
+5. **AUC 高估可用精度**: 按 10% 清洗预算, unrelated 的 AUC 0.945 只对应 precision 0.631 (丢掉的 37% 是干净样本); 仅 garbled 达到"零误伤"水平 (P@5% = 1.000);
+6. **混合噪音不稀释单类型信号**: 每个子类型在混合 run 中的可检性 ≥ 其单类型 run — mixed 的低 AUC 纯属标签聚合; 部署时应**按类型分别打分再取并集**;
+7. **伤害非单调**: unrelated 在 5% 时对 MMLU/ARC/TruthfulQA 的伤害反而大于 10% — 低比例下语义错配样本更被信任; 其置信度反转 (margin 4.75→2.45) 是该机制的量化证据;
+8. **duplicate 过拟合损伤近似线性** (held-out 相对增幅 10% ≈ 2× 5%);
+9. **噪音绝对影响小**: 两比例下 6 个微调模型成绩互相接近, 且全部劣于基座 — dolly SFT 本身的伤害淹没了 10%/5% 噪音的边际差异;
+10. 方法跨任务类型稳健 (7-8 类别 AUC 0.71-0.99), classification 是最难类别且低比例下更难。
 
 ### 6.2 检测难度光谱 (两比例合并)
 
 ```
-可检测 ◄──────────────────────────────────────────────► 不可检测
+可检测 ◄──────────────────────────────────────────────► 难检测
 一致模式(duplicate)   表面损坏(garbled)   语义错配(unrelated)   精致篡改(keyword)
-数据侧可检            训练侧可检          部分可检             几乎不可检
-(过拟合损伤,线性)     (最轻危害)          (伤害非单调,5%更伤)   (两比例均盲区)
+数据侧可检            训练侧可检          部分可检             最难检
+AUC 0.98 P@10% 0.72   AUC 0.996 P@5% 1.0  AUC 0.93 P@10% 0.63  AUC 0.70 P@10% 0.28
+(过拟合损伤,线性)     (最轻危害)          (伤害非单调,5%更伤)   (弱信号,精度不足)
 ```
 
 **关键洞察**: 检测难度与危害性不单调相关 — 最易检的 garbled 最无害; 最难检的 keyword 低比例无害; **真正的检测价值区是语义错配类噪音 (unrelated): 难检 + 低比例下伤害更大**。
 
+> 注: 光谱两端用 precision@k 而非仅 AUC 标注 —— AUC 0.93 (unrelated) 与 AUC 0.996 (garbled) 的实际清洗可用性差距 (0.63 vs 1.00) 远大于 AUC 数值差距所暗示的。keyword 的定性已从早期报告的"盲区/不可检"修正为"最难检" (见 §3.7)。
+
 ### 6.3 局限与后续工作
 
-1. **keyword 检测盲区** — 需实体感知手段 (NER 一致性 / 反事实扰动);
-2. **乱码定位** — 位置对齐法失效, 需序列对齐;
-3. **更极端的比例外推** (1%/20%) 未验证; 5% 与 10% 的非单调性提示剂量-效应曲线可能更复杂;
-4. **单一数据集/模型** — dolly-15k + Qwen2.5-3B + LoRA; 分类任务、更大模型需再验证;
-5. **eval 协议** — HellaSwag/TruthfulQA 绝对分偏低, 模型间比较有效;
-6. **逐题翻转** (两比例均 10-15%) 揭示总体准确率掩盖的个体差异 — 噪音模型与 clean 模型的错误模式归因是值得深化的方向。
+1. **keyword 精度不足** — 0.70-0.73 的 AUC 对应 P@10% 仅 0.281, 距可清洗尚远; 需实体感知手段 (NER 一致性 / 反事实扰动 / 基座模型参照打分);
+2. **near_duplicate 是新发现的检测缺口** — 0.733, 且 `text_nn_sim` 对其失效 (0.492); WordNet 级改写躲过 TF-IDF, 需语义嵌入相似度;
+3. **乱码定位** — 位置对齐法失效, 需序列对齐;
+4. **清洗收益未验证** — 本报告证明了"检出率"与"清洗精度", 但未做"清洗后模型是否更好"的对照实验 (按分数移除 top-k% vs 随机移除 vs 不清洗); 跨实验证据 (dynanoise) 提示存在天花板;
+5. **更极端的比例外推** (1%/20%) 未验证; 5% 与 10% 的非单调性提示剂量-效应曲线可能更复杂;
+6. **单一数据集/模型** — dolly-15k + Qwen2.5-3B + LoRA; 分类任务、更大模型需再验证;
+7. **eval 协议** — HellaSwag/TruthfulQA 绝对分偏低, 模型间比较有效;
+8. **逐题翻转** (两比例均 10-15%) 揭示总体准确率掩盖的个体差异 — 噪音模型与 clean 模型的错误模式归因是值得深化的方向。
 
 ### 6.4 复现
 
@@ -492,18 +577,26 @@ python scripts/compare_ratios.py --tags ratio10,ratio05
 
 另有 7-way `mixed` (7 类各占 1/7, 共 10%)。训练/评估/指标协议与核心实验完全一致。
 
-### 7.2 检测力 (7-way mixed 标签)
+### 7.2 检测力
 
-| 分类器 | AUC | acc |
-|---|---|---|
-| LR | 0.836 | 0.935 |
-| RF | **0.887** | 0.953 |
+**逐类型检测 (新增 — 此前仅有 7-way mixed 聚合结果)**:
+
+| 噪音类型 | LR AUC | RF AUC | 最优单指标 | P@5% | P@10% |
+|---|---|---|---|---|---|
+| **template** | 0.998 | **0.9995** | hard_loss_mean 0.096→**0.904** / loss_mean 0.101→0.899 (反向) | **0.959** | 0.819 |
+| truncation | **0.888** | 0.818 | loss_std 0.759 / mean_loss_std 0.745 | 0.408 | 0.340 |
+| near_duplicate | **0.733** | 0.687 | max_token_loss / hard_loss_max 0.680 / mean_loss_std 0.650 | 0.358 | 0.266 |
+| mixed (7-way) | 0.844 | **0.911** | mean_loss_std 0.679 / text_nn_sim 0.678 | 0.881 | 0.630 |
+
+**关键发现 1: template 的信号方向全面反转。** 其单指标 AUC 是 hard_loss_mean **0.096**、loss_mean 0.101、loss_curvature 0.102、entropy 0.139 —— 翻转后分别为 0.90/0.90/0.90/0.86。固定模板样本的损失与熵**远低于**正常样本, 因为模型已完全记住这个模板。这与 duplicate (loss AUC 0.37) 同属"可被记忆的噪音"family, 但比 duplicate 更极端。**该现象在只有 mixed 聚合结果时被完全掩盖** —— 跨实验综合 §2.1 所说的"方向陷阱", template 是目前最强的例证。另外 `hard_pos_jaccard` 0.808 (硬 token 位置跨 epoch 高度重合) 与 `loss_slope` 0.868 也是 template 的强特征: 固定模板导致难点位置恒定、损失下降轨迹异常。
+
+**关键发现 2: near_duplicate 是 keyword 之后第二难检的类型, 且 `text_nn_sim` 对其失效 (0.492)。** 这验证了跨实验综合的预测 —— WordNet 级轻改写足以躲过 TF-IDF 近邻相似度 (对比: 逐字节 duplicate 的 text_nn_sim 是 0.939)。检测它需要语义嵌入而非词面相似度, 这是当前特征集的一个真实缺口。
+
+**7-way mixed**: RF 0.911 (5 折 CV; 单次划分 0.887) — 优于 ratio10 的 4-way, 因新增三类中 template 极易检, 拉高整体。
 
 ![loss 轨迹 (extra10 4 数据集)](../results/charts/loss_trajectory_extra10.png)
 
-- **7-way 检测 (0.887) 反而优于 ratio10 的 4-way (0.850)** — 新增三类 (尤其 template 与 near_duplicate) 比 keyword/unrelated 更可检, 拉高了整体 AUC;
-- 最优单指标: `text_nn_sim` 0.730 (捕获 near_duplicate 的改写相似性), `loss_std` 0.699, `loss_curvature` 0.695 — 数据侧与训练侧特征协同;
-- 类别分层: creative_writing 1.000 / information_extraction 0.960 / general_qa 0.930 / open_qa 0.918 / closed_qa 0.898 / summarization 0.870 / **classification 0.781** / **brainstorming 0.772** (最低)。
+- 类别分层 (40 维特征): summarization 0.975 / information_extraction 0.954 / general_qa 0.928 / open_qa 0.926 / classification 0.925 / brainstorming 0.890 / closed_qa 0.857 / **creative_writing 0.781** (最低)。
 
 ### 7.3 对模型能力的影响
 
@@ -554,15 +647,19 @@ IFD = L(A\|Q) / L(A) — 条件回答损失 / 无条件回答损失, 越小越�
 ### 7.6 检测难度光谱更新 (含三类新噪音)
 
 ```
-可检测 ◄────────────────────────────────────────────────────────────────────► 不可检测
-garbled      template       duplicate  near_duplicate  unrelated  truncation  keyword
-token级      一致模式      数据侧     text_nn_sim   语义错配    信息缺失    精致篡改
-最易检       易检           线性损伤   可检           非单调     轻微       盲区
-             (IFD≈0,        (易检)    (轻危害)       (5%更伤)    (易检)     (两比例均盲区)
-              GSM8K伤害最重)
+可检测 ◄────────────────────────────────────────────────────────────────────► 难检测
+template  garbled   duplicate  unrelated  truncation  near_duplicate  keyword
+RF 0.9995 RF 0.996  RF 0.982   RF 0.931   LR 0.888    LR 0.733        LR 0.70-0.73
+P@5% 0.96 P@5% 1.00 P@5% 0.84  P@5% 0.73  P@5% 0.41   P@5% 0.36       P@5% 0.35
+一致模式  表面损坏  数据侧     语义错配   信息缺失    轻改写          精致篡改
+方向反转  最易检    线性损伤   非单调     信号偏晚    text_nn_sim失效  弱信号
+GSM8K-23% 最轻危害  (易检)     (5%更伤)   (轻危害)    (无可测危害)     (低比例无害)
 ```
 
-**新洞察**: 检测难度与危害性的非单调关系进一步确认 — 最易检的 garbled/template 要么无害要么伤害可解释 (template 的系统性学习), 而难检的 keyword 依旧无害; 真正的"检测价值区"仍是 semantic 级错配 (unrelated)。
+**新洞察:**
+1. **检测难度与危害性的非单调关系进一步确认** — 最易检的 template 危害最大 (GSM8K -23%), 而次易检的 garbled 几乎无害; 难检的 keyword 依旧无害。"检测难度"与"危害性"是两个独立维度;
+2. **真正的检测价值区仍是 semantic 级错配 (unrelated)**: 难检 (P@10% 0.63) + 低比例下伤害更大;
+3. **新发现的方法缺口是 near_duplicate**: 0.733 且数据侧特征失效 —— 唯一"现有特征集正面无解"的类型 (keyword 至少有弱信号, near_duplicate 连 text_nn_sim 这个应当奏效的特征都失效)。
 
 ---
 
