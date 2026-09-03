@@ -1,0 +1,11 @@
+{
+  "tag": "ratio10",
+  "noise_type": "unrelated",
+  "budget": 0.1,
+  "n_total": 14611,
+  "n_drop": 1461,
+  "n_keep": 13150,
+  "targeted_precision": 0.7761806981519507,
+  "random_precision": 0.10609171800136892,
+  "seed": 42
+}

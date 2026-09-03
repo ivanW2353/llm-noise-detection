@@ -10,7 +10,7 @@ direction against the model's predicted difficulty:
 Signals are computed post-hoc on a sample (no training needed). Needs GPU.
 
 Usage:
-  python scripts/natural_signal_validation.py --n 20000 --model clean
+  python scripts/3_analysis/natural_signal_validation.py --n 20000 --model clean
 """
 
 import argparse
@@ -26,7 +26,9 @@ from scipy.stats import spearmanr
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(project_root, "scripts", "2_train"))
+sys.path.insert(0, project_root)
 from train import MAX_LEN
 
 TOKEN_TOP_K = 0.2
@@ -94,7 +96,9 @@ def signals_for_prompt(model, tokenizer, prompts, max_new=64):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
+    # Go up 3 levels: scripts/3_analysis/natural_signal_validation.py -> scripts/3_analysis -> scripts -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--model", default="clean")
     ap.add_argument("--n", type=int, default=20000)
     ap.add_argument("--max-new", type=int, default=64)

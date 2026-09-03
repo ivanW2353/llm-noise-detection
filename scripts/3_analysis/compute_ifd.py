@@ -10,8 +10,8 @@ Runs on each dataset's FINAL model over the same 1/8 diagnostic subsample,
 saving results/<tag>/ifd_<dataset>.jsonl. Needs GPU.
 
 Usage:
-  python scripts/compute_ifd.py
-  python scripts/compute_ifd.py --dataset shortcut --tag shortcut10
+  python scripts/3_analysis/compute_ifd.py
+  python scripts/3_analysis/compute_ifd.py --dataset shortcut --tag shortcut10
 """
 
 import argparse
@@ -26,7 +26,9 @@ import yaml
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(project_root, "scripts", "2_train"))
+sys.path.insert(0, project_root)
 from train import MAX_LEN, tokenize_rows
 
 DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword",

@@ -110,19 +110,30 @@ Shared libraries extracted from 15+ analysis scripts (~590 lines of reusable cod
 - **`src/scorers.py`** — label-free scorers (`robust_z()`, `memo_scores()`, `unsupervised_scores()`)
 - **`src/eval_utils.py`** — evaluation metrics (`precision_at_k()`, `safe_auc()`, `lift_at_k()`)
 
-### Analysis scripts (`scripts/`)
+### Pipeline stages (`scripts/`)
+
+| Stage | Directory | Responsibility |
+|---|---|---|
+| 1 | `scripts/1_data/` | Build tagged noisy datasets |
+| 2 | `scripts/2_train/` | LoRA training, evaluation, diagnostics |
+| 3 | `scripts/3_analysis/` | Detection and feature analyses |
+| 4 | `scripts/4_reports/` | Cross-experiment comparison and report tables |
+
+The complete pipeline is [`workflows/run_full_experiment.sh`](workflows/run_full_experiment.sh).
+
+### Analysis scripts (`scripts/3_analysis/`)
 
 All scripts use the shared `src/` modules and support `--tag` / `--tags` for cross-experiment analysis:
 
 - **`analyze_detection.py`** — supervised detection (LR/RF), univariate AUCs, feature importance
 - **`analyze_unsupervised.py`** — label-free scorers (IsolationForest, Mahalanobis, z-score)
-- **`analyze_memorization_score.py`** — signed hyper-typicality rule for memorized noise
+- **`analyze_memorization.py`** — signed hyper-typicality rule for memorized noise
 - **`analyze_transfer.py`** — cross-ratio and cross-type detector transfer
 - **`analyze_token_concentration.py`** — true token_loss_top20 concentration from stored token detail
 - **`analyze_early_detection.py`** — early-epoch detection (precision@k by epoch)
 - **`analyze_all_features.py`** — feature exploration using ALL per-sample data
 
-See `REFACTOR_PROGRESS.md` for the refactoring details.
+See [`scripts/README.md`](scripts/README.md) for the stage-by-stage command map.
 
 ## Detection analysis
 
@@ -153,58 +164,46 @@ exact gradient attribution (`analyze_token_level.py`).
 
 ## Changing the noise ratio
 
-Every experiment is isolated under an `experiment_tag` (default `ratio10`), so
-different ratios never overwrite each other. **One experiment completes in one
-command** — every stage auto-skips what's already done, so re-running resumes:
+Each experiment is isolated by its `tag`, so runs never overwrite one another. The
+single workflow entry point accepts a tag and an optional comma-separated list of
+noise types:
 
 ```bash
-bash run_experiment.sh --ratio 0.20            # build + train + eval + detection + token-level + IFD
-bash run_experiment.sh --ratio 0.20 --reuse-clean   # reuse the clean run/eval from ratio10
-bash run_experiment.sh --ratio 0.20 --with-extra    # + template/truncation/near_duplicate (7-way mixed)
-bash run_experiment.sh --tag ratio20 --train-only | --eval-only | --analyze-only
+bash workflows/run_full_experiment.sh ratio20 garbled,duplicate,unrelated,keyword
+bash workflows/run_full_experiment.sh extra10 template,truncation,near_duplicate
 ```
 
-Layout per experiment tag (e.g. `ratio20`):
-- `<data_root>/data/ratio20/<dataset>/` (plus a shared `heldout.jsonl`)
-- `<data_root>/runs/ratio20/<dataset>/`
-- `<repo>/results/eval_ratio20_<dataset>.json` and `*_ratio20.*` analysis outputs
-
-Or step by step (analysis scripts auto-detect the trained datasets):
-
-```bash
-python scripts/make_noise.py --ratio 0.20 --tag ratio20
-python scripts/train.py --dataset clean --tag ratio20
-python scripts/evaluate.py --dataset clean --tag ratio20
-python scripts/analyze_detection.py --tag ratio20
-python scripts/analyze_token_level.py --tag ratio20
-python scripts/compute_ifd.py --tag ratio20
-```
+For one stage at a time, use the numbered directories in [`scripts/README.md`](scripts/README.md).
+Outputs are grouped by tag under `data/<tag>/`, `runs/<tag>/`, and `results/<tag>/`.
 
 ## Reproduce
 
 ```bash
-# 1. build the 6 datasets (default tag: ratio10)
-python scripts/make_noise.py            # -> <data_root>/data/ratio10/*
+# One command: build, train, evaluate, analyze, report
+bash workflows/run_full_experiment.sh ratio10
 
-# 2. train (one run per dataset, ~3 h each on RTX 5090 at 5 epochs)
-python scripts/train.py --dataset clean
-# or all: bash run_all.sh
+# Or run individual stages:
+# 1. build the datasets
+python scripts/1_data/make_noise.py --tag ratio10
 
-# 3. evaluate all models (after training)
-bash run_all_eval.sh                    # -> results/eval_*.json
+# 2. train one dataset (repeat as needed)
+python scripts/2_train/train.py --dataset clean --tag ratio10
+
+# 3. evaluate one model
+python scripts/2_train/evaluate.py --dataset clean --tag ratio10
 
 # 4. analysis
-python scripts/analyze_detection.py     # -> results/*.csv + *.png
-python scripts/analyze_token_level.py   # -> token-level attribution + AUCs
+python scripts/3_analysis/analyze_detection.py     # -> results/*.csv + *.png
+python scripts/3_analysis/analyze_token_level.py   # -> token-level attribution + AUCs
 
 # 5. deployability / robustness analyses (CPU-only, no retraining)
-python scripts/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # label-free scorers
-python scripts/analyze_memorization_score.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule
-python scripts/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio / cross-type
-python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20
+python scripts/3_analysis/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # label-free scorers
+python scripts/3_analysis/analyze_memorization.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule
+python scripts/3_analysis/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio / cross-type
+python scripts/3_analysis/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20
 
 # 6. external validity: natural-data signal validation (GPU ~2h, uses clean model)
-python scripts/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv
+python scripts/3_analysis/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv
 ```
 
 Config: `config.yaml` (paths, noise ratio, hyper-parameters).

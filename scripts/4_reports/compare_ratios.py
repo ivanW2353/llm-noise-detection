@@ -4,7 +4,7 @@ Aggregates per-tag evaluation results, detection AUC tables and held-out
 loss trajectories into a side-by-side comparison document (zh + en).
 
 Usage:
-  python scripts/compare_ratios.py --tags ratio10,ratio05
+  python scripts/4_reports/compare_ratios.py --tags ratio10,ratio05
 """
 
 import argparse

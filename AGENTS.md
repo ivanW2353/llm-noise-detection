@@ -15,18 +15,18 @@ LLM-noise-detection experiment: 4 noise types injected into dolly-15k at 10% (ta
 **Analysis scripts** (all migrated to use `src/` modules):
 - `analyze_detection.py` — supervised detection (LR/RF), univariate AUCs, feature importance
 - `analyze_unsupervised.py` — label-free scorers (IsolationForest, Mahalanobis, z-score)
-- `analyze_memorization_score.py` — signed hyper-typicality rule for memorized noise (§3.13)
+- `analyze_memorization.py` — signed hyper-typicality rule for memorized noise (§3.13)
 - `analyze_transfer.py` — cross-ratio and cross-type detector transfer
 - `analyze_token_concentration.py` — true token_loss_top20 concentration (§3.12)
 - `analyze_early_detection.py` — early-epoch detection (precision@k by epoch)
 - `analyze_all_features.py` — feature exploration using ALL per-sample data
 
-See `REFACTOR_PROGRESS.md` for details (eliminated ~350 lines of duplicated code).
+See `scripts/README.md` for the current stage-by-stage command map.
 
 ## Layout & data flow
 
 - `scripts/` pipeline (run in order): `make_noise.py` → `train.py` → `evaluate.py` → `analyze_detection.py` / `analyze_token_level.py`; `recompute_diag.py` is a post-hoc fix script.
-- Orchestrators: `run_all.sh` (6 trainings), `run_all_eval.sh` (7 models), `run_experiment.sh` (one-command full pipeline for a new ratio).
+- Orchestrator: `workflows/run_full_experiment.sh` (one tagged pipeline: data → train → eval → analysis → report).
 - **Large data lives in the repo dir but OUTSIDE git** at `data_root=/root/noisedetect` (gitignored: `data/`, `runs/`, `logs/`). Paths are tag-based:
   - `data/{tag}/{dataset}/train.jsonl` (no `train/` level) + shared `data/{tag}/heldout.jsonl`
   - `runs/{tag}/{dataset}/{metrics,tb,lora}`
@@ -37,47 +37,45 @@ See `REFACTOR_PROGRESS.md` for details (eliminated ~350 lines of duplicated code
 ## Commands
 
 ```bash
-python scripts/make_noise.py --ratio 0.05 --tag ratio05   # build datasets
-python scripts/train.py --dataset clean --tag ratio10      # one run (~3.5h, 5 epochs)
-python scripts/train.py --dataset garbled --smoke          # fast sanity check (~15s)
-python scripts/evaluate.py --dataset clean [--force]       # resumable: skips done tasks
-python scripts/analyze_detection.py --tag ratio10
-python scripts/analyze_token_level.py                      # needs GPU; ~15 min
-python scripts/recompute_diag.py                           # fixes user_loss in old runs
-bash run_experiment.sh --ratio 0.05 --tag ratio05 --reuse-clean  # full pipeline; reuses clean run
+python scripts/1_data/make_noise.py --ratio 0.05 --tag ratio05   # build datasets
+python scripts/2_train/train.py --dataset clean --tag ratio10      # one run (~3.5h, 5 epochs)
+python scripts/2_train/train.py --dataset garbled --smoke          # fast sanity check (~15s)
+python scripts/2_train/evaluate.py --dataset clean [--force]       # resumable: skips done tasks
+python scripts/3_analysis/analyze_detection.py --tag ratio10
+python scripts/3_analysis/analyze_token_level.py                      # needs GPU; ~15 min
+python scripts/2_train/recompute_diag.py                           # fixes user_loss in old runs
+bash workflows/run_full_experiment.sh ratio05 garbled,duplicate,unrelated,keyword  # full pipeline
 
 # CPU-only post-hoc analyses (no GPU, no retraining; all take --tags a,b,c)
-python scripts/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # label-free scorers vs supervised ceiling
-python scripts/analyze_memorization_score.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule (§3.13)
-python scripts/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio + cross-type transfer
-python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20 (§3.12)
-python scripts/analyze_all_features.py        --tag ratio10                   # full-feature exploration
+python scripts/3_analysis/analyze_unsupervised.py        --tags ratio10,ratio05,extra10  # label-free scorers vs supervised ceiling
+python scripts/3_analysis/analyze_memorization.py  --tags ratio10,ratio05,extra10  # signed hyper-typicality rule (§3.13)
+python scripts/3_analysis/analyze_transfer.py            --tags ratio10,ratio05,extra10  # cross-ratio + cross-type transfer
+python scripts/3_analysis/analyze_token_concentration.py --tags ratio10,ratio05,extra10  # true token_loss_top20 (§3.12)
+python scripts/3_analysis/analyze_all_features.py        --tag ratio10                   # full-feature exploration
 
 # 6. external validity: natural-data signal validation (GPU ~2h, uses clean model)
-python scripts/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv (§3.14)
+python scripts/3_analysis/natural_signal_validation.py --model clean --n 20000  # -> results/natural_validation.csv (§3.14)
 ```
 
-- No test suite; verification = `--smoke` flags + CPU-only loader checks.
+- Tests are lightweight entry-point and scorer checks: `python tests/test_refactored_scripts.py` and `python tests/test_scorers.py`.
 - Long jobs run in tmux windows inside the main session `noisedetect`
   (window 0 `chat`, window 1+ per job), never plain nohup:
   `tmux new-window -t noisedetect -n <job> 'cmd 2>&1 | tee <log>'`.
   Don't create separate tmux sessions for background jobs.
-- **Never edit `run_experiment.sh` / `run_all*.sh` while a tmux pipeline is executing it** — bash reads the script lazily; overwriting the file mid-run feeds torn lines to the running shell (caused a silent pipeline death: `ntinue: command not found` after training finished, eval never started). Edit scripts only between runs.
-- `run_experiment.sh` = **one experiment, one command**: build → train → eval → detection → token-level → IFD → prints `ALL DONE` (watch for it in the log; then run `compare_ratios.py` + git push manually). Every stage auto-skips completed work (train summaries, 7-task eval completeness, analysis outputs per trained dataset), so re-running the same command resumes an interrupted experiment — start it in a tmux window and it completes in one go, across any number of GPU-availability windows.
+- **Never edit `workflows/run_full_experiment.sh` while a tmux pipeline is executing it** — bash reads the script lazily; overwriting the file mid-run feeds torn lines to the running shell (caused a silent pipeline death: `ntinue: command not found` after training finished, eval never started). Edit scripts only between runs.
+- `workflows/run_full_experiment.sh` = **one experiment, one command**: build → train → eval → analysis → report, then prints `Experiment complete` (run `compare_ratios.py` separately when needed). Training and evaluation skip completed work; analysis can be re-run to refresh outputs. Re-running the command therefore resumes interrupted training/evaluation safely.
 - Analysis scripts auto-detect the trained datasets from `runs/{tag}/*/summary.json` (exclude clean for token-level) — no `--datasets` needed; `compute_ifd.py` now takes `--tag` (no more config-override hack).
 
 ## Reuse principles (avoid redundant work)
 
-- **clean run is ratio-independent** (same seed/order) — reuse it across ratio
-  experiments: `--reuse-clean` copies `runs/ratio10/clean` (saves ~3.5h) and
-  reuses its eval results (saves ~1.5h); base eval is tag-independent too.
+- **clean run is ratio-independent** (same seed/order) — it can be copied manually
+  from `runs/ratio10/clean` when starting another ratio; base eval is tag-independent.
 - **Identical datasets across experiments need no retraining**: e.g. the 10%
   garbled/duplicate/unrelated/keyword/mixed (4-way) runs of `ratio10` are
   byte-identical to any future 10% experiment without `--with-extra` — only
   train what's new (the extra10 experiment trains only template/truncation/
   near_duplicate/mixed, ~4 runs instead of 8).
-- **run_experiment.sh auto-skips** datasets whose `summary.json` exists and
-  eval models whose results are complete (7 tasks) — safe to re-run anytime.
+- Training skips datasets whose `summary.json` exists, and evaluation skips models whose results are complete (7 tasks) — safe to re-run the workflow.
 - Keep per-sample metrics jsonl — all derived features are computed from them
   in analysis, never re-train to regenerate analysis.
 

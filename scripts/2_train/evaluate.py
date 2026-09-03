@@ -8,11 +8,11 @@ Full results (incl. per-subject / per-task breakdowns) are saved after every
 task, so evaluation is resumable; re-running skips completed models/tasks.
 
 Usage:
-  python scripts/evaluate.py --dataset clean
-  python scripts/evaluate.py --dataset base          # base model, no LoRA
-  python scripts/evaluate.py --dataset clean --tasks mmlu,gsm8k
-  python scripts/evaluate.py --dataset clean --force # redo even if cached
-  python scripts/evaluate.py --dataset clean --smoke # tiny sanity check
+  python scripts/2_train/evaluate.py --dataset clean
+  python scripts/2_train/evaluate.py --dataset base          # base model, no LoRA
+  python scripts/2_train/evaluate.py --dataset clean --tasks mmlu,gsm8k
+  python scripts/2_train/evaluate.py --dataset clean --force # redo even if cached
+  python scripts/2_train/evaluate.py --dataset clean --smoke # tiny sanity check
 """
 
 import argparse
@@ -44,7 +44,15 @@ def load_model(cfg, dataset):
         attn_implementation="flash_attention_2", device_map={"": 0})
     if dataset != "base":
         tag = cfg["paths"].get("experiment_tag", "")
-        lora_path = os.path.join(cfg["paths"]["data_root"], "runs", tag, dataset, "lora")
+        data_root = cfg["paths"]["data_root"]
+
+        # Map special tags to new directory structure
+        if tag == "ratio10_clean":
+            run_base = os.path.join(data_root, "runs", "experiments", "cleaning_gain", tag)
+        else:
+            run_base = os.path.join(data_root, "runs", tag)
+
+        lora_path = os.path.join(run_base, dataset, "lora")
         model = PeftModel.from_pretrained(model, lora_path)
     model.eval()
     return model
@@ -368,7 +376,9 @@ def evaluate(cfg, dataset, tasks, smoke=False, force=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
+    # Go up 3 levels: scripts/2_train/evaluate.py -> scripts/2_train -> scripts -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--dataset", default="clean")
     ap.add_argument("--tasks", default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")

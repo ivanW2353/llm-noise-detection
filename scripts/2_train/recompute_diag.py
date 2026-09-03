@@ -7,8 +7,8 @@ fixed CE computation and saves correct values to <run>/metrics/diag_final.jsonl
 training-time values).
 
 Usage:
-  python scripts/recompute_diag.py            # all datasets
-  python scripts/recompute_diag.py --dataset garbled
+  python scripts/2_train/recompute_diag.py            # all datasets
+  python scripts/2_train/recompute_diag.py --dataset garbled
 """
 
 import argparse
@@ -22,7 +22,8 @@ import yaml
 from transformers import AutoTokenizer
 from peft import PeftModel
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 from train import (MAX_LEN, build_model, diagnostic_pass, tokenize_rows)
 
 DATASETS = ["clean", "garbled", "duplicate", "unrelated", "keyword", "mixed"]

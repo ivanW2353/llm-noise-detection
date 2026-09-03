@@ -11,8 +11,8 @@ For a subsample of each dataset:
 Method C (exact): one backward per hard token, ~1-2 min per dataset.
 
 Usage:
-  python scripts/analyze_token_level.py                # all datasets
-  python scripts/analyze_token_level.py --dataset garbled
+  python scripts/3_analysis/analyze_token_level.py                # all datasets
+  python scripts/3_analysis/analyze_token_level.py --dataset garbled
 """
 
 import argparse
@@ -31,7 +31,9 @@ import matplotlib.pyplot as plt
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(project_root, "scripts", "2_train"))
+sys.path.insert(0, project_root)
 from train import (MAX_LEN, compute_reference_direction, tokenize_rows)
 
 TOP_K = 24

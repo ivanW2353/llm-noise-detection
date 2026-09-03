@@ -199,4 +199,4 @@ expensive operation and should stay offline on small samples.
 
 ---
 
-*Implementation: `scripts/train.py` (feature capture), `scripts/analyze_detection.py` (derived features & classifiers), `scripts/analyze_token_level.py` (token-level). Validation data: `results/ratio10/auc_univariate.csv`, `results/ratio10/detection_multivariate.csv`.*
+*Implementation: `scripts/2_train/train.py` (feature capture), `scripts/3_analysis/analyze_detection.py` (derived features & classifiers), `scripts/3_analysis/analyze_token_level.py` (token-level). Validation data: `results/ratio10/auc_univariate.csv`, `results/ratio10/detection_multivariate.csv`.*

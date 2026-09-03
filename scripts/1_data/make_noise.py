@@ -407,12 +407,13 @@ def build(config, with_extra=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
+    # Go up 3 levels: scripts/1_data/make_noise.py -> scripts/1_data -> scripts -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--ratio", type=float, default=None, help="override noise ratio, e.g. --ratio 0.20")
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (output dir suffix), e.g. --tag ratio20")
     ap.add_argument("--with-extra", action="store_true",
-                    help="add 3 extra noise types: template (consistent pattern, Noise E/fixed_wrong "
-                         "family), truncation (information loss), near_duplicate (light paraphrase)")
+                    help="add template, truncation, and near_duplicate datasets")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     if args.ratio:

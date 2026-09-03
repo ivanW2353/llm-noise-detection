@@ -28,8 +28,8 @@ Univariate AUC is reported for each so the truncation effect is visible rather
 than assumed away.
 
 Usage:
-  python scripts/analyze_token_concentration.py --tag ratio10
-  python scripts/analyze_token_concentration.py --tags ratio10,ratio05,extra10
+  python scripts/3_analysis/analyze_token_concentration.py --tag ratio10
+  python scripts/3_analysis/analyze_token_concentration.py --tags ratio10,ratio05,extra10
 """
 
 import argparse
@@ -43,7 +43,8 @@ import pandas as pd
 import yaml
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 from src.config import get_tag, load_config
 
 

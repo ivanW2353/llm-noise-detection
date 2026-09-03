@@ -10,11 +10,11 @@ import sys
 def test_script_help(script_name):
     """Test that a script can show help without errors."""
     result = subprocess.run(
-        [sys.executable, f"scripts/{script_name}", "--help"],
+        [sys.executable, script_name, "--help"],
         cwd="/root/noisedetect",
         capture_output=True,
         text=True,
-        timeout=5
+        timeout=30
     )
     assert result.returncode == 0, f"{script_name} failed: {result.stderr}"
     assert "usage:" in result.stdout.lower(), f"No usage in {script_name} output"
@@ -23,13 +23,18 @@ def test_script_help(script_name):
 
 def main():
     scripts = [
-        "analyze_detection.py",
-        "analyze_unsupervised.py",
-        "analyze_memorization_score.py",
-        "analyze_early_detection.py",
-        "analyze_transfer.py",
-        "analyze_token_concentration.py",
-        "analyze_all_features.py",
+        "scripts/3_analysis/analyze_detection.py",
+        "scripts/3_analysis/analyze_unsupervised.py",
+        "scripts/3_analysis/analyze_memorization.py",
+        "scripts/3_analysis/analyze_early_detection.py",
+        "scripts/3_analysis/analyze_transfer.py",
+        "scripts/3_analysis/analyze_token_concentration.py",
+        "scripts/3_analysis/analyze_all_features.py",
+        "scripts/3_analysis/analyze_token_level.py",
+        "scripts/3_analysis/compute_ifd.py",
+        "scripts/2_train/train.py",
+        "scripts/2_train/evaluate.py",
+        "scripts/1_data/make_noise.py",
     ]
 
     print("Testing refactored scripts...")

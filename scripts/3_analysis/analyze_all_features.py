@@ -13,7 +13,7 @@ type (versus clean samples in the same run), comparing "existing 19-feature" AUC
 against newly derived features. Saves results/{tag}/feature_exploration.csv and
 prints the best new features.
 
-Usage: python scripts/analyze_all_features.py --tag ratio05
+Usage: python scripts/3_analysis/analyze_all_features.py --tag ratio05
 """
 import argparse
 import glob
@@ -25,7 +25,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 from src.config import get_tag, load_config
 
 try:

@@ -24,8 +24,8 @@ Cross-validated (5-fold stratified) rather than a single 70/30 split: the
 diagnostic-subsample settings put only ~10-25 noise samples in one test fold.
 
 Usage:
-  python scripts/analyze_early_detection.py --tag ratio10
-  python scripts/analyze_early_detection.py --tag ratio10 --datasets keyword
+  python scripts/3_analysis/analyze_early_detection.py --tag ratio10
+  python scripts/3_analysis/analyze_early_detection.py --tag ratio10 --datasets keyword
 """
 
 import argparse
@@ -44,7 +44,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 from src.config import get_tag, load_config
 from src.metrics import METRIC_ORDER, TRAJ_METRICS
 from src.eval_utils import precision_at_k

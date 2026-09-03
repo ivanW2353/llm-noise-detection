@@ -192,4 +192,4 @@ $$s = \big(\text{loss\\_std} > q_{\text{std}}\big) \land \big(\text{loss\\_slope
 
 ---
 
-*实现参考: `scripts/train.py` (特征捕获), `scripts/analyze_detection.py` (派生特征与分类), `scripts/analyze_token_level.py` (token 级)。验证数据: `results/ratio10/auc_univariate.csv`, `results/ratio10/detection_multivariate.csv`。*
+*实现参考: `scripts/2_train/train.py` (特征捕获), `scripts/3_analysis/analyze_detection.py` (派生特征与分类), `scripts/3_analysis/analyze_token_level.py` (token 级)。验证数据: `results/ratio10/auc_univariate.csv`, `results/ratio10/detection_multivariate.csv`。*

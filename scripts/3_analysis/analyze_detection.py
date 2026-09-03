@@ -42,7 +42,8 @@ from sklearn.metrics import auc, roc_auc_score, roc_curve
 from sklearn.preprocessing import StandardScaler
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
 # Import from refactored modules
 from src.config import load_config, get_tag, get_results_dir
@@ -342,7 +343,9 @@ def noise_spec(df):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
+    # Go up 3 levels: scripts/3_analysis/analyze_detection.py -> scripts/3_analysis -> scripts -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (e.g. ratio20)")
     ap.add_argument("--datasets", type=str, default=None,
                     help="comma-separated dataset list (default: the 6 standard datasets)")

@@ -29,8 +29,8 @@ population is large enough to shift the mean/covariance it is measured against,
 which caps how well any single-population outlier model can do.
 
 Usage:
-  python scripts/analyze_unsupervised.py --tag ratio10
-  python scripts/analyze_unsupervised.py --tags ratio10,ratio05,extra10
+  python scripts/3_analysis/analyze_unsupervised.py --tag ratio10
+  python scripts/3_analysis/analyze_unsupervised.py --tags ratio10,ratio05,extra10
 """
 
 import argparse
@@ -45,7 +45,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 from src.config import get_tag
 from src.metrics import TRAJ_METRICS
 from src.scorers import robust_z
@@ -85,9 +86,11 @@ def supervised_ceiling(X, y, seed=0):
 
 
 def main():
+    # Go up 3 levels: scripts/3_analysis/analyze_unsupervised.py -> scripts/3_analysis -> scripts -> project_root
     here = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(here))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(here), "config.yaml"))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--tag", type=str, default=None)
     ap.add_argument("--tags", type=str, default=None, help="comma-separated")
     args = ap.parse_args()

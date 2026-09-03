@@ -14,8 +14,8 @@ Metrics are appended to a JSONL file and aggregates go to TensorBoard.
 One run per dataset; all runs share the same seed/order for comparability.
 
 Usage:
-  python scripts/train.py --dataset clean
-  python scripts/train.py --dataset garbled --smoke   # quick sanity check
+  python scripts/2_train/train.py --dataset clean
+  python scripts/2_train/train.py --dataset garbled --smoke   # quick sanity check
 """
 
 import os
@@ -293,10 +293,18 @@ def train(cfg, dataset, smoke=False):
     n_ref = cfg["train"]["ref_samples"]
     n_held = cfg["train"]["heldout_samples"]
 
-    path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
-                        dataset, "train.jsonl")
-    hold_path = os.path.join(data_root, "data", cfg["paths"].get("experiment_tag", ""),
-                             "heldout.jsonl")
+    tag = cfg["paths"].get("experiment_tag", "")
+
+    # Map special tags to new directory structure
+    if tag == "ratio10_clean":
+        data_base = os.path.join(data_root, "data", "experiments", "cleaning_gain", tag)
+        run_base = os.path.join(data_root, "runs", "experiments", "cleaning_gain", tag)
+    else:
+        data_base = os.path.join(data_root, "data", tag)
+        run_base = os.path.join(data_root, "runs", tag)
+
+    path = os.path.join(data_base, dataset, "train.jsonl")
+    hold_path = os.path.join(data_base, "heldout.jsonl")
     rows = [json.loads(l) for l in open(path)]
     heldout_rows = [json.loads(l) for l in open(hold_path)]
     train_rows = rows
@@ -304,8 +312,21 @@ def train(cfg, dataset, smoke=False):
         train_rows = train_rows[:64]
 
     tag = cfg["paths"].get("experiment_tag", "")
+
+    # Resolve special cleaning-gain experiments under their full tag directory.
+    if tag == "ratio10_clean":
+        data_base = os.path.join(data_root, "data", "experiments", "cleaning_gain", tag)
+        run_base = os.path.join(data_root, "runs", "experiments", "cleaning_gain", tag)
+    else:
+        data_base = os.path.join(data_root, "data", tag)
+        run_base = os.path.join(data_root, "runs", tag)
+
+    # Override the paths constructed earlier
+    path = os.path.join(data_base, dataset, "train.jsonl")
+    hold_path = os.path.join(data_base, "heldout.jsonl")
+
     # smoke runs NEVER touch the real run directories
-    run_dir = os.path.join(data_root, "runs", tag, "_smoke" if smoke else "", dataset)
+    run_dir = os.path.join(run_base, "_smoke" if smoke else "", dataset)
     metric_dir = os.path.join(run_dir, "metrics")
     os.makedirs(metric_dir, exist_ok=True)
     writer = SummaryWriter(os.path.join(run_dir, "tb"))
@@ -577,10 +598,13 @@ def train(cfg, dataset, smoke=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml"))
+    # Go up 3 levels: scripts/2_train/train.py -> scripts/2_train -> scripts -> project_root
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--dataset", required=True,
                     choices=["clean", "garbled", "duplicate", "unrelated", "keyword",
-                             "template", "truncation", "near_duplicate", "mixed"])
+                             "template", "truncation", "near_duplicate", "mixed",
+                             "garbled_scored", "garbled_random"])
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--tag", type=str, default=None, help="experiment tag (run dir suffix)")
     ap.add_argument("--smoke", action="store_true")

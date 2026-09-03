@@ -35,7 +35,7 @@ asymmetry is the point, and it is reported rather than hidden by taking a
 directional max.
 
 Usage:
-  python scripts/analyze_memorization_score.py --tags ratio10,ratio05,extra10
+  python scripts/3_analysis/analyze_memorization.py --tags ratio10,ratio05,extra10
 """
 
 import argparse
@@ -47,7 +47,9 @@ import pandas as pd
 import yaml
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.config import get_tag
 from src.scorers import robust_z, memo_scores, MEMO_FEATS
 from src.eval_utils import precision_at_k
@@ -78,9 +80,11 @@ def two_tailed_precision(y, s, budget=0.10):
 
 
 def main():
+    # Go up 3 levels: scripts/3_analysis/analyze_memorization.py -> scripts/3_analysis -> scripts -> project_root
     here = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(here))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=os.path.join(os.path.dirname(here), "config.yaml"))
+    ap.add_argument("--config", default=os.path.join(project_root, "config.yaml"))
     ap.add_argument("--tag", type=str, default=None)
     ap.add_argument("--tags", type=str, default=None, help="comma-separated")
     args = ap.parse_args()

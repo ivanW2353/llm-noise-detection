@@ -1,0 +1,555 @@
+{
+  "experiments": {
+    "ratio10": {
+      "per_sample": {
+        "n_total": 89492,
+        "n_clean": 81822,
+        "n_noise": 7670,
+        "datasets": [
+          "clean",
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated"
+        ],
+        "n_features": 59
+      },
+      "auc_univariate": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "n_features": 57
+      },
+      "detection": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "models": [
+          "LR",
+          "RF"
+        ],
+        "mean_auc": 0.846
+      },
+      "precision_at_k": {
+        "datasets": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "k_fracs": [
+          0.05,
+          0.0909,
+          0.1,
+          0.1219,
+          0.2
+        ]
+      },
+      "evaluation": {
+        "models": [
+          "clean",
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated",
+          "base"
+        ],
+        "benchmarks": [
+          "mmlu",
+          "gsm8k",
+          "hellaswag",
+          "arc",
+          "bbh",
+          "truthfulqa",
+          "winogrande"
+        ]
+      },
+      "unsupervised": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "scorers": [
+          "zscore_max",
+          "zscore_mean",
+          "iforest",
+          "mahalanobis",
+          "SUPERVISED_rf"
+        ]
+      },
+      "memorization": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "scorers": [
+          "memo_signed",
+          "low_loss_only",
+          "memo_plus_conc",
+          "conc_only"
+        ],
+        "mean_auc": 0.339
+      },
+      "token_concentration": {
+        "n_samples": 135,
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated",
+          "ALL"
+        ]
+      },
+      "feature_exploration": {
+        "exists": true
+      },
+      "mixed_dilution": {
+        "n_runs": 4,
+        "columns": [
+          "noise_type",
+          "n_noise_mixed",
+          "mixed_loss_mean",
+          "mixed_loss_last",
+          "mixed_loss_std",
+          "mixed_loss_slope",
+          "mixed_converge_epoch",
+          "mixed_loss_rank",
+          "mixed_loss_curvature",
+          "mixed_grad_norm_mean",
+          "mixed_grad_norm_cv",
+          "mixed_cos_ref_mean",
+          "mixed_cos_ref_trend",
+          "mixed_update_contrib_mean",
+          "mixed_text_nn_sim",
+          "own_loss_mean",
+          "own_loss_last",
+          "own_loss_std",
+          "own_loss_slope",
+          "own_converge_epoch",
+          "own_loss_rank",
+          "own_loss_curvature",
+          "own_grad_norm_mean",
+          "own_grad_norm_cv",
+          "own_cos_ref_mean",
+          "own_cos_ref_trend",
+          "own_update_contrib_mean",
+          "own_text_nn_sim",
+          "mixed_rf_auc",
+          "mixed_lr_auc",
+          "own_rf_auc",
+          "own_lr_auc"
+        ]
+      }
+    },
+    "ratio05": {
+      "per_sample": {
+        "n_total": 88579,
+        "n_clean": 84742,
+        "n_noise": 3837,
+        "datasets": [
+          "clean",
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated"
+        ],
+        "n_features": 59
+      },
+      "auc_univariate": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated",
+          "mixed"
+        ],
+        "n_features": 40
+      },
+      "detection": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated",
+          "mixed"
+        ],
+        "models": [
+          "LR",
+          "RF"
+        ],
+        "mean_auc": 0.848
+      },
+      "precision_at_k": {
+        "datasets": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "k_fracs": [
+          0.0476,
+          0.05,
+          0.0617,
+          0.1,
+          0.2
+        ]
+      },
+      "evaluation": {
+        "models": [
+          "clean",
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated",
+          "base"
+        ],
+        "benchmarks": [
+          "mmlu",
+          "gsm8k",
+          "hellaswag",
+          "arc",
+          "bbh",
+          "truthfulqa",
+          "winogrande"
+        ]
+      },
+      "unsupervised": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "scorers": [
+          "zscore_max",
+          "zscore_mean",
+          "iforest",
+          "mahalanobis",
+          "SUPERVISED_rf"
+        ]
+      },
+      "memorization": {
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "mixed",
+          "unrelated"
+        ],
+        "scorers": [
+          "memo_signed",
+          "low_loss_only",
+          "memo_plus_conc",
+          "conc_only"
+        ],
+        "mean_auc": 0.327
+      },
+      "token_concentration": {
+        "n_samples": 134,
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "unrelated",
+          "ALL"
+        ]
+      },
+      "feature_exploration": {
+        "exists": true
+      },
+      "mixed_dilution": {
+        "n_runs": 4,
+        "columns": [
+          "noise_type",
+          "n_noise_mixed",
+          "mixed_loss_mean",
+          "mixed_loss_last",
+          "mixed_loss_std",
+          "mixed_loss_slope",
+          "mixed_converge_epoch",
+          "mixed_loss_rank",
+          "mixed_loss_curvature",
+          "mixed_grad_norm_mean",
+          "mixed_grad_norm_cv",
+          "mixed_cos_ref_mean",
+          "mixed_cos_ref_trend",
+          "mixed_update_contrib_mean",
+          "mixed_text_nn_sim",
+          "own_loss_mean",
+          "own_loss_last",
+          "own_loss_std",
+          "own_loss_slope",
+          "own_converge_epoch",
+          "own_loss_rank",
+          "own_loss_curvature",
+          "own_grad_norm_mean",
+          "own_grad_norm_cv",
+          "own_cos_ref_mean",
+          "own_cos_ref_trend",
+          "own_update_contrib_mean",
+          "own_text_nn_sim",
+          "mixed_rf_auc",
+          "mixed_lr_auc",
+          "own_rf_auc",
+          "own_lr_auc"
+        ]
+      }
+    },
+    "extra10": {
+      "per_sample": {
+        "n_total": 73263,
+        "n_clean": 67211,
+        "n_noise": 6052,
+        "datasets": [
+          "clean",
+          "mixed",
+          "near_duplicate",
+          "template",
+          "truncation"
+        ],
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "near_duplicate",
+          "template",
+          "truncation",
+          "unrelated"
+        ],
+        "n_features": 59
+      },
+      "auc_univariate": {
+        "noise_types": [
+          "near_duplicate",
+          "template",
+          "truncation",
+          "mixed"
+        ],
+        "n_features": 40
+      },
+      "detection": {
+        "noise_types": [
+          "near_duplicate",
+          "template",
+          "truncation",
+          "mixed"
+        ],
+        "models": [
+          "LR",
+          "RF"
+        ],
+        "mean_auc": 0.86
+      },
+      "precision_at_k": {
+        "datasets": [
+          "mixed",
+          "near_duplicate",
+          "template",
+          "truncation"
+        ],
+        "k_fracs": [
+          0.05,
+          0.1,
+          0.1126,
+          0.2
+        ]
+      },
+      "evaluation": {
+        "models": [
+          "mixed",
+          "near_duplicate",
+          "template",
+          "truncation"
+        ],
+        "benchmarks": [
+          "mmlu",
+          "gsm8k",
+          "hellaswag",
+          "arc",
+          "bbh",
+          "truthfulqa",
+          "winogrande"
+        ]
+      },
+      "unsupervised": {
+        "noise_types": [
+          "mixed",
+          "near_duplicate",
+          "template",
+          "truncation"
+        ],
+        "scorers": [
+          "zscore_max",
+          "zscore_mean",
+          "iforest",
+          "mahalanobis",
+          "SUPERVISED_rf"
+        ]
+      },
+      "memorization": {
+        "noise_types": [
+          "mixed",
+          "near_duplicate",
+          "template",
+          "truncation"
+        ],
+        "scorers": [
+          "memo_signed",
+          "low_loss_only",
+          "memo_plus_conc",
+          "conc_only"
+        ],
+        "mean_auc": 0.545
+      },
+      "token_concentration": {
+        "n_samples": 165,
+        "noise_types": [
+          "duplicate",
+          "garbled",
+          "keyword",
+          "near_duplicate",
+          "template",
+          "truncation",
+          "unrelated",
+          "ALL"
+        ]
+      },
+      "feature_exploration": {
+        "exists": true
+      },
+      "mixed_dilution": {
+        "n_runs": 7,
+        "columns": [
+          "noise_type",
+          "n_noise_mixed",
+          "mixed_loss_mean",
+          "mixed_loss_last",
+          "mixed_loss_std",
+          "mixed_loss_slope",
+          "mixed_converge_epoch",
+          "mixed_loss_rank",
+          "mixed_loss_curvature",
+          "mixed_grad_norm_mean",
+          "mixed_grad_norm_cv",
+          "mixed_cos_ref_mean",
+          "mixed_cos_ref_trend",
+          "mixed_update_contrib_mean",
+          "mixed_text_nn_sim",
+          "mixed_rf_auc",
+          "mixed_lr_auc",
+          "own_loss_mean",
+          "own_loss_last",
+          "own_loss_std",
+          "own_loss_slope",
+          "own_converge_epoch",
+          "own_loss_rank",
+          "own_loss_curvature",
+          "own_grad_norm_mean",
+          "own_grad_norm_cv",
+          "own_cos_ref_mean",
+          "own_cos_ref_trend",
+          "own_update_contrib_mean",
+          "own_text_nn_sim",
+          "own_rf_auc",
+          "own_lr_auc"
+        ]
+      }
+    }
+  },
+  "cross_experiment": {
+    "transfer_ratio": {
+      "shape": [
+        10,
+        11
+      ],
+      "train_tags": [
+        "ratio10",
+        "ratio05"
+      ],
+      "test_tags": [
+        "ratio05",
+        "ratio10"
+      ]
+    },
+    "transfer_type": {
+      "shape": [
+        32,
+        10
+      ],
+      "train_types": [
+        "duplicate",
+        "garbled",
+        "keyword",
+        "unrelated"
+      ],
+      "test_types": [
+        "duplicate",
+        "garbled",
+        "keyword",
+        "unrelated"
+      ]
+    },
+    "natural_validation": {
+      "shape": [
+        3,
+        8
+      ],
+      "exists": true
+    }
+  },
+  "summary": {
+    "n_experiments": 3,
+    "total_samples": 251334,
+    "all_noise_types": [
+      "duplicate",
+      "garbled",
+      "keyword",
+      "near_duplicate",
+      "template",
+      "truncation",
+      "unrelated"
+    ],
+    "all_benchmarks": [
+      "arc",
+      "bbh",
+      "gsm8k",
+      "hellaswag",
+      "mmlu",
+      "truthfulqa",
+      "winogrande"
+    ]
+  }
+}
