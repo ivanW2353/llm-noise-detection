@@ -1,0 +1,4 @@
+runs/**/tb/* filter=lfs diff=lfs merge=lfs -text
+results/eval/eval_raw_*.jsonl filter=lfs diff=lfs merge=lfs -text
+results/*/per_sample_metrics.csv filter=lfs diff=lfs merge=lfs -text
+runs/**/metrics/*.jsonl filter=lfs diff=lfs merge=lfs -text

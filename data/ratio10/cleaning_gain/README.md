@@ -11,4 +11,4 @@
 - `unrelated/detector_info.json`：检测器参数与特征
 - `unrelated/metadata.json`：实验配置和样本统计
 
-模型权重仍位于 `runs/experiments/cleaning_gain/`，汇总结果位于 `results/cleaning_gain_comparison.csv`。
+模型权重仍位于 `runs/ratio10/cleaning_gain/`，汇总结果位于 `results/cleaning_gain_comparison.csv`。

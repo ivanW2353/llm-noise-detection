@@ -2,9 +2,12 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 *.egg-info/
+
+# Source datasets remain local unless explicitly curated into Git.
 data/
-runs/
+
+# Training artifacts: retain metrics, exclude model weights.
+runs/**/lora/
 logs/
-results/per_sample_metrics*.csv
-results/eval/eval_raw_*.jsonl
+
 layer_norms.jsonl
