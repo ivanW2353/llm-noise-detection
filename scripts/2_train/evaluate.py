@@ -30,7 +30,7 @@ from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-BBH_DIR = None  # set from config at runtime: <data_root>/data/bbh
+BBH_DIR = None  # set from config at runtime: <data_root>/data/benchmarks/bbh
 MAX_LEN = 2048          # generation room (long CoT few-shot + output)
 SCORE_MAX_LEN = 1024    # MC scoring cap: [B, L, V] logits are memory-heavy
 
@@ -59,7 +59,7 @@ def load_model(cfg, dataset):
 
 
 @torch.no_grad()
-def score_options(model, tokenizer, samples, bs=48):
+def score_options(model, tokenizer, samples, bs=8):
     """samples: list of (prompt, options); returns per-sample nll list."""
     flat = [(p, " " + o) for p, opts in samples for o in opts]
     all_nll = []
@@ -388,6 +388,6 @@ if __name__ == "__main__":
     cfg = yaml.safe_load(open(args.config))
     if args.tag:
         cfg["paths"]["experiment_tag"] = args.tag
-    globals()["BBH_DIR"] = os.path.join(cfg["paths"]["data_root"], "data", "bbh")
+    globals()["BBH_DIR"] = os.path.join(cfg["paths"]["data_root"], "data", "benchmarks", "bbh")
     tasks = args.tasks.split(",") if args.tasks else cfg["eval"]["tasks"]
     evaluate(cfg, args.dataset, tasks, smoke=args.smoke, force=args.force)

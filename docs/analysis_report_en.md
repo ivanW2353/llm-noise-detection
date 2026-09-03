@@ -270,6 +270,21 @@ Mechanism: memorizable noise converges to extremely low loss — "over-typical,"
 
 ---
 
+### 6.4 Cleaning-Gain Control: Detector Removal vs. Random Removal
+
+To test whether detected samples are actually worth removing, we ran a controlled `ratio10` garbled experiment. The original noisy training set contains 14,611 examples; the detector-cleaned model removes the top 10% by detection score (13,150 kept), while the random control removes the same number uniformly at random. Both use the same Qwen2.5-3B + LoRA configuration, epoch count, and held-out set; only the removal strategy differs. Results are saved in `results/cleaning_gain_comparison.csv`.
+
+| Model | MMLU | GSM8K | HellaSwag | ARC | BBH | TruthfulQA | Winogrande | 7-task mean |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Original garbled | 0.6354 | 0.5269 | 0.2664 | 0.8080 | 0.0944 | 0.1873 | 0.5359 | 0.4363 |
+| Detector-cleaned | 0.6259 | 0.5178 | **0.2788** | **0.8123** | 0.0870 | 0.2044 | 0.5162 | 0.4346 |
+| Random removal | **0.6417** | 0.4958 | 0.2709 | 0.8072 | **0.0889** | **0.2081** | **0.5367** | **0.4356** |
+| Clean reference | 0.6295 | **0.5413** | 0.2715 | 0.7995 | 0.0741 | 0.1922 | 0.5383 | 0.4352 |
+
+The detector-cleaned minus random differences are: MMLU `-0.0158`, GSM8K `+0.0220`, HellaSwag `+0.0080`, ARC `+0.0051`, BBH `-0.0019`, TruthfulQA `-0.0037`, and Winogrande `-0.0205`; the unweighted seven-task mean is `-0.0010` (`-0.0008` excluding BBH). Detector cleaning therefore wins only 3 of 7 tasks and does not show a stable overall gain over random removal.
+
+**Interpretation**: In this single-noise-type, single-seed control, detector cleaning improves some tasks (especially GSM8K), but regressions elsewhere offset those gains. Downstream cleaning benefit cannot be inferred from detection AUC alone; it also depends on which examples are removed, optimization randomness, and task distribution. The evidence supports evaluating detector cleaning as a data-governance tool, but not claiming a universal downstream improvement.
+
 ## 7. Conclusions
 
 ### 7.1 Key Findings
@@ -277,17 +292,18 @@ Mechanism: memorizable noise converges to extremely low loss — "over-typical,"
 1. Sample-level noise detection is technically feasible for most types — 5 of 7 types reach supervised AUC ≥0.82 (garbled/template/duplicate/unrelated/truncation); keyword and near_duplicate remain clearly harder.
 2. Detection's real value is in data governance (quality monitoring, auditing, anomaly discovery) rather than "cleaning makes the model meaningfully better" — for most types at 10% contamination, absolute downstream impact is under one percentage point, and imperfect cleaning precision incurs a real false-positive cost.
 3. **The highest-priority governance target is consistent-pattern noise** (template/shortcut-style): it is both the easiest to detect (0.9994 achievable label-free) and the most catastrophic (GSM8K -23%) — the one type worth building a dedicated label-free monitoring rule for.
-4. The methodological boundary is clear: supervised detection covers all 7 types but needs labels; label-free detection only covers the two extremes (surface corruption + consistent pattern) — the semantic-noise middle (unrelated/keyword/near_duplicate) has no label-free solution under the current feature set and still requires labeling or semi-supervised methods.
+4. **Detector cleaning does not yet show a stable overall gain**: in the garbled, 10% contamination, single-seed control it wins only 3/7 tasks and trails random removal by 0.0010 on the seven-task mean; the evidence supports a data-governance use case, not a universal downstream-improvement claim.
+5. The methodological boundary is clear: supervised detection covers all 7 types but needs labels; label-free detection only covers the two extremes (surface corruption + consistent pattern) — the semantic-noise middle (unrelated/keyword/near_duplicate) has no label-free solution under the current feature set and still requires labeling or semi-supervised methods.
 
 ### 7.2 Limitations
 
 1. Single model (Qwen2.5-3B) + single dataset (dolly-15k) + single LoRA configuration; cross-model/cross-dataset generalization is untested.
 2. Noise is synthetically constructed; real-world noise patterns may be subtler and more mixed.
-3. No direct "clean-then-retrain" gain comparison yet (a cleaning-gain experiment is running on GPU; results will be added in a future update).
+3. The cleaning-gain control covers only garbled noise, one ratio, and one random seed; it is not enough to establish a cross-type or cross-seed generalization claim.
 
 ### 7.3 Future Work
 
-1. Cleaning-gain comparison: top-10%-by-score removal vs. random 10% removal, comparing downstream performance after retraining (in progress).
+1. Extend the cleaning-gain control across noise types, random seeds, and removal budgets, with uncertainty intervals.
 2. Natural-data signal validation: internal consistency already validated on lmsys-chat-1m (§6.2); what remains is detection-AUC validation on a **natural dataset with real noise labels**.
 3. Cross-model / cross-dataset generalization validation.
 
