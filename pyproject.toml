@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "noisedetect"
+version = "1.0.0"
+dependencies = ["numpy", "pandas", "pyyaml", "scikit-learn"]
+[project.scripts]
+noisedetect = "cli:main"
+[tool.setuptools]
+py-modules = ["cli", "settings", "data", "model", "train", "evaluate", "analyze"]

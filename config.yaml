@@ -1,8 +1,9 @@
+# Single source of truth.  Paths and component names are independent plugins.
 paths:
   model: /root/autodl-tmp/Qwen2.5-3B-Instruct
   data_root: /root/noisedetect
   repo_root: /root/noisedetect
-  experiment_tag: ratio10       # default experiment (10% noise); other ratios: ratio05, ...
+  experiment_tag: ratio10
 
 noise:
   ratio: 0.10
@@ -33,3 +34,8 @@ eval:
   max_new_tokens: 256
   batch_size: 32
   tasks: [mmlu, gsm8k, hellaswag, arc, bbh, truthfulqa, winogrande]
+
+components:
+  model: hf-lora
+  dataset_provider: jsonl
+  detector: LR

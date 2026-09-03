@@ -311,12 +311,12 @@ The detector-cleaned minus random differences are: MMLU `-0.0158`, GSM8K `+0.022
 
 ## Appendix A: Reproduction
 
-Training commands, data paths, and random seeds are documented in `README.md` and the header comments of `scripts/2_train/train.py`. Core scripts:
-- `scripts/2_train/train.py` — per-sample gradient-tracked training
-- `scripts/2_train/evaluate.py` — 7-benchmark evaluation
-- `scripts/rebuild_analysis_inventory.py` — data inventory generator (`results/data_inventory.json`)
-- `scripts/generate_report_tables.py` — source of this report's tables (`docs/report_tables.md`)
+Training commands, data paths, and random seeds are documented in `README.md` and the header comments of `train.py`. Core scripts:
+- `train.py` — per-sample gradient-tracked training
+- `evaluate.py` — 7-benchmark evaluation
+- `analyze.py` — data inventory generator (`results/data_inventory.json`)
+- `analyze.py` — source of this report's tables (`docs/report_tables.md`)
 
 ## Appendix B: Feature Definitions
 
-Full mathematical definitions of the 59 features (loss/grad_norm/cos_sim_ref formulas, token-level entropy and hard-token definitions, IFD formula, etc.) are in the `src/` module docstrings and the per-sample feature computation in `scripts/2_train/train.py`.
+Full mathematical definitions of the 59 features (loss/grad_norm/cos_sim_ref formulas, token-level entropy and hard-token definitions, IFD formula, etc.) are in the `` module docstrings and the per-sample feature computation in `train.py`.

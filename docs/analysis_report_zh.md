@@ -310,12 +310,12 @@ training 中的 held-out loss 轨迹 (`tb_heldout_loss.csv`) 显示: 仅 templat
 
 ## 附录 A: 复现实验
 
-训练命令、数据路径、随机种子等实现细节见 `README.md` 与 `scripts/2_train/train.py` 顶部注释。核心脚本:
-- `scripts/2_train/train.py` — 逐样本梯度追踪训练
-- `scripts/2_train/evaluate.py` — 7-benchmark 评估
-- `scripts/rebuild_analysis_inventory.py` — 数据清单生成 (`results/data_inventory.json`)
-- `scripts/generate_report_tables.py` — 本报告表格来源 (`docs/report_tables.md`)
+训练命令、数据路径、随机种子等实现细节见 `README.md` 与 `train.py` 顶部注释。核心脚本:
+- `train.py` — 逐样本梯度追踪训练
+- `evaluate.py` — 7-benchmark 评估
+- `analyze.py` — 数据清单生成 (`results/data_inventory.json`)
+- `analyze.py` — 本报告表格来源 (`docs/report_tables.md`)
 
 ## 附录 B: 特征定义
 
-59 维特征的完整数学定义 (loss/grad_norm/cos_sim_ref 的计算公式、token 级熵与 hard_token 定义、IFD 公式等) 见代码内 `src/` 模块的 docstring 与 `scripts/2_train/train.py` 中的特征计算逐样本实现。
+59 维特征的完整数学定义 (loss/grad_norm/cos_sim_ref 的计算公式、token 级熵与 hard_token 定义、IFD 公式等) 见代码内 `` 模块的 docstring 与 `train.py` 中的特征计算逐样本实现。

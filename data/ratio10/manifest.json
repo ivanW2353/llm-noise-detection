@@ -1,0 +1,32 @@
+{
+  "source": "databricks/databricks-dolly-15k",
+  "noise_ratio": 0.1,
+  "seed": 42,
+  "experiment_tag": "",
+  "n_total": 15011,
+  "n_holdout": 400,
+  "n_train": 14611,
+  "n_noise": 1461,
+  "datasets": [
+    "clean",
+    "garbled",
+    "duplicate",
+    "unrelated",
+    "keyword",
+    "mixed"
+  ],
+  "derived_experiments": {
+    "cleaning_gain/garbled": [
+      "random/train.jsonl",
+      "scored/train.jsonl",
+      "heldout.jsonl"
+    ],
+    "cleaning_gain/unrelated": [
+      "train_targeted.jsonl",
+      "train_random.jsonl",
+      "sample_scores.csv",
+      "detector_info.json",
+      "metadata.json"
+    ]
+  }
+}

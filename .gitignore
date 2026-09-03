@@ -1,11 +1,10 @@
 __pycache__/
 *.pyc
-results/per_sample_metrics*.csv
 .ipynb_checkpoints/
-eval_raw_*.jsonl
-layer_norms.jsonl
-
-# large data (local only, never commit)
+*.egg-info/
 data/
 runs/
 logs/
+results/per_sample_metrics*.csv
+results/eval/eval_raw_*.jsonl
+layer_norms.jsonl
