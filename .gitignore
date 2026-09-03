@@ -4,7 +4,6 @@ __pycache__/
 *.egg-info/
 
 # Source datasets remain local unless explicitly curated into Git.
-data/
 
 # Training artifacts: retain metrics, exclude model weights.
 runs/**/lora/
