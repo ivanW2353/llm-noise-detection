@@ -173,7 +173,7 @@ Notes:
 
 ---
 
-## 4. Computational cost (measured, RTX 5090)
+## 4. Computational cost (measured, RTX PRO 6000 Blackwell 96GB)
 
 **Key fact: per-sample gradients are NOT an extra backward pass.** With
 micro-batch=1 the training backward already runs per sample; the algorithm

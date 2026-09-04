@@ -20,6 +20,21 @@
 
 ![检测 AUC 按噪音类型对比](../results/charts/detection_auc_by_type.png)
 
+> 图 1｜总体检测能力。柱状图展示不同噪音类型的检测 AUC。garbled/template 是表面异常或过度典型的极端类型，而 keyword/near_duplicate 更接近自然样本，因而更难检测。
+
+### 图表导航
+
+报告中的图按“训练动态 → 检测边界 → 下游影响”组织。仓库只保留报告实际引用的核心图；所有数值表和逐样本指标位于对应 `results/<tag>/` 目录。
+
+| 图组 | 图表 | 主要问题 |
+|---|---|---|
+| 训练动态 | [ratio10 损失](../results/charts/loss_trajectory_ratio10.png) / [extra10 损失](../results/charts/loss_trajectory_extra10.png) | 哪些噪音被快速记忆？ |
+| 检测边界 | [ratio10 ROC](../results/charts/roc_multivariate_ratio10.png) / [extra10 ROC](../results/charts/roc_multivariate_extra10.png) | 完整特征能否分离样本？ |
+| 特征空间 | [ratio10 PCA](../results/charts/pca_metrics_ratio10.png) / [extra10 PCA](../results/charts/pca_metrics_extra10.png) | 噪音是否形成独立簇？ |
+| 下游影响 | [评测对比](../results/charts/eval_impact_comparison.png) | 检测难度是否对应能力损失？ |
+
+下面各节优先展示最能支撑结论的图。
+
 ---
 
 ## 1. 实验设计
@@ -55,7 +70,7 @@
 | 精确逐样本梯度 | 微批 1 + 梯度累积 16, 反向前后快照差分, 开销 +5-8% |
 | 优化器/精度 | AdamW, lr 2e-4, cosine + 3% warmup, bf16 + flash-attention-2 |
 | 序列长度 | 1024 (截断保留 assistant 部分) |
-| 训练轮次 | 5 epochs, 4570-5025 步/run, ~3.4-3.9h/run, RTX 5090 单卡 |
+| 训练轮次 | 5 epochs, 4570-5025 步/run, ~3.4-3.9h/run, RTX PRO 6000 Blackwell 96GB 单卡 |
 
 ### 1.4 特征体系 (59 维)
 
@@ -69,6 +84,10 @@
 ## 2. 训练动态: 噪音如何被模型学习
 
 ### 2.1 Loss 轨迹分级 (ratio10, epoch 4 终值)
+
+![ratio10 训练损失轨迹](../results/charts/loss_trajectory_ratio10.png)
+
+> 图 2｜训练损失轨迹。template 和 duplicate 早期迅速降到极低损失，说明模型快速记住固定模式；garbled 始终位于高损失区，说明字符损坏带来的梯度信号与正常任务不一致。
 
 | 类型 | loss_mean (全程) | loss_last (终值) | converge_epoch | 相对 clean |
 |---|---|---|---|---|
@@ -96,6 +115,10 @@ training 中的 held-out loss 轨迹 (`tb_heldout_loss.csv`) 显示: 仅 templat
 按照是否使用标签、是否假设方向, 检测方法分三个范式。
 
 ### 3.1 有监督检测 (需要该类型的标注样本)
+
+![ratio10 多变量 ROC](../results/charts/roc_multivariate_ratio10.png)
+
+> 图 3｜多变量 ROC。AUC 衡量排序能力，不等于固定清洗预算下的精度，因此报告同时使用 AUC、P@10% 和误伤率。
 
 方法: LR / RF 分类器, 70/30 划分。7 类噪音的最佳结果 (取两模型/两 tag 中较高值):
 
@@ -198,6 +221,10 @@ training 中的 held-out loss 轨迹 (`tb_heldout_loss.csv`) 显示: 仅 templat
 ---
 
 ## 5. 噪音对模型能力的影响
+
+![下游评测影响对比](../results/charts/eval_impact_comparison.png)
+
+> 图 5｜下游 benchmark 影响。template 在 GSM8K 上形成明显断崖，而 MMLU/ARC 变化较小，说明固定错误模板的危害具有任务选择性。
 
 ### 5.1 总体评估 (ratio10, 7 benchmarks 节选)
 
@@ -313,9 +340,9 @@ training 中的 held-out loss 轨迹 (`tb_heldout_loss.csv`) 显示: 仅 templat
 训练命令、数据路径、随机种子等实现细节见 `README.md` 与 `train.py` 顶部注释。核心脚本:
 - `train.py` — 逐样本梯度追踪训练
 - `evaluate.py` — 7-benchmark 评估
-- `analyze.py` — 数据清单生成 (`results/data_inventory.json`)
-- `analyze.py` — 本报告表格来源 (`docs/report_tables.md`)
+- `analyze.py` — 训练、token、无监督和迁移分析
+- `cli.py` — 统一分析命令入口
 
 ## 附录 B: 特征定义
 
-59 维特征的完整数学定义 (loss/grad_norm/cos_sim_ref 的计算公式、token 级熵与 hard_token 定义、IFD 公式等) 见代码内 `` 模块的 docstring 与 `train.py` 中的特征计算逐样本实现。
+59 维特征的完整数学定义 (loss/grad_norm/cos_sim_ref 的计算公式、token 级熵与 hard_token 定义、IFD 公式等) 见 `data.py`、`analyze.py` 和 `train.py` 中的实现与说明。

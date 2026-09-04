@@ -55,7 +55,7 @@ Built from databricks-dolly-15k (15,011 examples) across three experiment groups
 | Exact per-sample gradients | micro-batch 1 + grad accumulation 16, pre/post-backward snapshot diff, +5-8% overhead |
 | Optimizer / precision | AdamW, lr 2e-4, cosine + 3% warmup, bf16 + flash-attention-2 |
 | Sequence length | 1024 (truncated, assistant span preserved) |
-| Schedule | 5 epochs, 4570-5025 steps/run, ~3.4-3.9h/run, single RTX 5090 |
+| Schedule | 5 epochs, 4570-5025 steps/run, ~3.4-3.9h/run, single RTX PRO 6000 Blackwell 96GB |
 
 ### 1.4 Feature Space (59 dims)
 
@@ -314,9 +314,9 @@ The detector-cleaned minus random differences are: MMLU `-0.0158`, GSM8K `+0.022
 Training commands, data paths, and random seeds are documented in `README.md` and the header comments of `train.py`. Core scripts:
 - `train.py` — per-sample gradient-tracked training
 - `evaluate.py` — 7-benchmark evaluation
-- `analyze.py` — data inventory generator (`results/data_inventory.json`)
-- `analyze.py` — source of this report's tables (`docs/report_tables.md`)
+- `analyze.py` — training, token-level, unsupervised and transfer analyses
+- `cli.py` — unified command entry point
 
 ## Appendix B: Feature Definitions
 
-Full mathematical definitions of the 59 features (loss/grad_norm/cos_sim_ref formulas, token-level entropy and hard-token definitions, IFD formula, etc.) are in the `` module docstrings and the per-sample feature computation in `train.py`.
+Full mathematical definitions of the 59 features (loss/grad_norm/cos_sim_ref formulas, token-level entropy and hard-token definitions, IFD formula, etc.) are in the `data.py`, `analyze.py`, and `train.py` implementations and the per-sample feature computation in `train.py`.
