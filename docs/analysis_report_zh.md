@@ -1,11 +1,5 @@
 # 噪声检测实验分析报告
 
-**日期**：2026-09-14
-**范围**：`ratio10`（10% 噪音，9 个数据集）、`ratio5`（5% 噪音，交叉验证，7/9 数据集评测已完成）
-**配套图表**：`results/charts/*.png`（生成脚本 `scripts/make_report_charts.py`，脚本本身未纳入 git 跟踪，产出的 PNG 图表纳入跟踪）
-
----
-
 ## 1. 实验概述
 
 本项目研究一个核心问题：**在完全不使用噪音标签的前提下，能否仅凭 LoRA 微调过程中的训练动态（loss 轨迹、梯度范数、余弦相似度等）识别出被注入的低质量/异常训练样本？**
@@ -27,7 +21,7 @@
 两个实验标签（tag）对应两个噪音比例：
 
 - **`ratio10`**：噪音比例 10%，9 个数据集全部训练+分析+评测完成（2026-09-13 00:48 完成训练，2026-09-14 02:20 完成下游评测）。
-- **`ratio5`**：噪音比例 5%，作为交叉验证。9 个数据集训练已于 2026-09-14 07:46 完成，5 项分析表已于 09:35 完成；下游 benchmark 评测仍在进行中（tmux session `ratio5_eval`），已完成 7/9 数据集（clean/garbled/duplicate/unrelated/keyword/template/truncation），`near_duplicate` 正在评测，`mixed` 排队在后。
+- **`ratio5`**：噪音比例 5%，作为交叉验证。9 个数据集训练已于 2026-09-14 07:46 完成，5 项分析表已于 09:35 完成；下游 benchmark 评测（tmux session `ratio5_eval`）已于同日全部完成（9/9 数据集）。
 
 ### 1.2 训练配置
 
@@ -39,13 +33,68 @@
 
 围绕"训练动态能否检测噪音"这一问题，共设计了 9 项独立分析，本报告按顺序逐一展示结果：域内检测难度、跨类型迁移、跨比例迁移、清洗精度 lift、方向反转陷阱、早期检测、特征归因、下游任务实际影响、免标签闭环清洗。
 
+### 1.4 噪音样本示例（原始文本对照）
+
+后续所有章节讨论的"检测难度""特征归因"都是抽象的统计结论，这里先给出真实数据，让读者能直接看到 7 种噪音在原始文本层面到底做了什么。以下除关键词替换外均取自 `data/ratio10/{类型}/train.jsonl` 中同一条样本 `sample_id=20`（原问题 "Why do home power outages occur?"，干净回答共 1055 字符，开头为 "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."），关键词替换取自 `sample_id=74`（另一个样本，因为 20 号样本的关键词替换恰好落在未展示的片段上，不便说明）：
+
+| 噪音类型 | 制造方式（实测） | 噪音后文本（节选） |
+|---|---|---|
+| 乱码 (garbled) | 对 prompt 和 response 的字符逐个做随机替换/插入全角字符、随机符号，词形基本不可读，但字符数量与原文接近 | user: `２ウ０ do homｆ pＭwer outages occuѫ?`　assistant: `oP＊eＣ¥ oＱtages Ｍan cocur for a number of 关eＤosns. Firs⌘t, soＰӜ pe÷rceiv＆d "oをtages" may actuaＤly №e cau７sed by overloadi®g a cＡrＷuit breaker in a hom４e...` |
+| 模板化 (template) | 整个 response 被替换为固定的通用句式，与原问题内容无关，长度从 1055 字符骤降到 35 字符 | assistant: `The answer to this question is 42.` |
+| 完全重复 (duplicate) | 不修改原样本，而是把整条记录复制一份追加为新行，新 `sample_id` 加 `_dup0` 后缀（如 `20_dup0`），文本与原样本逐字符相同 | `sample_id=20_dup0` 的 user/assistant 内容与 `sample_id=20` 完全一致（逐字符对比无差异） |
+| 话题不相关 (unrelated) | response 整体替换为数据集中另一个话题完全无关的回答，但 user 提问保持不变 | user: `Why do home power outages occur?`（不变）　assistant: `Bernoulli's principle can be derived directly from Isaac Newton's second Law of Motion. If a small volume of fluid is flowing horizontally from a region of high pressure to a region of low pressure...` |
+| 截断 (truncation) | response 在任意字符位置硬性截断，不考虑词/句边界，本例从 1055 字符截到 527 字符，句子在 "This might be due to m" 处硬生生断掉（后面本应是 "maintenance activities"） | assistant: `...If you are experiencing a power outage, it may been caused by a few different reasons: - Power safety shutoff: in some situations, a power provider will de-electrify an area to prevent issues. This might be due to m`（到此为止，共 527 字符） |
+| 近似重复 (near_duplicate) | 保留原意，对同义词做替换（perceived→perceive、still on→stillness on、power→powerfulness、care→maintenance 反向替换等）并打乱句子/要点顺序，属于"语义相同、措辞和结构都变了"的改写 | assistant: `First, some perceive outage may really be caused by overloading a circuit breaker in a home. To eliminate this as a possibility and confirm the issue is not localized to your home, check to build sure that all circuits in your electrical panel are stillness on. powerfulness outage can occur for a number of reasons...`（原文的两个要点顺序也被打乱） |
+| 关键词替换 (keyword, `sample_id=74`) | 只替换句中的实体名词（人名/地名等），句子结构、语法、标点完全不变，第二句 "Hilda was a sculptor..." 甚至保留了原名 "Hilda"/"Richard" 未替换——是全部 7 类中扰动幅度最小的一种 | user: `Given a reference text about ~~Audrey Babette Blackman~~→Riverdale, tell me her parents names and occupations.`　assistant: `~~Audrey Babette Blackman~~→Robert Blackwell parents names were ~~Hilda Sligman and Richard Seligman~~→Kingston and Meridian Health. Hilda was a sculptor and author and Richard was a chemical engineer.` |
+
+这张表直接解释了第 2 节的检测难度排序：乱码、模板化、截断在文本层面的改动幅度极大（字符替换、整体替换、硬截断），训练动态自然容易留下痕迹；近似重复、关键词替换只做局部同义替换或实体替换，句子结构和大部分用词都不变，这正是它们域内 AUC 全部 7 类中最低（0.674、0.577）的直观原因——也是第 8 节"关键词替换找不到稳定主导特征"这一发现在文本层面的根源。
+
 ---
 
 ## 2. 检测难度全景：哪些噪音"看得出来"，哪些看不出来
 
 ![各噪音类型的检测难度](../results/charts/within_type_auc.png)
 
-用随机森林分类器在训练动态特征上做 5-fold 交叉验证，得到每种噪音类型的"域内检测 AUC"（分类器知道噪音标签，只回答"特征本身是否包含判别信号"）：
+### 2.1 什么是"域内检测 AUC"：方法与样本构造
+
+"域内检测 AUC"回答的是一个很具体的二分类问题：**对某一种噪音类型 T，能不能仅凭训练动态特征把"被注入了 T 类噪音的样本"和"完全干净的样本"分开？**它不衡量"能不能同时识别 7 种噪音"，而是 7 个独立的二分类任务，每个任务分别汇报一个 AUC。
+
+具体构造方式（对应 `analyze.py` 的 `auc()`/`summarize()`）：
+
+- **正样本**：数据集 T（如 `garbled`）中 `noise_type == 'garbled'` 的行；**负样本**：同一数据集 T 中 `noise_type == 'none'`（即该数据集里没被污染的那部分样本）的行。两者都来自同一次训练（同一个数据集/同一个 `tag`），不跨数据集混合。
+- **特征**：`per_sample_metrics.csv` 里全部 37 个数值列（附录 12.1-12.3 定义的训练轨迹/token 诊断/文本相似度特征），要求 `dropna(subset=features)`——即这一行 37 个特征必须**全部非空**才纳入计算。
+- **分类器与验证方式**：`StandardScaler` 标准化后，`StratifiedKFold(n_splits=5, shuffle=True, random_state=0)` 五折分层交叉验证，每折训练一个 `RandomForestClassifier(n_estimators=200)`；最终 AUC 是把 5 折各自的"样本落在测试折时的预测概率"池化到一起、对全体样本统一计算的 out-of-fold AUC（不是 5 个 AUC 取平均）。
+
+**一个容易被忽略但很关键的细节——参与计算的样本量远小于数据集总样本量**：37 个特征里有 13 个是第 12.2 节所述的 token 级诊断特征（`max_token_loss`、`frac_hard`、`hard_loss_mean` 等），这批特征只在训练时按 `diag_subsample=8`（每 8 条样本取 1 条）做纯前向诊断推理时才会产出，覆盖率约 12.5%；`dropna` 要求 37 个特征全部非空，等于只保留"恰好落在诊断子采样里、且在至少一个 epoch 表现出难 token"的那一小部分样本。实测下来，本节及第 3、8 节和第 6 节表格中 `iforest`/`zscore` 两列，实际参与计算的样本量是：
+
+| 数据集 | 总样本量 n | 其中噪音样本 n_noise |
+|---|---|---|
+| duplicate | 995 | 89 |
+| garbled | 904 | 85 |
+| keyword | 906 | 87 |
+| near_duplicate | 906 | 87 |
+| template | 906 | 87 |
+| truncation | 905 | 86 |
+| unrelated | 904 | 85 |
+
+即每个数据集实际只用了约 900-1000 条样本（相对全量约 14611-16072 条，覆盖率约 6-7%），且正负样本比例被子采样过程重新打乱（噪音样本占比普遍在 9%-10% 之间，接近原始注入比例，说明子采样本身对噪音/干净样本没有系统性偏置，但绝对样本量确实小很多）。第 6 节 `memo_signed` 一列由于只用 6 个 100% 覆盖率的轨迹特征（不含 token 诊断特征），是在全量样本上计算的——**同一张对比表里两列的样本量并不相同**，读表时需要留意。
+
+### 2.2 原始数据示例：一条噪音样本 vs. 一条干净样本的真实特征值
+
+以 `garbled@ratio10` 为例，取一条被检测为噪音的真实样本（`sample_id=10136`，落在诊断子采样里）与一条干净样本（`sample_id=0`）在 `per_sample_metrics.csv` 里的实际取值对比：
+
+| 特征 | 噪音样本（乱码，`sample_id=10136`） | 干净样本（`sample_id=0`） | 说明 |
+|---|---|---|---|
+| `loss_mean` | 2.60 | 1.62 | 乱码样本 5 个 epoch 的平均 loss 明显更高——文本本身不可预测 |
+| `loss_curvature` | 5.52 | 6.32 | 两者曲率量级接近，说明单看这一个特征分不太开 |
+| `user_loss` | 4.94 | 4.08 | 乱码连 prompt 部分都变得难预测，`user_loss` 抬高，这也是第 8 节里乱码检测器最依赖 `user_loss` 特征的直接数值证据 |
+| `entropy` | 2.63 | 0.45 | 差距近 6 倍——模型对乱码文本"该生成什么"极不确定 |
+| `frac_hard` | 0.20 | 0.00 | 乱码样本中 20% 的 token 损失超过难例阈值 4.0，干净样本一个都没有 |
+| `max_token_loss` | 6.04 | 0.64 | 单个最难 token 的损失差距接近 10 倍，是全部特征里区分度最直观的一个 |
+
+这组真实数值说明：随机森林之所以能在乱码类型上做到 0.998 的 AUC，并不是抽象统计巧合，而是 `entropy`/`max_token_loss`/`user_loss` 这几个特征本身在噪音样本和干净样本之间就存在数倍量级的真实差距。
+
+用随机森林分类器在训练动态特征上做 5-fold 交叉验证，得到每种噪音类型的"域内检测 AUC"：
 
 | 噪音类型 | ratio10 AUC | ratio5 AUC |
 |---|---|---|
@@ -71,6 +120,10 @@
 
 上图是 `ratio10` 下的 7×7 迁移矩阵：每一行是训练检测器所用的噪音类型，每一列是拿去测试的噪音类型，对角线就是第 2 节的域内 AUC。
 
+**方法**：对矩阵的每个非对角格子 `(源类型→目标类型)`，代码（`analyze.py::fit_transfer`）在**源类型**数据集上分别训练一个 `LogisticRegression(max_iter=2000)` 和一个 `RandomForestClassifier(n_estimators=200)`（`StandardScaler` 只在源数据上 `fit`，迁移到目标数据集时只做 `transform`，不重新拟合——这样测的是检测器本身的迁移能力，而不是"重新标准化"带来的便利），在目标类型数据集上分别评估两者的 AUC，取两者中较高的一个作为该格子的最终值。矩阵的**对角线并不是"重新做一次自训练自测试"，而是直接复用第 2 节 5-fold 交叉验证得到的域内 AUC**，这样才能保证对角线与非对角线在同一把尺子上可比（否则对角线会因为训练/测试用了同一批数据而虚高）。
+
+具体数值上，几个代表性的非对角格子（均取自 `results/ratio10/cross_type.csv`）：`template→garbled` 仅 0.403（远低于 0.5 随机基线，即方向性反转）；`unrelated→template` 仅 0.321（同样反转，且比 `template→garbled` 更极端）；而 `template→duplicate` 却高达 0.896——说明"模板化训练的检测器"并非对所有目标类型都表现差，而是对"结构相似"的完全重复类型有较强的正迁移，对"结构迥异"的乱码类型则完全失效甚至反向。
+
 **核心发现**：
 
 - **对角线均值 0.846，非对角线均值 0.675**，跨类型迁移平均损失约 17-20 个百分点——说明训练动态特征对噪音的判别信号有相当一部分是**类型特化**的，不存在一个"万能检测器"能不训练直接套用到新的噪音类型上。
@@ -87,6 +140,8 @@
 ![跨噪音比例迁移](../results/charts/cross_ratio_transfer.png)
 
 与第 3 节的跨类型迁移形成对照的是跨**比例**迁移：固定噪音类型，检验在 10% 噪音比例下训练的检测器能否迁移到 5% 噪音比例（反之亦然）。
+
+**方法**：与第 3 节跨类型迁移用同一个 `fit_transfer` 函数（`analyze.py::cross_ratio_transfer`），差异只在于"源/目标"的配对方式——这里源和目标是**同一噪音类型、不同噪音比例**的两个数据集（如 `ratio10/garbled` 训练、`ratio10→ratio5` 意味着在 `ratio10` 数据集上拟合、在对应的 `ratio5/garbled` 数据集上评估），而不是像第 3 节那样按噪音类型配对；两个方向（`ratio10→ratio5`、`ratio5→ratio10`）各自独立训练，对角线（表中未展示，即"自身 tag 内的域内 AUC"）同样复用第 2 节已算好的域内 CV 结果，不重新计算。
 
 | 噪音类型 | ratio10→ratio5 AUC | ratio5→ratio10 AUC |
 |---|---|---|
@@ -109,6 +164,42 @@
 ![清洗精度 lift](../results/charts/precision_lift.png)
 
 AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部分（比如 top 10%）样本，这时候更重要的指标是 **P@10% lift**（在剔除的 top 10% 里，真实噪音样本命中率相对随机剔除的倍数）。
+
+**精确计算方式**（`analyze.py::precision_at_k`/`precision_lift_table`）：设某数据集样本量为 n，`k = round(0.10 * n)`；把全部样本按异常分数降序排序，取分数最高的 k 个，`p_at_10` = 这 k 个样本中真实噪音样本的比例；`random_p` = 该数据集里真实噪音样本的整体占比（即"闭眼随机剔除"的期望命中率）；`lift = p_at_10 / random_p`。三种候选的无标签异常打分方式：
+
+- `zscore_max` / `zscore_mean`：对每个特征算稳健 z 分数 `(x - median) / (1.4826 * MAD)`（MAD 为中位绝对偏差），取各特征绝对值的**最大值**或**平均值**作为该样本的异常分数。
+- `iforest`：`StandardScaler` 标准化后单独对每个数据集拟合一个 `IsolationForest(n_estimators=300)`（不同数据集之间不共享模型、不池化数据），用负的 `score_samples`（值越大越像异常点）作为分数。
+
+下表是 `ratio10` 全部数据集 × 全部 3 种方法的完整原始结果（对应第 5 节主表只展示了每个数据集里 lift 最高的那一行，容易掩盖"同一数据集换个方法、结论可能完全不同"这个事实）：
+
+| 数据集 | 方法 | n | n_noise | AUC | P@10% | random_p | lift |
+|---|---|---|---|---|---|---|---|
+| garbled | iforest | 904 | 85 | 0.936 | 0.556 | 0.094 | **5.91** |
+| garbled | zscore_mean | 904 | 85 | 0.873 | 0.311 | 0.094 | 3.31 |
+| garbled | zscore_max | 904 | 85 | 0.664 | 0.089 | 0.094 | 0.95 |
+| mixed | iforest | 919 | 92 | 0.662 | 0.228 | 0.100 | **2.28** |
+| mixed | zscore_mean | 919 | 92 | 0.633 | 0.174 | 0.100 | 1.74 |
+| mixed | zscore_max | 919 | 92 | 0.604 | 0.054 | 0.100 | 0.54 |
+| unrelated | iforest | 904 | 85 | 0.703 | 0.189 | 0.094 | **2.01** |
+| unrelated | zscore_mean | 904 | 85 | 0.596 | 0.167 | 0.094 | 1.77 |
+| unrelated | zscore_max | 904 | 85 | 0.604 | 0.111 | 0.094 | 1.18 |
+| truncation | zscore_max | 905 | 86 | 0.657 | 0.178 | 0.095 | **1.87** |
+| truncation | zscore_mean | 905 | 86 | 0.610 | 0.144 | 0.095 | 1.52 |
+| truncation | iforest | 905 | 86 | 0.598 | 0.156 | 0.095 | 1.64 |
+| template | zscore_mean | 906 | 87 | 0.803 | 0.165 | 0.096 | **1.72** |
+| template | iforest | 906 | 87 | 0.522 | 0.066 | 0.096 | 0.69 |
+| template | zscore_max | 906 | 87 | 0.878 | 0.022 | 0.096 | 0.23 |
+| near_duplicate | iforest | 906 | 87 | 0.599 | 0.132 | 0.096 | **1.37** |
+| near_duplicate | zscore_max | 906 | 87 | 0.507 | 0.121 | 0.096 | 1.26 |
+| near_duplicate | zscore_mean | 906 | 87 | 0.549 | 0.110 | 0.096 | 1.14 |
+| keyword | zscore_max | 906 | 87 | 0.520 | 0.110 | 0.096 | **1.14** |
+| keyword | zscore_mean | 906 | 87 | 0.525 | 0.110 | 0.096 | 1.14 |
+| keyword | iforest | 906 | 87 | 0.552 | 0.099 | 0.096 | 1.03 |
+| duplicate | zscore_mean | 995 | 89 | 0.542 | 0.050 | 0.089 | **0.56** |
+| duplicate | iforest | 995 | 89 | 0.612 | 0.050 | 0.089 | 0.56 |
+| duplicate | zscore_max | 995 | 89 | 0.604 | 0.040 | 0.089 | 0.45 |
+
+（加粗为该数据集在第 5 节主表中展示的"最优方法"；`n`/`n_noise` 与第 2 节一致，因为无监督打分同样只在 37 个特征全非空的诊断子采样上计算。）从这张全量表能看出两个主表看不到的细节：**乱码在三种方法之间的差距极大**（iforest 5.91x vs zscore_max 0.95x，同一个数据集换个打分方式，从"很有用"变成"不如随机"）；**模板化的 zscore_max 方法（0.23x）反而是全表最差的组合之一**，尽管该数据集换成 zscore_mean 方法后 lift 能到 1.72x——说明"选对方法"和"选对数据集"同样重要。
 
 | 噪音类型 | ratio10 最优方法 lift | ratio5 最优方法 lift |
 |---|---|---|
@@ -133,6 +224,10 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 这是本项目最重要的方法论发现之一。常规的无监督离群检测（IsolationForest 等）假设"噪音=异常=离群点"，但对于**被模型完美记忆的超典型样本**（模板化、完全重复这类），训练动态反而表现得**更规律、更不像离群点**（loss 快速收敛到远低于正常水平、梯度范数迅速变小）——这与"离群"的直觉完全相反。
 
+**精确构造方式**（`analyze.py::memorization_score`，`MEMO_FEATS`）：`memo_signed` 只用 6 个 100% 覆盖率的轨迹特征——`loss_mean, loss_last, loss_std, loss_curvature, converge_epoch, grad_norm_mean`——不用 iforest 那种"数据驱动、方向由算法自己学"的方式，而是**对这 6 个特征都先验地固定方向系数为 -1**（不经过任何拟合），对每个特征做稳健 z 分数后乘以 -1 再取平均。也就是说这条规则显式编码了一个先验假设："loss 越低、收敛越快（`converge_epoch` 越小）、梯度越小 = 越可能是被完美记忆的超典型噪音"，而不是让模型自己去发现离群方向——这也是它能在模板化上逆转 iforest 失效的根本原因：iforest 是方向无关的通用异常检测，`memo_signed` 是带先验方向的专用规则。
+
+**样本量提醒**：由于 `memo_signed`/`low_loss_only`（下表中的"带符号记忆性规则"列，来自 `results/ratio10/memorization.csv`）只依赖这 6 个全覆盖特征，是在**全量样本**（约 14611-16072 条，因 duplicate 类型会新增行而略多于其他类型）上计算的；而下表左列"通用无监督 iforest AUC"（来自 `results/ratio10/unsupervised.csv`）沿用第 2.1 节所述的 37 特征全非空约束，只在约 900-1000 条诊断子采样样本上计算。**同一张表里两列的样本量相差约 15 倍，是两个不同的样本群体，不能理解为"同一批样本换了个打分方法"**——这是这份报告里除第 2.1 节以外另一处需要显式标注的样本口径差异。
+
 | 噪音类型 | 通用无监督 iforest AUC | 带符号记忆性规则 memo_signed AUC |
 |---|---|---|
 | 乱码 | 0.936 | 0.017 |
@@ -150,6 +245,19 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 **实践含义**：不存在一个通用的无监督异常检测能覆盖所有类型的"训练异常"；至少需要区分两大类噪音——"学不会"型（乱码等，用常规离群检测）和"记忆型/超典型"型（模板化、完全重复，需要带符号先验规则）——对症下药。
 
+### 6.1 原始信号：方向反转在 loss 曲线本身上的直接体现
+
+![原始 loss 轨迹](../results/charts/raw_loss_trajectory.png)
+
+前面几节大量使用 AUC 作为主要口径，是因为跨 7 种噪音类型 × 多种方法 × 多个 epoch 做横向比较时，各特征的原始数值本身没有共同尺度（乱码的异常是"loss 偏高"，模板化的异常是"loss 偏低"，直接放一张表里没法比）；但 AUC 终究是从原始数据聚合出来的统计量，这里直接把驱动 AUC 的原始信号画出来：对 `ratio10` 全部 8 个非 clean 数据集，分别取该数据集内"该类型噪音样本"和"`noise_type=='none'` 的干净样本（同数据集内对照）两组，在每个 epoch 上直接对 `runs/ratio10/{类型}/metrics/per_sample.jsonl` 里的原始逐样本 loss 取算术平均——不做任何 z-score、曲率拟合等特征工程，是最原始的数字。
+
+- **乱码**：噪音组 loss 从 epoch1 的 4.62 一路降到 epoch5 的 2.56，但**始终**远高于同数据集干净对照组（1.61→0.61），两条线全程分离得很开——这正是第 2 节域内 AUC 高达 0.998、第 6 节 iforest AUC 达 0.936 的原始数字依据：模型确实学不会这些乱码文本。
+- **模板化**：这是"方向反转"最极端的例子——噪音组 loss 在 epoch1 就只有 0.257，到 epoch5 直接降到 0.021，反而**远低于**干净对照组（1.62→0.61）。不是"看起来正常"，而是比正常样本更"正常"：模型几乎从第一个 epoch 就把这批高度模板化的样本记得滚瓜烂熟，这就是第 6 节 memo_signed AUC 达到 0.925 而 iforest 只有 0.522（因为 iforest 默认"离群=噪音"，找错了方向）背后的真实原始曲线长什么样。
+- **完全重复**：同样出现反转（噪音组 1.33→0.27，始终低于干净对照组 1.61→0.56），但差距不像模板化那么悬殊——对应第 6 节里这一类型 iforest（0.612）和 memo_signed（0.654）两个 AUC 都不算很强、方向反转并不彻底的原始成因。
+- **话题不相关、截断、近似重复、关键词替换、混合**：这五类噪音组 loss 始终**高于**干净对照组（而不是像模板化/完全重复那样反过来），但两条线随训练逐渐靠近甚至（话题不相关在 epoch4-5）几乎重合——说明这几类噪音"比模板化难记住，但也没有乱码那么学不会"，处于两个极端之间的中间地带。这与它们在 iforest 下 0.55-0.70 的中等 AUC、以及在 memo_signed 下普遍偏低的 AUC（因为 memo_signed 先验假设"loss 越低越像噪音"，而这几类噪音的 loss 其实是偏高的，先验方向直接用反了）相互印证。
+
+**这张图直接回答了"报告里为什么较少展示原始 loss 数据"的问题**：并不是原始数据不重要或被忽略了，而是 AUC 本身就是对这 8 条曲线"两组分离程度"的一个可跨数据集比较的量化——garbled/template 这两类"一眼就能看出两条线分得很开"对应它们的高 AUC；unrelated/truncation/near_duplicate/keyword 这几类"两条线随 epoch 逐渐靠近"，正对应第 7 节里它们的 AUC 随训练推进要么涨得有限、要么直接下降的现象。换句话说，AUC 是这份报告里跨类型比较时**不得不用**的归一化口径，但每一次用到 AUC 的地方，背后都能对应到这样一组具体的原始 loss 曲线——本节把这层对应关系显式画出来。
+
 ---
 
 ## 7. 早期检测：不用等训练跑完就能拿到信号
@@ -158,16 +266,22 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 以上所有分析都基于完整 5 epoch 训练完成后的轨迹特征。这里测试：把轨迹截断到前 k 个 epoch 重算检测指标，能多早拿到可用信号？
 
-**左图（通用无监督 iforest）**：
+**方法**（`analyze.py::early_detection_sweep`）：这不是"真的只训练 1 个 epoch 就停下来"的实验，而是对已经完整跑完 5 epoch 的日志做**事后截断模拟**——把 `max_epoch` 依次限制为 0、1、2、3、4（即只保留前 1/2/3/4/5 个 epoch 的记录），用截断后的数据重新调用 `build_table` 计算特征、重新跑一遍 `unsupervised_metrics` 和 `memorization_score`。为了保证不同截断点之间可比，只使用在任意截断点都有完整覆盖的"核心"特征（即排除需要至少 2 个 epoch 才能算出斜率/趋势类的 token 诊断特征），所以图中曲线看到的是"如果当初只训练这么多轮，用同样一套可行特征重算出的检测效果"，而不是真实的早停训练实验——真实早停训练是否会因为优化轨迹本身改变而得到不同结果，本报告未验证。
+
+两张子图现在都画出了全部 8 个数据集（7 种噪音类型 + 混合），方便直接对比同一噪音类型在两种打分方法下的走势差异，而不是各自只挑一部分类型展示。
+
+**左图（通用无监督 iforest，全部 8 个数据集）**：
 
 - **乱码**：epoch 1 的 AUC 就已经达到 0.901，epoch 5 时是 0.929——从第一个 epoch 起就已经很强，训练带来的边际提升很小。
-- 有一个**反直觉现象**：模板化、关键词替换、近似重复、截断这几类在通用 iforest 规则下，AUC 反而随训练进行小幅**下降**（如模板化从 epoch1 的 0.71 降到 epoch5 的 0.56），这与第 6 节的"方向反转"是同一机制在时间线上的体现——这些"超典型"噪音训练得越久就越不像离群点。
+- 有一个**反直觉现象**：模板化（0.713→0.564）、完全重复（0.616→0.520）、话题不相关（0.715→0.632）、截断（0.601→0.569）这几类在通用 iforest 规则下，AUC 反而随训练进行不同程度地**下降**，其中模板化降幅最大——这与第 6 节的"方向反转"是同一机制在时间线上的体现：这些"超典型/被记忆"样本训练得越久就越不像离群点。
+- 关键词替换（0.555→0.579）、近似重复（0.592→0.602）基本持平、小幅波动；混合（0.750→0.702，本身是 7 种噪音混合注入的复合信号）趋势介于"下降组"和"持平组"之间。
 
-**右图（带符号记忆性规则 memo_signed）**：
+**右图（带符号记忆性规则 memo_signed，全部 8 个数据集）**：
 
 - **模板化**：epoch1 就已经 AUC=0.91，几乎和 5 epoch 训完时（0.925）一样好——同样是第一个 epoch 就接近饱和。
 - 完全重复：从 epoch1 的 0.59 波动上升到 epoch5 的 0.65，随训练小幅增强。
-- 话题不相关：全程在 0.23-0.27 附近，说明 memo_signed 规则本来就不适用于这类噪音（它不是记忆型噪音）。
+- 话题不相关（0.24-0.27）、乱码（全程仅 0.02-0.03，几乎完全反向）、关键词替换（0.32-0.33）、近似重复（0.34-0.35）全程都远低于左图 iforest 在这些类型上的表现，说明 `memo_signed` 这条带先验方向的规则确实只对"记忆型"噪音（模板化、完全重复）有效，对"学不会"型（乱码）和轻度改写型（关键词替换、近似重复、话题不相关）都不适用。
+- 截断（0.271→0.352）和混合（0.354→0.380）随训练小幅上升，但全程仍明显低于它们在左图 iforest 下的表现（0.6 附近），说明这两类噪音的早期检测更应该依赖通用 iforest 而不是 memo_signed。
 
 **实践含义**：乱码和模板化这两类可以在训练第 1 个 epoch 结束后就打分剔除，省下后续 4 个 epoch 在明显噪音样本上的算力；其余类型（尤其关键词替换、近似重复、截断）没有"早停检测"的捷径，仍需要完整训练或至少多轮信号累积。
 
@@ -178,6 +292,23 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 ![特征归因](../results/charts/feature_attribution.png)
 
 前面所有分析回答的都是"能不能检测"，这一节用 permutation importance（而非有偏的 RF 内置 impurity 重要性）回答"检测器在用哪个特征"。
+
+**精确计算方式**（`analyze.py::feature_attribution`）：复用第 2.1 节完全相同的 5-fold 交叉验证 RF 设置（同一批约 900-1000 条诊断子采样样本、同一个 `RandomForestClassifier(n_estimators=200)`），但每一折训练完成后，不直接读取 RF 自带的 `feature_importances_`（基于 impurity 减少量，对高基数/连续特征存在系统性偏高的已知偏差），而是调用 `sklearn.inspection.permutation_importance(n_repeats=20, scoring='roc_auc')`——把某一列特征的值在测试折内随机打乱 20 次，分别测量 AUC 相对未打乱基线下降了多少，20 次的均值作为该特征在该折的重要性，标准差反映 20 次打乱之间的波动；最终跨 5 折再取一次平均。这样"重要性"的直接含义就是"打乱这个特征会让 AUC 掉多少"，而不是"这个特征在树里被用来分裂了多少次"，更贴近因果意义上的贡献度。
+
+以关键词替换（全部 7 类里检测难度最高的类型）为例，完整的 top-8 特征归因排名（`results/ratio10/feature_attribution.csv`）：
+
+| 排名 | 特征 | importance | importance_std |
+|---|---|---|---|
+| 1 | `loss_slope` | 0.0204 | 0.0121 |
+| 2 | `hard_loss_max` | 0.0087 | 0.0058 |
+| 3 | `max_token_loss` | 0.0080 | 0.0074 |
+| 4 | `cos_ref_trend` | 0.0059 | 0.0089 |
+| 5 | `grad_norm_last` | 0.0053 | 0.0179 |
+| 6 | `loss_curvature` | 0.0036 | 0.0051 |
+| 7 | `entropy` | 0.0034 | 0.0091 |
+| 8 | `loss_std` | 0.0026 | 0.0164 |
+
+这张表直观展示了"关键词替换检测难"到底难在哪里：第一名 `loss_slope` 的重要性只有 0.02（对比完全重复第一名 `text_nn_sim` 高达 0.148，相差 7 倍以上），且从第 5 名 `grad_norm_last` 开始，`importance_std`（0.018）已经**超过了 importance 本身**（0.005）——意味着在 5 折交叉验证的不同折之间，这些特征的重要性排名很不稳定，某一折可能显示该特征重要，另一折可能显示几乎无用。这不是某一个特征"藏得比较深"，而是关键词替换这类"只换 1-2 个实体词、句子结构完全不变"的噪音，本身在训练动态和文本统计特征里都没有留下稳定可复现的痕迹（呼应第 1.4 节展示的原始文本例子）。
 
 **最重要的发现——两类噪音的检测信号几乎完全不来自训练动态**：
 
@@ -204,6 +335,21 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 以上都是"能不能检测出噪音"，这一节回答更根本的问题：**噪音注入到底有没有真的损害模型在下游任务上的表现？**（7 项 benchmark：MMLU / GSM8K / HellaSwag / ARC / BBH / TruthfulQA / Winogrande 平均准确率）
 
+**原始数据：分 benchmark 展开，而非只看平均值**。下表是 `clean` / `template` / `near_duplicate`（ratio10）三个数据集在 7 项 benchmark 上各自的准确率（数据来自 `results/eval/eval_ratio10_{dataset}.json`）：
+
+| benchmark | 样本量 n | clean | template | near_duplicate | template - clean |
+|---|---|---|---|---|---|
+| GSM8K | 1319 | 0.5497 | **0.4602** | 0.5679 | **-0.0895** |
+| BBH | 540 | 0.0926 | 0.0500 | 0.0889 | -0.0426 |
+| TruthfulQA | 817 | 0.1787 | 0.1873 | 0.1971 | +0.0086 |
+| Winogrande | 1267 | 0.5367 | 0.5478 | 0.5359 | +0.0111 |
+| MMLU | 14042 | 0.6332 | 0.6434 | 0.6286 | +0.0102 |
+| ARC | 1172 | 0.8046 | 0.8157 | 0.8072 | +0.0111 |
+| HellaSwag | 10042 | 0.2770 | 0.2776 | 0.2750 | +0.0006 |
+| **7 项平均** | — | **0.439** | **0.426** | 0.443 | -0.013 |
+
+这张表揭示了一个被"7 项平均"掩盖的真实效应：**GSM8K 上 template 相对 clean 实际下降了 8.95 个百分点（0.5497→0.4602）**，是全部 7 项 benchmark 里唯一一个下降幅度接近个位数百分点的项目；但因为其余 6 项 benchmark 上 template 反而普遍略有上升（MMLU/ARC/Winogrande 均小幅提升），averaged 后只剩下 1.3 个百分点的净下降（0.439→0.426），单看平均值容易误以为"各项 benchmark 都只是小幅波动"，实际上是"一项真实受损、六项基本不受影响甚至略有假性提升"的不均衡结构。GSM8K 是数值推理任务，对生成内容的精确格式/连贯性要求最高，这与"模板化噪音让模型学会输出模板化/敷衍式回答"这一假设相符；而 BBH 因为 n 仅 540（全部 benchmark 里样本量最小），其 -4.26 个百分点的下降需要更谨慎看待，波动本身可能包含更大的统计噪声。
+
 | 数据集 | ratio10 平均准确率 | ratio5 平均准确率 |
 |---|---|---|
 | clean（干净基线） | 0.439 | 0.437 |
@@ -213,14 +359,14 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 | 关键词替换 | 0.438 | 0.433 |
 | **模板化** | **0.426** | 0.433 |
 | 截断 | 0.433 | 0.435 |
-| 近似重复 | 0.443 | 评测中 |
-| 混合 | 0.439 | 评测中 |
+| 近似重复 | 0.443 | 0.445 |
+| 混合 | 0.439 | **0.430** |
 
 **观察**：
 
 - 各数据集之间的差距非常小（全部落在 0.42-0.44 区间），说明在当前噪音比例（5%/10%）和训练规模下，LoRA 微调对下游 7 项通用能力 benchmark 的影响本身就很有限——这些 benchmark 更多考察模型的预训练知识，而不是 SFT 阶段学到的具体行为，噪音注入的"伤害"更多应该体现在指令遵循质量、生成风格等本报告未覆盖的维度上，而非这类选择题/数值题 benchmark。
 - 在有限的差距中，**模板化在 ratio10 下的下游准确率（0.426）是全部数据集中最低的**，甚至低于干净基线（0.439）——与第 2/6/7 节"模板化是检测最容易、记忆最深"的结论相呼应：模型对模板化噪音的过拟合记忆确实在下游任务上留下了可观测的负面痕迹，是本次评测中唯一一个"检测容易 + 确实有害"两个信号相互印证的类型。
-- ratio5 的下游评测仍有 2 个数据集（近似重复、混合）在排队中，待补齐后才能确认 5% 噪音比例下是否仍是模板化危害最大。
+- **ratio5 的下游评测现已全部完成（9/9 数据集）**，结果与 ratio10 不完全一致：ratio5 下最低分变成了**混合噪音（0.430）**，而不是模板化（0.433，与截断/关键词并列中等水平）——说明"模板化下游危害最大"这一结论**不是跨噪音比例稳定的**，在 5% 噪音比例下 7 种噪音混合后的复合效应反而更明显地拖累了下游表现。这提示模板化的下游损害可能存在某种阈值效应（需要足够高的噪音比例才会显著表现出来），而混合噪音的下游损害则可能是多种轻微效应叠加的结果，值得在后续工作中针对"混合噪音是否存在协同放大效应"单独验证。
 
 ---
 
@@ -232,11 +378,17 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 以 `garbled@ratio10`（全量 14,611 条训练样本，真实噪音占比 9.999%）为例，用纯无监督 IsolationForest（不看任何噪音标签，20 维基础轨迹特征+`text_nn_sim`，在全量数据上单独拟合）按 10% 预算打分剔除：
 
+**方法与特征列表**（`cleaning_loop.py::build`）：与第 2.1 节"域内检测 AUC"用 37 特征、只在约 900-1000 条诊断子采样样本上计算不同，这里要在**全量训练集**上打分剔除（否则真实噪音样本大部分根本不在候选范围内，清洗没有意义），因此改用"在该数据集上取值全部非空"的特征子集，即排除全部 token 级诊断特征（子采样、大量缺失）和 `cos_global_*`（每个优化器 step 内与同窗口其他样本比较，数据结构上不便复用于单样本打分），只保留 20 个 100% 覆盖率的轨迹特征：
+
+`text_nn_sim, loss_mean, loss_last, loss_std, loss_slope, loss_min, converge_epoch, loss_curvature, loss_rank, grad_norm_mean, grad_norm_last, grad_norm_std, grad_norm_slope, cos_ref_mean, cos_ref_last, cos_ref_std, cos_ref_slope, grad_norm_cv, cos_ref_trend, update_contrib_mean`
+
+具体流程：`StandardScaler` 标准化这 20 维特征后，`IsolationForest(n_estimators=300, random_state=42)` 在全量数据上拟合，取负的 `score_samples` 作为异常分数（不看任何噪音标签，纯粹按分数排序）；按 10% 预算 `n_drop = round(0.10 * n)`，取分数最高的 `n_drop` 条样本作为"定向剔除"集合，另外用同一个随机种子独立随机抽取等量样本作为"随机剔除"对照组；分别统计两个剔除集合里真实 `noise_type != 'none'` 的样本占比，即为下面的"定向剔除精度"与"随机剔除精度"。
+
 - **定向剔除精度：52.1%**（剔除的 1,461 条样本中，761 条确实是真实注入的 garbled 噪音）
 - **随机剔除精度：9.2%**（与真实噪音占比 10.0% 基本吻合，符合预期）
 - **提升倍数：约 5.7 倍**
 
-**当前状态——尚未完成，只有清洗精度这一步的结果**：已生成 `train_targeted`（定向剔除后）和 `train_random`（随机剔除对照）两个训练集，排队等待 GPU 释放后重新训练并评测下游 benchmark，与未清洗基线（`eval_ratio10_garbled.json`）、干净基线（`eval_ratio10_clean.json`）三方对比。这一步是验证"检测到的高精度是否真的能转化为下游任务提升"的关键闭环，**目前只完成了打分和剔除，重训练+评测对比部分还在排队中**（tmux session `cleaning_loop_garbled`，等待 `ratio5_eval` 释放 GPU 后自动开始）。
+**当前状态——尚未完成，只有清洗精度这一步的结果**：已生成 `train_targeted`（定向剔除后）和 `train_random`（随机剔除对照）两个训练集，重新训练并评测下游 benchmark，与未清洗基线（`eval_ratio10_garbled.json`）、干净基线（`eval_ratio10_clean.json`）三方对比。这一步是验证"检测到的高精度是否真的能转化为下游任务提升"的关键闭环，**目前打分和剔除已完成，重训练+评测对比正在进行中**（tmux session `cleaning_loop_garbled`，已于 `ratio5_eval` 完成后于 2026-09-14 18:10 自动启动，目前处于重训练阶段）。
 
 ---
 
@@ -260,6 +412,86 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 ### 11.3 下一步方向
 
-- 等待 `ratio5_eval`（近似重复、混合两个数据集）和 `cleaning_loop_garbled`（重训练+评测）跑完，补全本报告标注为"进行中"的部分。
+- 等待 `cleaning_loop_garbled`（重训练+评测）跑完，补全本报告第 10 节标注为"进行中"的部分（`ratio5_eval` 已于 2026-09-14 全部完成）。
 - 将闭环清洗方法推广到其余噪音类型，尤其验证 P@10% lift < 1 的完全重复类型清洗后是否反而有害。
 - 探索针对关键词替换、近似重复这类"轻度扰动"噪音的专用特征（当前的训练动态+文本相似度特征组合对它们信号很弱）。
+
+---
+
+## 12. 附录：核心指标定义与采集耗时
+
+本节汇总项目中出现的全部诊断指标的精确计算方式（含代码出处）、覆盖率与采集口径，并给出诊断环节的逐阶段实测耗时，供后续特征工程决策参考。所有代码引用均指向根目录 `model.py`/`analyze.py`/`textsim.py`。
+
+### 12.1 训练轨迹类指标（全量覆盖，来自 `per_sample.jsonl`）
+
+这一类指标在训练主循环内直接计算，**每个训练样本在每个 epoch 都会产出一条记录，无子采样，覆盖率 100%**（`model.py:246-257` 的 `flush_window`）。由于 `micro_batch=1` 而 `grad_accum=16`（`config.yaml`），代码先对单个样本做前向+反向拿到该样本独有的梯度，再累积 16 个样本后才真正调用 `opt.step()`——这个设计是为了在"梯度累积"这种工程优化手段下，仍能保留"这一步更新里，某个具体样本贡献了多少、往哪个方向"的可归因信息，否则 16 个样本的梯度会被直接加总，无法逐样本区分。
+
+| 指标 | 精确计算方式 | 直觉含义 |
+|---|---|---|
+| `loss_mean` / `loss_last` / `loss_std` / `loss_slope` | 该样本 5 个 epoch 的 loss 值：均值 / 第 5 个 epoch 的值 / 标准差 / `loss[epoch4]-loss[epoch0]` | 训练全程的平均难度 / 最终收敛水平 / 波动幅度 / 是否越训越差还是越训越好 |
+| `loss_min` | 5 个 epoch 中的最小 loss | 模型曾经达到过的最佳拟合程度 |
+| `converge_epoch` | loss 首次小于阈值 2.0 的 epoch 序号，若从未达到则记为 5（`analyze.py:52-53`：`(m<2.0).idxmax(axis=1)`，全程未达标则整行赋值为 `len(ep_cols)`） | 模型"学会"这个样本要花多久——异常样本往往要更久，或者反而"学得过快"（见 `converge_epoch` 与记忆型噪音的关系，第 6 节） |
+| `loss_curvature` / `loss_rank` | 对 5 个 epoch 的 loss 曲线做二次多项式最小二乘拟合（`analyze.py:54-55`：`X=[1, epoch, epoch^2]`，取二次项系数 `coeffs[:,0]`）；`loss_rank` 是该样本 loss 在同批样本内的百分位排名，5 个 epoch 取均值 | 曲率衡量收敛"减速/加速"的形态是否异常（比如收敛后又反弹）；排名衡量该样本在同伴中是否持续"格外难"或"格外容易" |
+| `grad_norm_mean` / `_last` / `_std` / `_slope` / `_cv` | 每个 epoch 内该样本单独贡献的梯度增量（`delta_buf`，即该样本反向传播后 LoRA 全部参数的梯度向量）的 L2 范数（`model.py:274`：`g_norm=torch.linalg.vector_norm(delta_buf)`），再按 5 个 epoch 汇总为均值/末值/标准差/斜率；`_cv=grad_norm_std/grad_norm_mean` | 该样本单独驱动模型参数移动的幅度——异常样本常伴随异常大或异常小的梯度 |
+| `cos_ref_mean` / `_last` / `_std` / `_slope` / `_trend` | 该样本梯度向量与一个**训练开始前固定不变**的参考方向 `ref_buf` 的余弦相似度（`model.py:275`：`cos_ref=dot(delta_buf,ref_buf)/g_norm`）。`ref_buf` 由 200 条从未参与训练的 held-out 干净样本，在训练开始前对模型做一次前向+反向、取平均梯度并归一化得到（`_compute_reference_direction`，`model.py:57-75`），之后训练全程保持不变 | 这个样本的梯度方向，跟"一个干净、正常样本理应有的梯度方向"偏离有多大；因为参考方向是训练前算好并冻结的，所以这个指标能跨 epoch 比较同一把"标尺" |
+| `cos_global_mean` / `_last` / `_std` / `_slope` | 该样本梯度增量与**同一次梯度累积窗口内**（同一优化器 step 内的 16 个样本）全部样本梯度总和的余弦相似度（`model.py:236-245`：`dot_globs`/`bsqs` 用同一窗口内的 `delta_b` 与其他样本比较） | 这个样本这一步是否与"同伴"方向一致——如果一个窗口里 15 个样本都指向 A 方向，这个样本却指向反方向，说明它可能在拖后腿或制造冲突更新 |
+| `update_contrib_mean` | 仅取 LoRA 的 `B` 矩阵部分（`b_offsets`），该样本贡献的参数增量 `delta_b` 的范数，除以 Adam 优化器该组参数二阶矩估计 `v_buf`（即 `exp_avg_sq`，从 `opt.state` 里读出）平方根的范数（`model.py:280`：`upd=‖delta_b‖/(‖sqrt(v_buf)‖+1e-8)`），再对 5 个 epoch 取均值 | 比原始梯度范数更接近"Adam 优化器实际会让这个样本挪动多少参数"——因为 Adam 会用二阶矩把不同参数的更新幅度重新缩放，原始梯度大不代表实际更新步长大 |
+
+### 12.2 Token 级诊断指标（子采样覆盖，来自 `diag_epoch*.jsonl` / `token_diag_epoch*.jsonl`）
+
+每个 epoch 训练结束后，代码额外对训练集做一次**间隔子采样**（`train_data[::diag_step]`，`diag_step=train.diag_subsample`，默认 8，即每 8 个样本取 1 个）的**纯前向推理**（`_diagnostic_pass`，`model.py:120-168`，`@torch.no_grad()`，不参与反向传播、不更新参数），批大小 8。对 14611 条训练样本，子采样后每个 epoch 只对 1827 条（12.5%）计算这批指标，其余 87.5% 的样本这些列为空，`analyze.py` 用全列中位数填充（`_load_run_metrics` 未对这批列做特殊处理，遗留空值由后续 `unsupervised_metrics` 等函数统一 `fillna(median)`）。
+
+| 指标 | 精确计算方式 | 直觉含义 |
+|---|---|---|
+| `max_token_loss` | 该样本 response 段全部 token 的交叉熵损失中的最大值（`model.py:153`：`toks.max()`） | 该样本里"最令模型意外"的单个 token 有多离谱 |
+| `frac_hard` | response 段中损失超过 `hard_threshold`（默认 4.0）的 token 占比（`model.py:154`：`(toks>thresh).float().mean()`） | 整个样本中"难 token"的密度，而非只看最难的一个 |
+| `user_loss` | prompt（用户提问）部分 token 的平均交叉熵损失（`model.py:157`）。注意：训练时 prompt 部分的 label 被置为 `-100`（`user_mask`），不参与梯度计算，这个指标纯粹是诊断用的"顺手测一下" | 乱码等噪音会让 prompt 本身就变得难以预测，这个指标能捕捉到问题出在输入侧而非仅输出侧 |
+| `entropy` | 模型对 response 段每个位置下一个 token 预测分布的香农熵，对全部 label token 取均值（`model.py:143-147`：`-(exp(log_softmax)*log_softmax).sum(-1)`） | 模型对"接下来该生成什么"的不确定程度；熵高说明模型自己也很犹豫 |
+| `token_loss_skew` / `token_loss_kurt` | 该样本全部 token 级 loss 值的偏度（scipy `skew`）与超额峭度（scipy `kurtosis`，Fisher 定义，正态分布为 0）（`model.py:161-163`，仅当 token 数 >3 时计算） | 偏度衡量分布是否有单侧长尾（少数 token 损失远高于其余）；峭度衡量分布是否比正态更"尖峰厚尾"（是否存在孤立的极端 token） |
+| `hard_loss_mean` / `hard_loss_max` | 每个 epoch 取该样本 loss 最高的 `top_k=32` 个 token（`model.py:164`：`toks.topk(min(32,len(toks)))`），记录其 `[位置, token_id, loss]` 三元组列表；`analyze.py:87-90` 再对这 32 个值取平均/取最大值，并对多个 epoch 取均值 | `hard_loss_mean` 反映"最难那批 token"整体有多难；`hard_loss_max` 反映其中最极端的一个 |
+| `hard_pos_peak` / `hard_pos_std_mean` | top-32 难 token 在序列中位置（token 下标）的均值 / 标准差，先在单个 epoch 内对 32 个 token 求统计量，再对多个 epoch 取均值（`model.py:91-92`） | 难 token 是集中在句子某个局部区域，还是分散在全文各处 |
+| `hard_id_uniq` | 5 个 epoch 累计出现过的、跨 epoch 去重后的难 token id 总数（`model.py:93-94`：对每个 epoch 的 top-32 token id 取并集后计数） | 难 token 集合本身有多"稳定"——数值越小说明每次都是同一批 token 上难，越大说明难点在漂移 |
+| `hard_pos_jaccard` | 相邻两个 epoch 的难 token 位置集合的 Jaccard 相似度（交集大小/并集大小），对全部相邻 epoch 对取均值（`model.py:95-98`：`len(pa&pb)/max(1,len(pa\|pb))`） | 衡量"难点"是持续卡在同一批 token 上（Jaccard 高，更像结构性异常），还是随机波动（Jaccard 低，更像噪声） |
+
+**重要发现（本次探索验证）**：对模板化、近似重复两类，仅用有真实 token 数据的 12.5% 样本算 `hard_loss_max` 的 AUC 分别为 0.920 / 0.632，而全量（87.5% 中位数填充后）AUC 只有 0.564 / 0.515——说明当前 1/8 子采样**显著稀释**了这两类信号；关键词替换则真实数据 AUC 仅 0.555，说明它的瓶颈是信号本身弱，不是采样率问题（详见 12.5 节的重训成本评估）。
+
+### 12.3 文本层面指标（静态，不依赖训练）
+
+| 指标 | 精确计算方式 | 直觉含义 |
+|---|---|---|
+| `text_nn_sim` | 对同一数据集全部样本的 `prompt+response` 拼接文本构建 TF-IDF 向量（`textsim.py:10`：`TfidfVectorizer(ngram_range=(1,2), min_df=min(10,N), sublinear_tf=True, max_features=200_000)`，即同时用 1-gram 和 2-gram、对数缩放词频、词表上限 20 万），再用余弦距离的 `NearestNeighbors(k=2)` 为每个样本找最近邻（`k=2` 是因为第 1 近邻永远是样本自身，取第 2 个才是"除自己以外最像的样本"），相似度 = `1 - 该距离` | 这个样本的文字表达（词汇+局部搭配）在训练集里是否能找到几乎一样的"孪生"样本——对完全重复、近似重复这类"复制/轻改写"噪音非常敏感，但对关键词替换这种"整体结构不变、只换 1-2 个词"的噪音几乎不敏感（TF-IDF 向量几乎不受影响） |
+
+实测：对 `keyword@ratio10`（14611 条样本）计算全量 `text_nn_sim` 耗时约 7.3 秒（含 TF-IDF 构建 + 最近邻检索），是全部指标里计算成本最低的一类，且完全不需要 GPU。
+
+### 12.4 已产出但未进入检测流程的诊断量
+
+| 指标 | 精确计算方式 | 现状 |
+|---|---|---|
+| `layer_norms.jsonl` / TensorBoard `lora_layer_gradnorm/layer{li}` | 每个优化器 step（即每完成一次 16 样本的梯度累积窗口）调用一次，对该 step 累积的梯度，按 LoRA 所在的 transformer 层号分别求和后取 L2 范数（`_window_layer_grad_norms`，`model.py:80-86`：按层号分组，`sqrt(sum(grad**2))`）。仅监控三层：`target_ids={0, n_layers//2, n_layers-1}`——对当前 Qwen2.5-3B-Instruct（36 层）即第 0、18、35 层（`model.py:227`）。每次训练 5 epoch × 914 个优化器 step ≈ 4570 行 | 这是**按训练 step 聚合的全局量**，不是按样本的量——一个 step 里 16 个样本的梯度贡献已经被加在一起，无法反推出"某个样本单独在某一层的梯度是多少"。因此即使想把它塞进 `per_sample_metrics.csv`，现有数据形态也做不到，必须改造成类似 `cos_global`/`grad_norm` 那样的逐样本-逐层拆分（在 `flush_window` 里按层号重新做一遍范数计算），这需要修改训练代码并重新训练，而不是简单的后处理脚本能解决的。目前全项目代码中没有任何位置读取或合并这份数据，仅用于人工在 TensorBoard 里观察各层梯度量级随训练的变化曲线 |
+
+### 12.5 采集耗时（实测，`keyword@ratio10`，单卡 NVIDIA RTX PRO 6000 Blackwell Server Edition）
+
+耗时数据来自 `runs/ratio10/keyword/metrics/diag_epoch*.jsonl` 等文件的磁盘写入时间戳（`stat` mtime），并与 `logs/full_run.log` 中记录的该数据集训练起止时间（2026-09-12 09:26:36 → 12:33:55，实测总耗时 187.3 分钟）交叉核对，两者一致。
+
+**单 epoch 内部构成**（基于 `config.yaml` 当前配置推算）：
+
+- 训练样本数 14611，`micro_batch=1`、`grad_accum=16` → 每个 epoch 有 `⌈14611/16⌉=914` 个优化器 step；5 epoch 共 4570 step。
+- 每个优化器 step 内：16 次单样本前向+反向（逐样本，非批处理），随后做一次 `opt.step()`、写入 `layer_norms.jsonl` 一行、写入 `per_sample.jsonl` 16 行。
+- 每 `eval_steps=200` 个优化器 step 触发一次 held-out 验证（`_eval_heldout`，`model.py:106-117`，纯前向，200 条样本、批大小 8，共 25 个 batch）——每个 epoch 内约触发 4-5 次（step 200/400/600/800）。
+- 每 `log_every=25` 个优化器step，向 TensorBoard 写入一批标量（loss/grad_norm/cos_ref/cos_global/update_contrib/lr/tokens_per_sec/gpu_mem 等），耗时可忽略。
+- epoch 训练阶段结束后，才触发一次性的 token 级诊断前向推理（12.2 节所述，1827 个子采样样本，批大小 8，共 229 个 batch，纯前向不反向）。
+
+**逐 epoch 实测耗时**（由文件 mtime 差值推算，5 个 epoch 依次为）：
+
+| Epoch | 本 epoch 总耗时（训练+诊断推理） | 备注 |
+|---|---|---|
+| 0 | ~38 分钟 | 含一次性开销：模型/LoRA/tokenizer 加载、200 条 held-out 参考样本的参考方向计算（`_compute_reference_direction`） |
+| 1 | ~38 分钟 | |
+| 2 | ~37 分钟 | |
+| 3 | ~37 分钟 | |
+| 4（末轮） | 训练阶段 ~36 分钟 + 诊断推理阶段 **单独测得 34 秒** | 这是唯一能把"训练"和"诊断推理"拆开单独测量的一轮，因为 `per_sample.jsonl`/`layer_norms.jsonl` 的最后一次写入时间标记了训练阶段结束点 |
+| **合计（5 epoch）** | **约 187 分钟（约 3.1 小时）** | 与 `full_run.log` 记录的起止时间差（187.3 分钟）一致 |
+
+**推论**：229 个 batch 的诊断前向推理耗时 34 秒，平均每 batch 约 0.15 秒；若将 `diag_subsample` 从 8 改为 1（全量诊断，14611 个样本、批大小 8、`⌈14611/8⌉=1827` 个 batch），诊断阶段预计增至约 **270 秒（4.5 分钟）**，单数据集 5 epoch 总耗时预计从 187 分钟增至约 **209 分钟（3.5 小时）**，即增加约 12%（诊断推理本身不含反向传播和优化器更新，理论上应与 batch 数近似线性缩放，此处按线性外推）。
+
+**跨数据集/整体项目重训成本外推**：若只对当前判定"有提升空间"的 `near_duplicate` 类型（12.2 节结论）做全量诊断重训，需要 `ratio10` + `ratio5` 两个 tag 各一次，预计合计增加约 **44 分钟**（每个 tag 约 22 分钟的增量）；若对全部 9 类噪音数据集 × 2 个比例（18 个 run）都改为全量诊断，预计合计增加约 **6.6 小时**（每个 run 约 22 分钟增量 × 18）。以上数据来自单一数据集、单台机器的一次实测，不同数据集（文本长度、样本数）与 GPU 负载下会有波动，仅供量级参考，不构成精确排期承诺。
