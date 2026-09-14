@@ -5,8 +5,21 @@ __pycache__/
 
 # Source datasets remain local unless explicitly curated into Git.
 
-# Training artifacts: retain metrics, exclude model weights.
+# Model weights / checkpoints: never track, regardless of where they land.
+# Directory-level rule covers the current save_pretrained() output path;
+# extension rules are defense-in-depth if that path ever changes.
 runs/**/lora/
-logs/
+*.safetensors
+*.ckpt
+*.pt
+*.bin
 
+# Training artifacts: retain metrics (some tracked via Git LFS, see
+# .gitattributes), exclude logs and the unused layer_norms diagnostic dump.
+logs/
 layer_norms.jsonl
+
+# Orchestration shell scripts (run_full.sh etc.): operational tooling tied
+# to specific runs/tags, not part of the tracked codebase deliverable.
+/*.sh
+/scripts/

@@ -1,8 +1,0 @@
-category,n,n_noise,rf_auc
-information_extraction,488,20,0.9847
-classification,689,21,0.9579
-summarization,524,32,0.9518
-general_qa,784,34,0.9109
-open_qa,1315,47,0.898
-closed_qa,637,15,0.871
-brainstorming,763,31,0.8637

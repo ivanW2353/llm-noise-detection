@@ -8,7 +8,7 @@ paths:
 noise:
   ratio: 0.10
   seed: 42
-  types: [garbled, duplicate, unrelated, keyword]
+  types: [garbled, duplicate, unrelated, keyword, template, truncation, near_duplicate]
 
 train:
   max_len: 1024
@@ -39,3 +39,8 @@ components:
   model: hf-lora
   dataset_provider: jsonl
   detector: LR
+
+# Optional large-data mode: use --source hf://HuggingFaceH4/ultrachat_200k
+data:
+  split: train_sft
+  max_samples: 200000
