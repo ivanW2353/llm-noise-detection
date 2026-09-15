@@ -376,7 +376,7 @@ This table reveals a real effect the "mean of 7" number masks: **on GSM8K, templ
 
 ---
 
-## 10. Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works" (In Progress)
+## 10. Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works"
 
 ![Closed-loop cleaning hit precision](../results/charts/en/cleaning_precision.png)
 
@@ -394,7 +394,22 @@ The pipeline: `StandardScaler` normalizes these 20 features, an `IsolationForest
 - **Random-removal precision: 9.2%** (closely matches the true noise fraction of 10.0%, as expected)
 - **Lift: ~5.7x**
 
-**Current status — not yet complete, only the cleaning-precision step has results**: two training sets have been produced, `train_targeted` (after targeted removal) and `train_random` (random-removal control), and are being retrained and evaluated on downstream benchmarks, for a three-way comparison against the uncleaned baseline (`eval_ratio10_garbled.json`) and the clean baseline (`eval_ratio10_clean.json`). This step is the key closed-loop check on whether the detected precision actually translates into a downstream improvement — **scoring and removal are complete, and the retrain-and-evaluate comparison is now in progress** (tmux session `cleaning_loop_garbled`, auto-started at 2026-09-14 18:10 once `ratio5_eval` finished, currently in the retraining phase).
+**Downstream benchmark comparison (retrain + evaluate now fully complete)**: `train_targeted` (after targeted removal) and `train_random` (random-removal control) were each retrained from scratch, giving a four-way comparison against the uncleaned baseline (`eval_ratio10_garbled.json`) and the clean baseline (`eval_ratio10_clean.json`):
+
+![Downstream impact of closed-loop cleaning](../results/charts/en/cleaning_downstream.png)
+
+| Variant | Mean accuracy across 7 downstream benchmarks |
+|---|---|
+| Clean baseline | 0.4389 |
+| Unclean baseline (garbled) | 0.4388 |
+| Targeted-removal retrain | 0.4364 |
+| Random-removal retrain | 0.4357 |
+
+**Key finding — the 5.7x precision advantage did not translate into any observable downstream gain; both retrained versions actually scored slightly below the uncleaned baseline**: targeted removal (0.4364) did edge out random removal (0.4357) as expected (more precisely targeting real noise should beat blind removal), but neither beat the uncleaned baseline (0.4388), let alone the clean baseline (0.4389). This gap (0.0007-0.0032) also falls within the noise band already observed in Section 9 (the 7-benchmark average spread itself sits in a narrow 0.42-0.44 range), so it should not be over-interpreted as a statistically meaningful regression.
+
+The real explanation was already foreshadowed in Section 9: **`garbled` noise itself causes essentially zero real downstream harm** (uncleaned baseline 0.4388 vs. clean baseline 0.4389 — a difference of only 0.0001). It was chosen for this closed-loop demonstration because it is the easiest type to detect (AUC > 0.98), not because it does the most downstream damage. When a noise type is "easy to detect" but "not actually harmful downstream to begin with," removing it naturally yields no downstream benefit; meanwhile, dropping 10% of the training samples (however accurately targeted at real noise) also shrinks the effective training set by 10%, and if this "data-loss" side effect slightly outweighs the "denoising" benefit, cleaning can end up scoring a touch lower than not cleaning at all — which is exactly the 0.4388 → 0.4364/0.4357 pattern observed here.
+
+This result overturns the closed-loop cleaning experiment's original implicit assumption ("higher detection/removal precision → downstream performance must improve"), and is itself a valuable negative result: **whether cleaning yields a downstream benefit depends on whether that noise type is actually harmful downstream in the first place, not just on how high the detection/removal precision is**. Section 9 already identified template as the one type that satisfies both "easy to detect" and "actually harmful downstream" (an 8.95-point drop on GSM8K vs. clean) — the real next target for verifying "does cleaning actually help downstream" should be template, not garbled (see Section 11.3).
 
 ---
 
@@ -408,17 +423,17 @@ The pipeline: `StandardScaler` normalizes these 20 features, an `IsolationForest
 4. **The direction-reversal trap is a real methodological pitfall**: "hyper-typical/memorized" noise like template needs a signed prior rule (not generic outlier detection) to be caught, and this same pitfall reappears along the early-detection time axis.
 5. **Two types' high AUC is not what it appears**: over 90% of the detection signal for duplicate and unrelated comes from a static text-similarity feature, not training dynamics — these two types cannot be cited as evidence that the "training-dynamics detection" methodology works.
 6. **Real downstream harm is limited but present**: the spread across the 7 general benchmarks is small, but template at ratio10 is genuinely the worst-performing dataset downstream — the only type where "easy to detect" and "actually harmful" both hold.
-7. **Label-free closed-loop cleaning shows early positive evidence**: for garbled noise, targeted removal achieves 5.7x the precision of random removal, but the final verification step — whether retraining after cleaning actually improves downstream performance — is still in progress.
+7. **Label-free closed-loop cleaning was verified end-to-end, yielding a valuable negative result**: for garbled noise, targeted removal achieves 5.7x the precision of random removal, but downstream performance after retraining did not improve — both cleaned variants actually scored slightly below the uncleaned baseline. The root cause is that garbled itself is nearly harmless downstream, showing that a cleaning method's downstream payoff depends on whether the noise type is actually harmful, not just on detection precision.
 
 ### 11.2 Limitations
 
 - The overall spread in downstream benchmark impact is small (0.42-0.44 range), which could mean the current evaluation suite isn't sensitive enough, or that at this LoRA fine-tuning scale/epoch count, noise's downstream impact is genuinely limited; larger-scale or longer training could plausibly amplify these differences.
-- The closed-loop cleaning experiment has so far only been validated on a single noise type/ratio (`garbled@ratio10`), and has not yet been extended to other noise types (especially the harder-to-detect keyword and near-duplicate) or mixed-noise scenarios.
+- The closed-loop cleaning experiment has so far only been validated on a single noise type/ratio (`garbled@ratio10`), and has not yet been extended to other noise types (especially the harder-to-detect keyword and near-duplicate, or template, which Section 9 confirms is actually harmful downstream) or mixed-noise scenarios; in hindsight, choosing garbled as the first target was itself a flawed experimental design — it is the easiest type to detect but is nearly harmless downstream, so no cleaning benefit could ever have been observed.
 - The finding that `text_nn_sim` dominates duplicate/unrelated detection means the core "training-dynamics detection" methodology currently has substantive support only for types like garbled, template, truncation, and keyword — this should be stated carefully to avoid over-generalizing the claim.
 
 ### 11.3 Next Steps
 
-- Wait for `cleaning_loop_garbled` (retrain + evaluate) to finish, to complete the Section 10 portion of this report currently marked "in progress" (`ratio5_eval` fully finished on 2026-09-14).
+- Re-run the closed-loop cleaning experiment on template noise instead — it is the only type in this report that satisfies both "easy to detect" and "actually harmful downstream," so it is the real test of whether cleaning can produce a downstream gain.
 - Extend closed-loop cleaning to the remaining noise types, in particular checking whether cleaning the duplicate type (whose P@10% lift is < 1) is actually harmful rather than helpful.
 - Explore dedicated features for "light perturbation" noise types like keyword and near-duplicate, for which the current combination of training-dynamics and text-similarity features carries very weak signal.
 
