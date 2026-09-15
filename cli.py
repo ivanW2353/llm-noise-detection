@@ -12,7 +12,7 @@ def parser():
  t=sub.add_parser('train',help='train one dataset'); t.add_argument('--config',default='config.yaml'); t.add_argument('--tag'); t.add_argument('--dataset',required=True); t.add_argument('--train-file'); t.add_argument('--model',default='mock',choices=['mock','hf-lora']); t.add_argument('--smoke',action='store_true')
  e=sub.add_parser('evaluate',help='evaluate configured tasks'); e.add_argument('--config',default='config.yaml'); e.add_argument('--tag'); e.add_argument('--dataset',required=True); e.add_argument('--model',default='mock',choices=['mock','hf-lora']); e.add_argument('--tasks'); e.add_argument('--force',action='store_true')
  a=sub.add_parser('analyze',help='run metric analysis'); a.add_argument('--config',default='config.yaml'); a.add_argument('--tag'); a.add_argument('--tags'); a.add_argument('--kind',choices=['features','training','token','unsupervised','transfer','cross_type','cross_ratio','precision_lift','memorization','early_unsupervised','early_memorization','feature_attribution'],default='features'); a.add_argument('--dataset'); a.add_argument('--input'); a.add_argument('--output')
- c=sub.add_parser('clean',help='build a label-free cleaned training set (targeted + random-drop control)'); c.add_argument('--config',default='config.yaml'); c.add_argument('--tag'); c.add_argument('--dataset',required=True); c.add_argument('--budget',type=float,default=0.10)
+ c=sub.add_parser('clean',help='build a label-free cleaned training set (targeted + random-drop control)'); c.add_argument('--config',default='config.yaml'); c.add_argument('--tag'); c.add_argument('--dataset',required=True); c.add_argument('--budget',type=float,default=0.10); c.add_argument('--method',default='iforest',choices=['iforest','memo_signed'])
  return p
 
 def main(argv=None):
@@ -31,7 +31,7 @@ def main(argv=None):
   tasks=a.tasks.split(',') if a.tasks else s.section('eval').get('tasks',[]); print(Evaluator(s,create(a.model,s)).run(a.dataset,tasks,a.force)); return 0
  if a.command=='clean':
   from cleaning_loop import build
-  print(build(s.root,a.tag or s.tag,a.dataset,a.budget)); return 0
+  print(build(s.root,a.tag or s.tag,a.dataset,a.budget,method=a.method)); return 0
  if a.command=='analyze':
   import pandas as pd
   from analyze import summarize, build_table, training_metrics, token_metrics, token_metrics_for_tag, unsupervised_metrics, transfer_metrics, cross_type_transfer, cross_ratio_transfer, precision_lift_table, memorization_score, early_detection_sweep, feature_attribution
