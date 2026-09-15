@@ -508,13 +508,57 @@ Three things stand out.
 
 For unknown noise, in increasing order of cost:
 
-1. **Run both legs, pooled rather than chosen between.** Score with the training-dynamics detector pool and `text_nn_sim` zscore at once and take the higher. It is the only combination in the table above with no below-random cell, and it costs almost nothing (`text_nn_sim` is already a full-coverage feature, no new collection required).
+1. **Run both legs, pooled rather than chosen between.** Score with the training-dynamics detector pool and `text_nn_sim` zscore at once and take the higher. It is the only combination in the table above with no below-random cell, and it costs almost nothing (`text_nn_sim` is already a full-coverage feature, no new collection required). Section 12.5 wires this into `cleaning_loop.py` and reports what it actually costs in the label-free version — precision does improve, but "no below-random cell" does not fully reproduce without labels.
 2. **Keep a guard against direction reversal.** The one-directional assumption "noise = high loss" has a documented failure on an unseen type (template 0.416). The `memo_signed` method from Section 6 is exactly a two-sided score, treating "abnormally easy to learn" as suspicious too. On unknown noise it should be two-sided by default — better to over-recall and review than to remove by a one-directional ranking.
 3. **Do not trust a single detector's overall AUC.** That 0.563-0.730 first column invites the reading "the detector is okay, just not great"; the truth is that it covers 14% of the noise and is near-perfect on that 14%. Evaluating a heterogeneous stream demands per-type slicing, otherwise the coverage gap stays invisible and "narrow" gets misdiagnosed as "broken".
 4. **The incremental cost after discovering a new type is low.** Once an unknown noise type is identified by hand, injecting a batch of it and training a dedicated detector moves it from the 0.416/0.670 tier to the 0.96-1.00 tier (the "own type only" column in 12.2). None of that requires retraining the base model, only one LoRA fine-tune with metrics persisted (~1.5 hours, see Section 15.5) — which makes "keep discovering, keep adding detectors" a more realistic path than chasing a single universal detector.
 
 One limitation not yet addressed: the "unseen types" in this section are still among the 7 we injected ourselves, merely unseen by the detector pool. Genuinely wild noise (mis-pasted content, encoding errors, cross-language contamination, machine-translation artifacts) may differ from these 7 in both text distribution and training dynamics, so the 0.416-0.935 range from leave-one-out cannot be extrapolated to it directly. This has been added to the limitations list in Section 14.2.
 
+
+### 12.5 Wiring the recommendation into production code: the `pooled` scorer
+
+Recommendation 1 from 12.4 now exists in `cleaning_loop.py` as a third `method` option, `pooled`. It standardizes three legs and takes the per-sample maximum:
+
+- `iforest` z-score — the undirected outlier side, 20 full-coverage features;
+- `memo_signed` z-score — the fixed-sign "abnormally easy to learn" side, 6 features (a subset of the 20 above);
+- **|z|** of `text_nn_sim` — the static text side. This leg is absolute-valued rather than one-directional: high `text_nn_sim` means "near-identical to a neighbor" (duplicate, template), low means "unlike anything else" (garbled, unrelated), and both tails are suspicious. The other two legs are one-directional.
+
+Max rather than mean, because each leg is silent (score near 0) on the types it cannot see, and averaging would let two silent legs dilute the one that actually fired.
+
+**Note the difference in view**: the leave-one-out results in 12.3 use **supervised** detectors (LR/RF trained on other types' noise labels) and measure "what happens when an existing detector meets a new type"; all three legs here are **label-free** and measure "what is achievable with nothing but a pile of unlabeled dirty data". The numbers are not directly comparable, though the conclusions point the same way.
+
+Measured on `mixed` under a 10% budget (`scripts/pooled_scorer_compare.py`, output `results/ratio10/pooled_scorer_compare.csv`):
+
+| Scorer | Overall AUC | Removal precision P@10% | Lift over random | Per-type cells below random |
+|---|---|---|---|---|
+| `pooled` | **0.725** | **0.323** | **3.83×** | 1 |
+| `iforest` | 0.706 | 0.268 | 3.18× | **0** |
+| `text_nn_sim` \|z\| alone | 0.636 | 0.255 | 3.03× | 2 |
+| `memo_signed` | 0.380 | 0.128 | 1.52× | 5 |
+| Random | 0.500 | 0.084 | 1.00× | — |
+
+Per-type AUC (that type vs. clean):
+
+| Type | `iforest` | `memo_signed` | `text_nn_sim` \|z\| | `pooled` |
+|---|---|---|---|---|
+| duplicate | 0.703 | 0.651 | **0.967** | 0.946 |
+| garbled | **0.968** | 0.008 | 0.513 | 0.926 |
+| unrelated | 0.734 | 0.230 | 0.809 | **0.842** |
+| template | 0.603 | **0.866** | 0.736 | 0.822 |
+| keyword | **0.642** | 0.319 | 0.513 | 0.545 |
+| truncation | **0.687** | 0.255 | 0.472 | 0.527 |
+| near_duplicate | **0.620** | 0.318 | 0.465 | 0.494 |
+
+Three points that need stating honestly.
+
+**First, `pooled` wins on precision, not on "eliminating every below-random cell".** It lifts P@10% from `iforest`'s 0.268 to 0.323 (a 20% relative gain), at the cost of near_duplicate falling to 0.494 — 0.006 below random. `iforest` alone, meanwhile, happens to have no below-random cell on `mixed`. The 12.3 conclusion that "pooling eliminates every below-random cell" does not fully reproduce here, because the label-free `memo_signed` leg is itself below random on 5 of 7 types (garbled at 0.008 — it ranks garbled text at the cleanest end), so it contributes far more noise to the pool than a supervised detector pool would. `pooled` should therefore be read as "trading precision for coverage under unknown noise", not as a free improvement.
+
+**Second, `memo_signed` alone on a mixed stream is catastrophic (AUC 0.380, 0.12 worse than random).** That is not a bug but its design boundary: a fixed-sign rule only works on memorized, hyper-typical noise, and 5 of the 7 types in a mixed stream are ordinary outlier noise that it actively **ranks in reverse**. Section 6 already stated the rule must score below 0.5 on non-memorized noise; this is what that costs in a real mixed setting — the 0.531 removal precision on single-type template (vs. `iforest`'s 0.040) does not extrapolate to a mixed stream.
+
+**Third, the removal budget gets eaten by the easiest types.** Look at the composition of the 1482 removed rows: `pooled` catches 186 duplicate rows (97.4% of that type removed) and 141 garbled (72.7%), but only 14 template (6.8%), even though template's per-type AUC is 0.822. The budget is finite and duplicate's scores are simply higher across the board — **a good per-type AUC does not mean the type gets caught under a shared budget**. This is the same phenomenon as Section 5's "high AUC doesn't mean useful under a budget", made worse in a mixed stream because types compete for the same budget.
+
+Taken together, the production recommendation is tiered: **use a single method when the noise type is known and calibrated** (`memo_signed` for template, `iforest` for garbled, `text_nn_sim` directly for duplicate/unrelated) — precision is clearly higher; **use `pooled` when the noise composition is unknown or mixed** — it is the only option that avoids severe failure on any of the 7 types, at the price of a precision ceiling around 0.32 and a budget dominated by the most salient types. A full closed-loop retrain on `mixed` (remove, retrain, evaluate downstream) has not been run yet; it is listed as a next step in Section 14.3.
 ---
 ## 13. Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works"
 

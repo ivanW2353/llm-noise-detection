@@ -14,6 +14,17 @@ Two scoring methods are supported (see `method=`):
   analyze.py::memorization_score / MEMO_FEATS) — flags samples with
   suspiciously LOW loss / fast convergence as noise instead of high
   |z|-outliers. This is the correct scorer for memorized noise types.
+- 'pooled': the two above plus a `text_nn_sim` z-score, each standardized
+  and combined by per-sample max. Picking between iforest and memo_signed
+  requires already knowing whether the noise is outlier-type or
+  memorized-type, which is exactly what an unknown noise type denies you.
+  Report section 12 measures that cost: on a leave-one-type-out pool the
+  trajectory route spans AUC 0.416-0.935 (template lands BELOW random) and
+  text_nn_sim spans 0.396-0.974 (garbled below random), but they fail on
+  disjoint types, so pooling all three is the only combination with no
+  below-random type. Use this when the noise composition is unknown or
+  mixed; the single-method options stay available for the calibrated
+  single-type case, where they are more precise.
 
 Differs from analyze.py::unsupervised_metrics()/memorization_score() in
 feature coverage: those score only the ~900-row diagnostic subsample per
@@ -53,6 +64,28 @@ def _score_memo_signed(sub: pd.DataFrame, features: list[str]) -> tuple[np.ndarr
     return (z * signs).mean(axis=1), cols
 
 
+def _zs(v: np.ndarray) -> np.ndarray:
+    return (v - v.mean()) / (v.std() + 1e-12)
+
+
+def _score_pooled(sub: pd.DataFrame, features: list[str], seed: int) -> tuple[np.ndarray, list[str]]:
+    """Max of three standardized scores: the undirected outlier score, the
+    signed hyper-typicality score, and raw text dissimilarity. Max (not mean)
+    because each leg is silent on the types it cannot see — averaging would
+    let two silent legs bury the one that fired."""
+    legs = [_zs(_score_iforest(sub[features].to_numpy(float), seed))]
+    memo, memo_cols = _score_memo_signed(sub, features)
+    legs.append(_zs(memo))
+    used = list(features) + [f'{c}(signed)' for c in memo_cols]
+    if 'text_nn_sim' in features:
+        # High text_nn_sim means "near-identical to a neighbour" (duplicate,
+        # template); low means "unlike anything else" (garbled, unrelated).
+        # Both tails are suspicious, so this leg is |z|, unlike the other two.
+        legs.append(np.abs(_zs(sub['text_nn_sim'].to_numpy(float))))
+        used.append('text_nn_sim(abs_z)')
+    return np.vstack(legs).max(axis=0), used
+
+
 def build(root: str | Path, tag: str, dataset: str, budget: float = 0.10, seed: int = 42, method: str = 'iforest') -> dict:
     root = Path(root)
     metrics = pd.read_csv(root / 'results' / tag / 'per_sample_metrics.csv', low_memory=False)
@@ -67,6 +100,8 @@ def build(root: str | Path, tag: str, dataset: str, budget: float = 0.10, seed: 
         used_features = features
     elif method == 'memo_signed':
         score, used_features = _score_memo_signed(sub, features)
+    elif method == 'pooled':
+        score, used_features = _score_pooled(sub, features, seed)
     else:
         raise ValueError(f'unknown method: {method}')
 
@@ -97,8 +132,11 @@ def build(root: str | Path, tag: str, dataset: str, budget: float = 0.10, seed: 
     meta = {
         'tag': tag, 'dataset': dataset, 'budget': budget, 'n_total': n, 'n_drop': n_drop,
         'n_keep': n - n_drop, 'seed': seed,
-        'detector': 'iforest_per_dataset_unsupervised (no labels)' if method == 'iforest'
-                    else 'memo_signed_fixed_sign_rule (no labels)',
+        'detector': {
+            'iforest': 'iforest_per_dataset_unsupervised (no labels)',
+            'memo_signed': 'memo_signed_fixed_sign_rule (no labels)',
+            'pooled': 'pooled_max_of_iforest_memo_signed_textsim (no labels)',
+        }[method],
         'n_features': len(used_features), 'features': used_features,
         'targeted_precision': precision(targeted_drop), 'random_precision': precision(random_drop),
         'true_noise_ratio': sum(is_noise.values()) / len(rows),
