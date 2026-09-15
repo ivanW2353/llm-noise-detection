@@ -37,7 +37,13 @@ Two experiment tags correspond to two noise ratios:
 
 ### 1.3 Analysis Methods Overview
 
-Around the "can training dynamics detect noise" question, 9 independent analyses were designed. This report presents them in order: within-domain detection difficulty, cross-type transfer, cross-ratio transfer, cleaning-precision lift, the direction-reversal trap, early detection, feature attribution, actual downstream impact, and label-free closed-loop cleaning.
+Around the "can training dynamics detect noise" question, 10 independent analyses were designed. The report proceeds in three stages:
+
+- **Sections 2-9 — methodological findings**. Each facet of detection capability, examined in turn: within-domain detection difficulty, cross-type transfer, cross-ratio transfer, cleaning-precision lift, the direction-reversal trap, early detection, feature attribution, and actual downstream impact.
+- **Sections 10-11 — synthesis and validation**. The scattered findings above are consolidated into "which method to use for which noise type, and what raw data it depends on" (Section 10), then a feature-ablation experiment upgrades the "is all that data actually necessary" judgment from qualitative attribution to quantitative evidence (Section 11).
+- **Section 12 — production application**. The validated methods are put to work in label-free closed-loop cleaning, advancing from "can score and rank" to "actually remove and retrain" — the only experiment in the report that produces a real downstream comparison.
+
+Section 13 summarizes conclusions and limitations; Section 14 is the appendix (precise definitions, coverage, and collection timing for every metric).
 
 ### 1.4 Noise Sample Examples (Raw Text Comparison)
 
@@ -71,7 +77,7 @@ The exact construction (matching `analyze.py`'s `auc()`/`summarize()`):
 - **Features**: all 37 numeric columns in `per_sample_metrics.csv` (the training-trajectory / token-diagnostic / text-similarity features defined in Appendix 12.1-12.3), with `dropna(subset=features)` — a row is only included if **all 37 features are non-null**.
 - **Classifier and validation**: after `StandardScaler` normalization, `StratifiedKFold(n_splits=5, shuffle=True, random_state=0)` 5-fold stratified cross-validation, training one `RandomForestClassifier(n_estimators=200)` per fold; the final AUC pools each sample's out-of-fold predicted probability (from whichever fold it fell into as test data) across all 5 folds and computes a single AUC over the whole set — not an average of 5 separate AUCs.
 
-**An easily-overlooked but important detail — the effective sample size is far smaller than the dataset's total size**: 13 of the 37 features are the token-level diagnostic features from Section 12.2 (`max_token_loss`, `frac_hard`, `hard_loss_mean`, etc.), which are only produced during the forward-only diagnostic pass at `diag_subsample=8` (every 8th sample), giving roughly 12.5% coverage. Requiring all 37 features to be non-null effectively keeps only the small subset of samples that happened to land in the diagnostic subsample *and* showed at least one "hard token" in at least one epoch. In practice, the number of samples that actually enter the computation for this section, Section 3, Section 8, and the `iforest`/`zscore` columns of Section 6's table is:
+**An easily-overlooked but important detail — the effective sample size is far smaller than the dataset's total size**: 13 of the 37 features are the token-level diagnostic features from Section 14.2 (`max_token_loss`, `frac_hard`, `hard_loss_mean`, etc.), which are only produced during the forward-only diagnostic pass at `diag_subsample=8` (every 8th sample), giving roughly 12.5% coverage. Requiring all 37 features to be non-null effectively keeps only the small subset of samples that happened to land in the diagnostic subsample *and* showed at least one "hard token" in at least one epoch. In practice, the number of samples that actually enter the computation for this section, Section 3, Section 8, and the `iforest`/`zscore` columns of Section 6's table is:
 
 | Dataset | Total n | Of which noise (n_noise) |
 |---|---|---|
@@ -376,11 +382,67 @@ This table reveals a real effect the "mean of 7" number masks: **on GSM8K, templ
 
 ---
 
-## 10. Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works"
+## 10. Best Screening Method per Noise Type, at a Glance
+
+Sections 2-9 separately covered each noise type's detection difficulty, feature attribution, and the direction-reversal issue, but never assembled "which method should be used for which type, what raw data it relies on, and whether that data is actually necessary" in one place. This section summarizes the current state; Section 11 upgrades the "is it necessary" judgment from qualitative attribution ranking to quantitative ablation evidence.
+
+One framing caveat first: the AUC numbers reported in Sections 2-9 (`unsupervised.csv`/`memorization.csv`/`feature_attribution.csv`) are all computed on the **diagnostic subsample table** (roughly 900-1,200 rows per dataset, a 12.5% sample), where every feature is available, including token-level diagnostics and `cos_global_*`. The `cleaning_loop.py` used by label-free closed-loop cleaning (Section 12), however, must score and remove from the **full training set** (14,611+ rows), where token diagnostics and `cos_global_*` are not 100% covered, so it is restricted to the 20 full-coverage features (Sections 14.1/14.3). The two don't always agree — for garbled/template the full-coverage features happen to be enough on their own, so the reported AUC and production precision roughly match; but for near_duplicate/keyword a large share of the usable signal lives in the token diagnostics, so the reported AUC looks better than what production can actually achieve.
+
+| Noise type | Best label-free method (AUC, full-training-set basis) | Supervised ceiling (RF within-type AUC, reference only) | Main raw data category relied on | Necessity verdict |
+|---|---|---|---|---|
+| garbled | iforest + full-coverage features, 0.932 | 0.998 | Full-coverage trajectory features (`loss_curvature`/`loss_rank`, etc.) | Trajectory features are already sufficient; neither `text_nn_sim` nor token diagnostics are necessary (Section 11 ablation: adding/removing either barely moves the number) |
+| template | **Must use memo_signed**, 0.925 (iforest is only 0.537, near-chance) | 0.999 | memo_signed's 6 signed trajectory features; but Section 11's ablation shows `text_nn_sim` alone also reaches 0.805 | The signed trajectory features are the necessary and sufficient production-viable option; `text_nn_sim` is an independent second signal — not necessary, but useful for cross-checking |
+| duplicate | iforest + full-coverage features, 0.528 (**weak, and diluted**) | 0.986 | In theory, `text_nn_sim` alone would suffice | **The current production choice is not optimal** — Section 11's ablation shows `text_nn_sim` alone (zscore) reaches 0.938, 0.41 higher than the current 20-feature mixed iforest; the other features are essentially dilutive |
+| unrelated | iforest + full-coverage features, 0.641 | 0.925 | Mostly `text_nn_sim`, with a real contribution from trajectory features too | Partially redundant — `text_nn_sim` alone reaches 0.783 (Section 11), already beating the current mixed approach, but trajectory features still add something, so it can't be simplified to a single feature the way duplicate can |
+| truncation | zscore_max/iforest + full-coverage features, ~0.58 | 0.763 (the ceiling itself is not high) | Full-coverage trajectory features and token diagnostics each contribute a bit, with no single dominant feature | Nothing to trim — every available category is already in use and the result is still modest; this is weak detectability, not a feature-selection problem |
+| near_duplicate | iforest + full-coverage features, 0.614 (weak) | 0.674 (also on the low side) | Token-level diagnostics carry the strongest signal (0.641) but are unavailable in production; `text_nn_sim` contributes almost nothing among the full-coverage features | **Genuine raw-data coverage gap** — the signal that actually works lives in diagnostics that only cover 12.5% of samples; the current full-scale data is already near its ceiling for this type |
+| keyword | iforest/zscore + full-coverage features, 0.55-0.59 (near-chance) | 0.577 (the ceiling itself is low) | Every category contributes weakly (Section 11: `text_nn_sim`, full-coverage trajectory, and token diagnostics all sit between 0.50 and 0.59) | **Not a wrong method choice — every existing raw data category is insufficient.** A 1-2 word substitution barely perturbs a TF-IDF vector or a training trajectory; a genuinely new word-substitution-detection feature is needed |
+| mixed | iforest + full-coverage features, 0.706 (the best label-free combination) | No attribution/within-type analysis available (`feature_attribution.csv`/`cross_type.csv` both lack a mixed row) | Unknown — attribution analysis gap | Cannot be assessed; a dedicated supervised attribution pass on mixed is needed to answer this |
+
+---
+
+## 11. Feature Ablation: Is `text_nn_sim` Being Diluted? What Would Token Diagnostics Actually Buy?
+
+### 11.1 Motivation and Design
+
+Two of the "necessity verdicts" in Section 10 are currently backed only by attribution-importance rankings (Section 8), not quantitative evidence: is the duplicate/unrelated detection signal really being "diluted" by irrelevant features? And how much would adding (production-unavailable) token-level diagnostics actually improve near_duplicate/keyword, and is it worth reworking the collection pipeline to get full coverage for them?
+
+Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `scripts/feature_ablation.py`, output at `results/ratio10/feature_ablation.csv`.
+
+Five ablation conditions:
+
+| Condition | Feature scope | Usable by `cleaning_loop.py` today? |
+|---|---|---|
+| `full_diag` | All numeric columns (including token diagnostics, `cos_global_*`) | No — this is exactly the `unsupervised.csv` result cited in Sections 2-9 |
+| `full_coverage` | The 20 full-coverage features (Sections 14.1/14.3; what `cleaning_loop.py` actually uses in production) | **Yes — current production choice** |
+| `no_text` | `full_coverage` minus `text_nn_sim` (19 features) | Yes |
+| `text_only` | `text_nn_sim` alone | Yes |
+| `token_only` | Token-level diagnostics alone (13 features, only 12.5%-subsample coverage) | **No** — unavailable in production; included only to quantify what it would be worth if it were available |
+
+### 11.2 Results
+
+![Feature ablation: is text_nn_sim diluted? What would token diagnostics buy?](../results/charts/en/feature_ablation.png)
+
+(Values are the best AUC among zscore_max/zscore_mean/iforest scoring for each condition. `full_coverage` is the current production choice; `text_only`/`token_only` are the two comparison conditions, with the latter hatched to emphasize "not usable in production, reference only.")
+
+Three quantitative findings:
+
+1. **duplicate and unrelated's current production approach really is diluted.** For duplicate, `text_nn_sim` alone (zscore) reaches AUC 0.938 — 0.41 higher than the current 20-feature mixed iforest (0.528). For unrelated, `text_nn_sim` alone reaches 0.783, 0.14 higher than the current approach (0.641). This isn't an inference from an attribution ranking — it's a direct head-to-head comparison: mixing the other 19 weak features into the same unsupervised scorer actively hurts a signal that was already strong on its own. The `no_text` condition (duplicate 0.564, unrelated 0.571) confirms this further: what's left after removing `text_nn_sim` is itself weak, so the "dilution" really is the problem, not some hidden value in the trajectory features.
+2. **Template's high detectability comes from two independent signals stacked together, not memorization alone.** `text_nn_sim` alone reaches AUC 0.805 on template — templated noise reuses a small set of fixed templates, which naturally produces high textual similarity, an entirely separate clue from the "memorized / anomalously fast convergence" signal that memo_signed captures. The current memo_signed approach (0.925) is already good enough on its own; this finding mainly explains *why* template is so detectable, rather than suggesting a new improvement.
+3. **near_duplicate and keyword are a genuine methodological blind spot, not a wrong choice of scoring method.** For near_duplicate, even adding the production-unavailable token diagnostics only gets AUC to 0.641. For keyword, all three conditions land between 0.50 and 0.59 — `text_nn_sim` (0.531) and token diagnostics (0.514) perform similarly and both weakly. This means none of the currently collected raw data categories are sufficient for these two "light, local perturbation" noise types; no recombination of existing signals fixes this — it needs a purpose-built feature (e.g., per-token local-substitution detection, rather than whole-text or whole-trajectory statistics).
+
+### 11.3 Recommendations
+
+- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed.
+- **Not worth investing in right now**: improving near_duplicate/keyword requires new features rather than a new scoring method, which is a substantially larger scope of work — for now this is recorded as a known limitation (folded into Section 13.2), to be revisited only once there's clear downstream-benefit evidence (analogous to Section 9's verification for template).
+
+---
+
+## 12. Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works"
 
 ![Closed-loop cleaning hit precision](../results/charts/en/cleaning_precision.png)
 
-**This is currently the only experiment in the project that advances from "score and rank" to an actual cleaning action, and it differs in kind from the previous 9 sections**: every prior analysis only verified "can noise samples be told apart" (AUC/lift numbers), never whether "retraining after cleaning actually improves things."
+**This is currently the only experiment in the project that advances from "score and rank" to an actual cleaning action, and it differs in kind from Sections 2-11**: every prior analysis only verified "can noise samples be told apart" (AUC/lift numbers), never whether "retraining after cleaning actually improves things."
 
 Using `garbled@ratio10` (14,611 training samples total, true noise fraction 9.999%) as the test case, a purely unsupervised IsolationForest (no noise labels used, 20-dimensional base trajectory features plus `text_nn_sim`, fit independently on the full dataset) scores and removes a 10% budget of samples:
 
@@ -409,13 +471,13 @@ The pipeline: `StandardScaler` normalizes these 20 features, an `IsolationForest
 
 The real explanation was already foreshadowed in Section 9: **`garbled` noise itself causes essentially zero real downstream harm** (uncleaned baseline 0.4388 vs. clean baseline 0.4389 — a difference of only 0.0001). It was chosen for this closed-loop demonstration because it is the easiest type to detect (AUC > 0.98), not because it does the most downstream damage. When a noise type is "easy to detect" but "not actually harmful downstream to begin with," removing it naturally yields no downstream benefit; meanwhile, dropping 10% of the training samples (however accurately targeted at real noise) also shrinks the effective training set by 10%, and if this "data-loss" side effect slightly outweighs the "denoising" benefit, cleaning can end up scoring a touch lower than not cleaning at all — which is exactly the 0.4388 → 0.4364/0.4357 pattern observed here.
 
-This result overturns the closed-loop cleaning experiment's original implicit assumption ("higher detection/removal precision → downstream performance must improve"), and is itself a valuable negative result: **whether cleaning yields a downstream benefit depends on whether that noise type is actually harmful downstream in the first place, not just on how high the detection/removal precision is**. Section 9 already identified template as the one type that satisfies both "easy to detect" and "actually harmful downstream" (an 8.95-point drop on GSM8K vs. clean) — the real next target for verifying "does cleaning actually help downstream" should be template, not garbled (see Section 11.3).
+This result overturns the closed-loop cleaning experiment's original implicit assumption ("higher detection/removal precision → downstream performance must improve"), and is itself a valuable negative result: **whether cleaning yields a downstream benefit depends on whether that noise type is actually harmful downstream in the first place, not just on how high the detection/removal precision is**. Section 9 already identified template as the one type that satisfies both "easy to detect" and "actually harmful downstream" (an 8.95-point drop on GSM8K vs. clean) — the real next target for verifying "does cleaning actually help downstream" should be template, not garbled (see Section 13.3).
 
 ---
 
-## 11. Conclusions and Limitations
+## 13. Conclusions and Limitations
 
-### 11.1 Summary of Core Conclusions
+### 13.1 Summary of Core Conclusions
 
 1. **Detection difficulty varies by noise type, and the ranking is stable**: garbled/template/duplicate are easiest to detect (AUC > 0.98), keyword/near-duplicate are hardest (AUC 0.57-0.76); this ranking holds across both the 10% and 5% noise ratios.
 2. **Cross-type transfer loses substantial ground (~17-20 points), cross-ratio transfer is nearly lossless**: a detector needs separate calibration per noise type, but not per noise ratio.
@@ -425,27 +487,27 @@ This result overturns the closed-loop cleaning experiment's original implicit as
 6. **Real downstream harm is limited but present**: the spread across the 7 general benchmarks is small, but template at ratio10 is genuinely the worst-performing dataset downstream — the only type where "easy to detect" and "actually harmful" both hold.
 7. **Label-free closed-loop cleaning was verified end-to-end, yielding a valuable negative result**: for garbled noise, targeted removal achieves 5.7x the precision of random removal, but downstream performance after retraining did not improve — both cleaned variants actually scored slightly below the uncleaned baseline. The root cause is that garbled itself is nearly harmless downstream, showing that a cleaning method's downstream payoff depends on whether the noise type is actually harmful, not just on detection precision.
 
-### 11.2 Limitations
+### 13.2 Limitations
 
 - The overall spread in downstream benchmark impact is small (0.42-0.44 range), which could mean the current evaluation suite isn't sensitive enough, or that at this LoRA fine-tuning scale/epoch count, noise's downstream impact is genuinely limited; larger-scale or longer training could plausibly amplify these differences.
 - The closed-loop cleaning experiment has so far only been validated on a single noise type/ratio (`garbled@ratio10`), and has not yet been extended to other noise types (especially the harder-to-detect keyword and near-duplicate, or template, which Section 9 confirms is actually harmful downstream) or mixed-noise scenarios; in hindsight, choosing garbled as the first target was itself a flawed experimental design — it is the easiest type to detect but is nearly harmless downstream, so no cleaning benefit could ever have been observed.
 - The finding that `text_nn_sim` dominates duplicate/unrelated detection means the core "training-dynamics detection" methodology currently has substantive support only for types like garbled, template, truncation, and keyword — this should be stated carefully to avoid over-generalizing the claim.
-- The ablation in Sections 13/14 confirms that `cleaning_loop.py`'s current "20-feature mixed iforest" approach for duplicate/unrelated is being diluted by weak features other than `text_nn_sim` — scoring on `text_nn_sim` alone is more precise. near_duplicate/keyword, by contrast, are a genuine methodological blind spot with the current raw data categories, not a case of picking the wrong scoring method.
+- The ablation in Sections 10/11 confirms that `cleaning_loop.py`'s current "20-feature mixed iforest" approach for duplicate/unrelated is being diluted by weak features other than `text_nn_sim` — scoring on `text_nn_sim` alone is more precise. near_duplicate/keyword, by contrast, are a genuine methodological blind spot with the current raw data categories, not a case of picking the wrong scoring method.
 
-### 11.3 Next Steps
+### 13.3 Next Steps
 
 - Re-run the closed-loop cleaning experiment on template noise instead — it is the only type in this report that satisfies both "easy to detect" and "actually harmful downstream," so it is the real test of whether cleaning can produce a downstream gain.
 - Extend closed-loop cleaning to the remaining noise types, in particular checking whether cleaning the duplicate type (whose P@10% lift is < 1) is actually harmful rather than helpful.
-- Add a `text_sim` scoring option to `cleaning_loop.py` for duplicate/unrelated (Section 14.3) — expected to be more precise than the current mixed-feature iforest, and needs no new data collection since `text_nn_sim` is already a full-coverage feature.
-- Explore dedicated features for "light perturbation" noise types like keyword and near-duplicate, for which the current combination of training-dynamics and text-similarity features carries very weak signal (Section 14 confirms this holds even after adding production-unavailable token diagnostics).
+- Add a `text_sim` scoring option to `cleaning_loop.py` for duplicate/unrelated (Section 11.3) — expected to be more precise than the current mixed-feature iforest, and needs no new data collection since `text_nn_sim` is already a full-coverage feature.
+- Explore dedicated features for "light perturbation" noise types like keyword and near-duplicate, for which the current combination of training-dynamics and text-similarity features carries very weak signal (Section 11 confirms this holds even after adding production-unavailable token diagnostics).
 
 ---
 
-## 12. Appendix: Metric Definitions and Collection Timing
+## 14. Appendix: Metric Definitions and Collection Timing
 
 This section catalogs the exact computation (with code references) of every diagnostic metric produced by the pipeline, its coverage and collection method, and measured per-stage timing for the diagnostic step, to inform future feature-engineering decisions. Code references point to `model.py`/`analyze.py`/`textsim.py` in the project root.
 
-### 12.1 Training-trajectory metrics (full coverage, from `per_sample.jsonl`)
+### 14.1 Training-trajectory metrics (full coverage, from `per_sample.jsonl`)
 
 These are computed directly inside the training loop, and **every training sample produces one record per epoch, with no subsampling — 100% coverage** (`flush_window`, `model.py:246-257`). Because `micro_batch=1` while `grad_accum=16` (`config.yaml`), the code runs forward+backward on one sample at a time to isolate that sample's own gradient contribution, and only calls `opt.step()` once 16 samples have accumulated — this design exists specifically so that, despite gradient accumulation being a throughput optimization, the code can still attribute "how much did this specific sample contribute to this update, and in what direction," which would otherwise be lost once 16 samples' gradients are summed together.
 
@@ -460,7 +522,7 @@ These are computed directly inside the training loop, and **every training sampl
 | `cos_global_mean` / `_last` / `_std` / `_slope` | Cosine similarity between this sample's gradient delta and the sum of all gradient deltas within the **same gradient-accumulation window** (the same 16-sample optimizer step) (`model.py:236-245`: `dot_globs`/`bsqs` compare this sample's `delta_b` against the rest of the window) | Whether this sample's update this step agrees with its "peers" — if 15 samples in a window point one way and this one points the opposite way, it may be fighting the update rather than reinforcing it |
 | `update_contrib_mean` | Restricted to the LoRA `B` matrices (`b_offsets`): the norm of this sample's parameter-delta contribution `delta_b`, divided by the norm of the square root of the Adam optimizer's second-moment estimate `v_buf` (i.e. `exp_avg_sq`, read from `opt.state`) for that same parameter group (`model.py:280`: `upd=‖delta_b‖/(‖sqrt(v_buf)‖+1e-8)`), averaged over the 5 epochs | Closer than a raw gradient norm to "how much Adam will actually move these parameters" — Adam rescales updates per-parameter using the second moment, so a large raw gradient doesn't necessarily mean a large effective step |
 
-### 12.2 Token-level diagnostic metrics (subsampled coverage, from `diag_epoch*.jsonl` / `token_diag_epoch*.jsonl`)
+### 14.2 Token-level diagnostic metrics (subsampled coverage, from `diag_epoch*.jsonl` / `token_diag_epoch*.jsonl`)
 
 After each epoch's training finishes, the code runs one extra **strided-subsample, forward-only** inference pass (`train_data[::diag_step]`, `diag_step=train.diag_subsample`, default 8 — i.e. every 8th sample) (`_diagnostic_pass`, `model.py:120-168`, decorated `@torch.no_grad()`, no backpropagation, no parameter updates), batch size 8. Out of 14,611 training samples, only 1,827 (12.5%) get these metrics computed each epoch; the remaining 87.5% have these columns left null, and `analyze.py` fills them with the column median (`_load_run_metrics` performs no special handling for these columns — the leftover nulls are filled downstream by functions like `unsupervised_metrics` via `fillna(median)`).
 
@@ -476,9 +538,9 @@ After each epoch's training finishes, the code runs one extra **strided-subsampl
 | `hard_id_uniq` | The count of distinct hard-token ids observed across all 5 epochs, after taking the union across epochs (`model.py:93-94`: union of each epoch's top-32 token ids, then counted) | How stable the hard-token set itself is — a small count means the same tokens are hard every time; a large count means the hard spots drift |
 | `hard_pos_jaccard` | Jaccard similarity (intersection over union) between the hard-token position sets of each pair of consecutive epochs, averaged across all such pairs (`model.py:95-98`: `len(pa&pb)/max(1,len(pa\|pb))`) | Whether the "hard spots" stay pinned to the same tokens over time (high Jaccard, more like a structural anomaly) or fluctuate randomly (low Jaccard, more like noise) |
 
-**Key finding from this exploration**: for template and near-duplicate, `hard_loss_max` computed only on the 12.5% of samples with real token-level data reaches AUC 0.920 / 0.632, while the full column (87.5% median-imputed) only reaches AUC 0.564 / 0.515 — showing the current 1/8 subsample **significantly dilutes** signal for these two types. For keyword replacement, even the real (non-imputed) data only reaches AUC 0.555, showing its bottleneck is weak underlying signal, not the sampling rate (see the retraining-cost estimate in Section 12.5).
+**Key finding from this exploration**: for template and near-duplicate, `hard_loss_max` computed only on the 12.5% of samples with real token-level data reaches AUC 0.920 / 0.632, while the full column (87.5% median-imputed) only reaches AUC 0.564 / 0.515 — showing the current 1/8 subsample **significantly dilutes** signal for these two types. For keyword replacement, even the real (non-imputed) data only reaches AUC 0.555, showing its bottleneck is weak underlying signal, not the sampling rate (see the retraining-cost estimate in Section 14.5).
 
-### 12.3 Text-level metric (static, training-independent)
+### 14.3 Text-level metric (static, training-independent)
 
 | Metric | Exact computation | Intuition |
 |---|---|---|
@@ -486,13 +548,13 @@ After each epoch's training finishes, the code runs one extra **strided-subsampl
 
 Measured: computing full-dataset `text_nn_sim` for `keyword@ratio10` (14,611 samples) takes about 7.3 seconds (including TF-IDF construction and nearest-neighbor search) — the cheapest of all metrics to compute, and requires no GPU at all.
 
-### 12.4 Diagnostics produced but never consumed by the detection pipeline
+### 14.4 Diagnostics produced but never consumed by the detection pipeline
 
 | Metric | Exact computation | Status |
 |---|---|---|
 | `layer_norms.jsonl` / TensorBoard `lora_layer_gradnorm/layer{li}` | Computed once per optimizer step (i.e. once per completed 16-sample gradient-accumulation window): the gradients accumulated in that step are grouped by the transformer layer index they belong to, summed, and L2-normed (`_window_layer_grad_norms`, `model.py:80-86`: group by layer id, `sqrt(sum(grad**2))`). Only three layers are monitored: `target_ids={0, n_layers//2, n_layers-1}` — for the current Qwen2.5-3B-Instruct (36 layers), that's layers 0, 18, and 35 (`model.py:227`). Each full training run (5 epochs × 914 optimizer steps) produces ≈4,570 lines | This is a **step-level, global aggregate**, not a per-sample quantity — the 16 samples in a step have already had their gradient contributions summed together, so there is no way to recover "what was sample X's gradient in layer Y" from this data. Even wanting to merge it into `per_sample_metrics.csv` is not achievable with the current data shape; it would require restructuring this exactly like `cos_global`/`grad_norm` — recomputing per-layer norms per sample inside `flush_window` — which means changing the training code and retraining, not something a post-hoc script can fix. No code anywhere in the project currently reads or merges this data; it exists solely for manually inspecting per-layer gradient magnitude curves in TensorBoard |
 
-### 12.5 Measured collection timing (`keyword@ratio10`, single NVIDIA RTX PRO 6000 Blackwell Server Edition GPU)
+### 14.5 Measured collection timing (`keyword@ratio10`, single NVIDIA RTX PRO 6000 Blackwell Server Edition GPU)
 
 Timing figures come from the on-disk write timestamps (mtimes) of files like `runs/ratio10/keyword/metrics/diag_epoch*.jsonl`, cross-checked against the start/end timestamps for this dataset recorded in `logs/full_run.log` (2026-09-12 09:26:36 → 12:33:55, a measured total of 187.3 minutes) — the two sources agree.
 
@@ -502,7 +564,7 @@ Timing figures come from the on-disk write timestamps (mtimes) of files like `ru
 - Within each optimizer step: 16 single-sample forward+backward passes (one sample at a time, not batched), followed by one `opt.step()`, one line appended to `layer_norms.jsonl`, and 16 lines appended to `per_sample.jsonl`.
 - Every `eval_steps=200` optimizer steps, a held-out validation pass fires (`_eval_heldout`, `model.py:106-117`, forward-only, 200 samples, batch size 8, 25 batches) — roughly 4-5 times per epoch (at steps 200/400/600/800).
 - Every `log_every=25` optimizer steps, a batch of TensorBoard scalars is written (loss/grad_norm/cos_ref/cos_global/update_contrib/lr/tokens_per_sec/gpu_mem, etc.) — negligible cost.
-- Only after the training portion of the epoch finishes does the one-off token-level diagnostic forward pass run (Section 12.2: 1,827 subsampled rows, batch size 8, 229 batches, forward-only, no backward).
+- Only after the training portion of the epoch finishes does the one-off token-level diagnostic forward pass run (Section 14.2: 1,827 subsampled rows, batch size 8, 229 batches, forward-only, no backward).
 
 **Measured per-epoch timing** (derived from file mtime differences, epochs in order):
 
@@ -517,60 +579,4 @@ Timing figures come from the on-disk write timestamps (mtimes) of files like `ru
 
 **Inference**: 229 diagnostic batches take 34 seconds, i.e. roughly 0.15 seconds per batch. If `diag_subsample` were changed from 8 to 1 (full diagnostics over all 14,611 samples, batch size 8, `⌈14611/8⌉=1,827` batches), the diagnostic phase is projected to grow to roughly **270 seconds (4.5 minutes)**, and total time for one dataset over 5 epochs is projected to grow from 187 minutes to roughly **209 minutes (3.5 hours)** — about a **12% increase** (the diagnostic pass involves no backward pass or optimizer step, so it should scale close to linearly with batch count; this is a linear extrapolation).
 
-**Extrapolated cost across datasets / the full project**: retraining only `near_duplicate` (Section 12.2's conclusion) with full diagnostics, for both the `ratio10` and `ratio5` tags, is projected to add roughly **44 minutes total** (~22 minutes per tag). Switching all 9 noise types × 2 ratios (18 runs) to full diagnostics is projected to add roughly **6.6 hours total** (~22 minutes per run × 18). These figures come from a single measurement on one dataset and one machine; other datasets (different text lengths, sample counts) and GPU contention will shift them somewhat — treat them as order-of-magnitude estimates, not a firm scheduling commitment.
-
----
-
-## 13. Best Screening Method per Noise Type, at a Glance
-
-Earlier sections separately covered each noise type's detection difficulty, feature attribution, and the direction-reversal issue, but never assembled "which method should be used for which type, what raw data it relies on, and whether that data is actually necessary" in one place. This section summarizes the current state; Section 14 upgrades the "is it necessary" judgment from qualitative attribution ranking to quantitative ablation evidence.
-
-One framing caveat first: the AUC numbers reported elsewhere in this document (`unsupervised.csv`/`memorization.csv`/`feature_attribution.csv`) are all computed on the **diagnostic subsample table** (roughly 900-1,200 rows per dataset, a 12.5% sample), where every feature is available, including token-level diagnostics and `cos_global_*`. `cleaning_loop.py`, however, must score and remove from the **full training set** (14,611+ rows), where token diagnostics and `cos_global_*` are not 100% covered, so it is restricted to the 20 full-coverage features (Sections 12.1/12.3). The two don't always agree — for garbled/template the full-coverage features happen to be enough on their own, so the reported AUC and production precision roughly match; but for near_duplicate/keyword a large share of the usable signal lives in the token diagnostics, so the reported AUC looks better than what production can actually achieve.
-
-| Noise type | Best label-free method (AUC, full-training-set basis) | Supervised ceiling (RF within-type AUC, reference only) | Main raw data category relied on | Necessity verdict |
-|---|---|---|---|---|
-| garbled | iforest + full-coverage features, 0.932 | 0.998 | Full-coverage trajectory features (`loss_curvature`/`loss_rank`, etc.) | Trajectory features are already sufficient; neither `text_nn_sim` nor token diagnostics are necessary (Section 14 ablation: adding/removing either barely moves the number) |
-| template | **Must use memo_signed**, 0.925 (iforest is only 0.537, near-chance) | 0.999 | memo_signed's 6 signed trajectory features; but Section 14's ablation shows `text_nn_sim` alone also reaches 0.805 | The signed trajectory features are the necessary and sufficient production-viable option; `text_nn_sim` is an independent second signal — not necessary, but useful for cross-checking |
-| duplicate | iforest + full-coverage features, 0.528 (**weak, and diluted**) | 0.986 | In theory, `text_nn_sim` alone would suffice | **The current production choice is not optimal** — Section 14's ablation shows `text_nn_sim` alone (zscore) reaches 0.938, 0.41 higher than the current 20-feature mixed iforest; the other features are essentially dilutive |
-| unrelated | iforest + full-coverage features, 0.641 | 0.925 | Mostly `text_nn_sim`, with a real contribution from trajectory features too | Partially redundant — `text_nn_sim` alone reaches 0.783 (Section 14), already beating the current mixed approach, but trajectory features still add something, so it can't be simplified to a single feature the way duplicate can |
-| truncation | zscore_max/iforest + full-coverage features, ~0.58 | 0.763 (the ceiling itself is not high) | Full-coverage trajectory features and token diagnostics each contribute a bit, with no single dominant feature | Nothing to trim — every available category is already in use and the result is still modest; this is weak detectability, not a feature-selection problem |
-| near_duplicate | iforest + full-coverage features, 0.614 (weak) | 0.674 (also on the low side) | Token-level diagnostics carry the strongest signal (0.641) but are unavailable in production; `text_nn_sim` contributes almost nothing among the full-coverage features | **Genuine raw-data coverage gap** — the signal that actually works lives in diagnostics that only cover 12.5% of samples; the current full-scale data is already near its ceiling for this type |
-| keyword | iforest/zscore + full-coverage features, 0.55-0.59 (near-chance) | 0.577 (the ceiling itself is low) | Every category contributes weakly (Section 14: `text_nn_sim`, full-coverage trajectory, and token diagnostics all sit between 0.50 and 0.59) | **Not a wrong method choice — every existing raw data category is insufficient.** A 1-2 word substitution barely perturbs a TF-IDF vector or a training trajectory; a genuinely new word-substitution-detection feature is needed |
-| mixed | iforest + full-coverage features, 0.706 (the best label-free combination) | No attribution/within-type analysis available (`feature_attribution.csv`/`cross_type.csv` both lack a mixed row) | Unknown — attribution analysis gap | Cannot be assessed; a dedicated supervised attribution pass on mixed is needed to answer this |
-
----
-
-## 14. Feature Ablation: Is `text_nn_sim` Being Diluted? What Would Token Diagnostics Actually Buy?
-
-### 14.1 Motivation and Design
-
-Two of the "necessity verdicts" in Section 13 are currently backed only by attribution-importance rankings (Section 8), not quantitative evidence: is the duplicate/unrelated detection signal really being "diluted" by irrelevant features? And how much would adding (production-unavailable) token-level diagnostics actually improve near_duplicate/keyword, and is it worth reworking the collection pipeline to get full coverage for them?
-
-Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `scripts/feature_ablation.py`, output at `results/ratio10/feature_ablation.csv`.
-
-Five ablation conditions:
-
-| Condition | Feature scope | Usable by `cleaning_loop.py` today? |
-|---|---|---|
-| `full_diag` | All numeric columns (including token diagnostics, `cos_global_*`) | No — this is exactly the `unsupervised.csv` result cited elsewhere in this report |
-| `full_coverage` | The 20 full-coverage features (Sections 12.1/12.3; what `cleaning_loop.py` actually uses in production) | **Yes — current production choice** |
-| `no_text` | `full_coverage` minus `text_nn_sim` (19 features) | Yes |
-| `text_only` | `text_nn_sim` alone | Yes |
-| `token_only` | Token-level diagnostics alone (13 features, only 12.5%-subsample coverage) | **No** — unavailable in production; included only to quantify what it would be worth if it were available |
-
-### 14.2 Results
-
-![Feature ablation: is text_nn_sim diluted? What would token diagnostics buy?](../results/charts/en/feature_ablation.png)
-
-(Values are the best AUC among zscore_max/zscore_mean/iforest scoring for each condition. `full_coverage` is the current production choice; `text_only`/`token_only` are the two comparison conditions, with the latter hatched to emphasize "not usable in production, reference only.")
-
-Three quantitative findings:
-
-1. **duplicate and unrelated's current production approach really is diluted.** For duplicate, `text_nn_sim` alone (zscore) reaches AUC 0.938 — 0.41 higher than the current 20-feature mixed iforest (0.528). For unrelated, `text_nn_sim` alone reaches 0.783, 0.14 higher than the current approach (0.641). This isn't an inference from an attribution ranking — it's a direct head-to-head comparison: mixing the other 19 weak features into the same unsupervised scorer actively hurts a signal that was already strong on its own. The `no_text` condition (duplicate 0.564, unrelated 0.571) confirms this further: what's left after removing `text_nn_sim` is itself weak, so the "dilution" really is the problem, not some hidden value in the trajectory features.
-2. **Template's high detectability comes from two independent signals stacked together, not memorization alone.** `text_nn_sim` alone reaches AUC 0.805 on template — templated noise reuses a small set of fixed templates, which naturally produces high textual similarity, an entirely separate clue from the "memorized / anomalously fast convergence" signal that memo_signed captures. The current memo_signed approach (0.925) is already good enough on its own; this finding mainly explains *why* template is so detectable, rather than suggesting a new improvement.
-3. **near_duplicate and keyword are a genuine methodological blind spot, not a wrong choice of scoring method.** For near_duplicate, even adding the production-unavailable token diagnostics only gets AUC to 0.641. For keyword, all three conditions land between 0.50 and 0.59 — `text_nn_sim` (0.531) and token diagnostics (0.514) perform similarly and both weakly. This means none of the currently collected raw data categories are sufficient for these two "light, local perturbation" noise types; no recombination of existing signals fixes this — it needs a purpose-built feature (e.g., per-token local-substitution detection, rather than whole-text or whole-trajectory statistics).
-
-### 14.3 Recommendations
-
-- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed.
-- **Not worth investing in right now**: improving near_duplicate/keyword requires new features rather than a new scoring method, which is a substantially larger scope of work — for now this is recorded as a known limitation (folded into Section 11.2), to be revisited only once there's clear downstream-benefit evidence (analogous to Section 9's verification for template).
+**Extrapolated cost across datasets / the full project**: retraining only `near_duplicate` (Section 14.2's conclusion) with full diagnostics, for both the `ratio10` and `ratio5` tags, is projected to add roughly **44 minutes total** (~22 minutes per tag). Switching all 9 noise types × 2 ratios (18 runs) to full diagnostics is projected to add roughly **6.6 hours total** (~22 minutes per run × 18). These figures come from a single measurement on one dataset and one machine; other datasets (different text lengths, sample counts) and GPU contention will shift them somewhat — treat them as order-of-magnitude estimates, not a firm scheduling commitment.
