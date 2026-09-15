@@ -2,6 +2,28 @@
 
 一个按领域组织的 LLM 噪声实验项目。实验数据位于 `data/`，结果位于 `results/`，报告位于 `docs/`；所有运行代码都在根目录，避免多层命令/工作流目录。
 
+研究的核心问题：**在完全不使用噪音标签的前提下，能否仅凭 LoRA 微调过程中的训练动态（loss 轨迹、
+梯度范数、余弦相似度等）识别出被注入的低质量训练样本？**
+
+## 结论与报告
+
+完整分析报告：[`docs/analysis_report_zh.md`](docs/analysis_report_zh.md)（英文版
+[`analysis_report_en.md`](docs/analysis_report_en.md)，两版结构与内容同步）。
+
+想快速了解做了什么、怎么做的，看报告第 2 节（实验方案与执行步骤）；想知道结论，看第 15 节。
+几个值得先知道的结果：
+
+- **检测难度因噪音类型差异极大**，且排序稳定：乱码/模板化/完全重复 AUC > 0.98，关键词替换/近似重复
+  只有 0.57-0.76。
+- **方向反转是真实的方法论坑**：模板化这类"被记忆"的噪音 loss 更低、收敛更快，通用离群检测会把它们
+  排到最干净的一端。用错方向的清洗精度（4.0%）比随机剔除（9.2%）还差。
+- **检测器是"窄"，不是"垮"**：单类型检测器拉到混合噪音流上整体 AUC 掉到 0.563-0.730，但限定
+  "自己那一类 vs 干净"后保持率 0.96-1.23——是覆盖缺口，不是分布失效。
+- **清洗精度高不等于下游变好**：garbled 上定向剔除精度达随机的 5.7 倍，但重训后下游没有提升，
+  因为 garbled 本身下游危害接近零。清洗的收益取决于噪音是否真的有害。
+- **两类噪音的高 AUC 名不副实**：完全重复、话题不相关的检测信号 90% 以上来自静态文本相似度，
+  不是训练动态。
+
 ## 目录
 
 ```
@@ -13,7 +35,7 @@
 ├── evaluate.py              评测结果持久化
 ├── textsim.py               文本层面的最近邻相似度特征（TF-IDF，非训练动态）
 ├── analyze.py               训练/token/无监督/迁移/早期检测/特征归因分析
-├── cleaning_loop.py          免标签闭环清洗（打分剔除 + 随机剔除对照）
+├── cleaning_loop.py         免标签闭环清洗（三种打分器 + 等量随机剔除对照）
 ├── cli.py                   统一命令入口
 ├── run.py                   CLI 启动器
 └── scripts/                 编排脚本（完整流程、评测、分析），不纳入 git 跟踪，见下方说明
@@ -23,6 +45,15 @@
 这类实验方法本身一律放根目录并纳入 git 跟踪，通过 `cli.py` 的子命令/`--kind` 暴露。
 
 `scripts/` 目录：
+
+一次性分析脚本（产出纳入 git 跟踪的 CSV/PNG，脚本本身不跟踪）：
+
+- `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告第 13 节。
+- `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 13.5 节。
+- `feature_ablation.py`：特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告第 12 节。
+- `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
+
+编排脚本：
 
 - `run_full.sh <tag> [ratio]`：当前通用入口——数据生成、9 类数据集 LoRA 训练、全量分析表（features/training/unsupervised/cross_type/precision_lift/memorization）一次跑完。
 - `run_full_ratio10.sh`：ratio10 实验的历史执行记录（已完成，保留用于复现；未包含后续新增的三项分析，新实验请用 `run_full.sh`）。
@@ -57,7 +88,9 @@ python cli.py analyze --kind early_memorization --tag ratio10
 # 特征归因：每个噪音类型的 RF 检测器到底在用哪些特征（permutation importance）
 python cli.py analyze --kind feature_attribution --tag ratio10
 # 免标签闭环清洗：无监督打分剔除疑似噪音 + 等量随机剔除对照，供重训练对比
-python cli.py clean --tag ratio10 --dataset garbled --budget 0.10
+python cli.py clean --tag ratio10 --dataset garbled --budget 0.10                      # iforest（默认）
+python cli.py clean --tag ratio10 --dataset template --budget 0.10 --method memo_signed # 记忆型噪音
+python cli.py clean --tag ratio10 --dataset mixed --budget 0.10 --method pooled         # 成分未知/混合
 # 读取已保存的迁移结果
 python cli.py analyze --kind transfer --input results/transfer_cross_ratio.csv --tags ratio5,ratio10
 ```
@@ -94,11 +127,36 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
   而非"能不能检测"；发现 duplicate/unrelated 主要靠 `text_nn_sim`（文本相似度，非训练动态特征）。
 - `transfer`：读取跨比例/跨类型迁移结果，支持 `--tags` 筛选。
 
-`clean`（`cli.py clean --tag <tag> --dataset <ds> --budget <frac>`）：免标签闭环清洗——用
-IsolationForest 在全量训练集上打分，剔除疑似噪音最多的 `budget` 比例，另建等量随机剔除对照组，
-产出 `data/{tag}/cleaning_loop/{dataset}/{train_targeted,train_random}.jsonl` 供重新训练+评测对比。
+`clean`（`cli.py clean --tag <tag> --dataset <ds> --budget <frac> [--method ...]`）：免标签闭环清洗——
+在**全量**训练集（而非诊断子样本）上打分，剔除疑似噪音最多的 `budget` 比例，另建等量随机剔除对照组，
+产出 `data/{tag}/cleaning_loop/{name}/{train_targeted,train_random}.jsonl` 供重新训练+评测对比。
+随机对照是必须的：剔除 10% 样本本身就减少 10% 训练数据，只跟未清洗基线比无法区分"去噪收益"和"数据量损失"。
+
+三个 `--method` 对应三种噪音假设，选错方向的代价很大（同为 template 剔 1461 条，`iforest` 命中精度
+4.0%、比随机的 9.2% 还差一半，`memo_signed` 则是 53.1%）：
+
+| `--method` | 假设 | 适用 | 特征 |
+|---|---|---|---|
+| `iforest`（默认） | 噪音 = 离群，无方向 | garbled / unrelated 等真正异常的噪音 | 20 个全覆盖特征 |
+| `memo_signed` | 噪音 = 异常地**容易学**（loss 低、收敛快），符号先验固定 | template / duplicate 等记忆型噪音 | 6 个带符号轨迹特征 |
+| `pooled` | 以上两者 + `text_nn_sim` 的 \|z\|，各自标准化后取逐样本最大值 | **噪音成分未知或混合**时 | 27 项 |
+
+`pooled` 是"用精度换覆盖面"而非免费改进：`mixed` 上它的 P@10% 0.323 高于 `iforest` 的 0.268，
+但代价是 near_duplicate 略低于随机，且剔除预算会被最显著的类型（duplicate/garbled）占据。
+噪音类型已知且已校准时，单方法精度更高。详见报告 13.5 节。
 
 ## 派生实验数据
+
+闭环清洗实验的产物（报告第 14 节）：
+
+| 目录 | 内容 |
+|---|---|
+| `data/{tag}/cleaning_loop/{name}/` | 清洗后训练集 `train_targeted.jsonl` / `train_random.jsonl` + `metadata.json`（含剔除精度、用到的特征列表） |
+| `runs/{tag}/cleaning_loop_*/` | 重训练的逐样本指标 |
+| `results/eval/eval_{tag}_cleaning_loop_*.json` | 重训练后的 7 项 benchmark 结果 |
+
+`{name}` 为数据集名（`iforest` 默认方法）或 `{dataset}_{method}`（其他打分器），已跑完的有
+`garbled`、`template`、`template_memo_signed`、`mixed`、`mixed_memo_signed`、`mixed_pooled`。
 
 清洗增益实验的原始数据仍归档在 `data/ratio10/cleaning_gain/unrelated/`（`train_random.jsonl`/`train_targeted.jsonl` 及对应的 `training_commands.sh`）。其训练产物目录 `runs/ratio10/cleaning_gain/` 及汇总表 `results/cleaning_gain_comparison.csv` 已在后续清理中删除；若需要该项对比结论，需重新执行 `data/ratio10/cleaning_gain/unrelated/training_commands.sh` 并重新汇总。
 
