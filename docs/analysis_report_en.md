@@ -689,7 +689,7 @@ Taken together, the production recommendation is tiered: **use a single method w
 
 **This is currently the only experiment in the project that advances from "score and rank" to an actual cleaning action, and it differs in kind from Sections 2-12**: every prior analysis only verified "can noise samples be told apart" (AUC/lift numbers), never whether "retraining after cleaning actually improves things."
 
-This section's experiment uses `cleaning_loop.py`'s `iforest` scorer. It is now one of three options (the others being `memo_signed` and the `pooled` scorer added in Section 13.5); it was chosen here because garbled is textbook outlier-type noise, so `iforest`'s "noise = outlier" assumption actually holds. Sections 6 and 12.5 show how that assumption fails on memorized noise and on a mixed stream respectively.
+This section's experiment uses `cleaning_loop.py`'s `iforest` scorer. It is now one of three options (the others being `memo_signed` and the `pooled` scorer added in Section 13.5); it was chosen here because garbled is textbook outlier-type noise, so `iforest`'s "noise = outlier" assumption actually holds. Sections 7 and 13.5 show how that assumption fails on memorized noise and on a mixed stream respectively.
 
 Using `garbled@ratio10` (14,611 training samples total, true noise fraction 9.999%) as the test case, a purely unsupervised IsolationForest (no noise labels used, 20-dimensional base trajectory features plus `text_nn_sim`, fit independently on the full dataset) scores and removes a 10% budget of samples:
 
