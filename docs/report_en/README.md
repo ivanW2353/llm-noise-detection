@@ -7,11 +7,12 @@
 
 This project studies one central question: **without using any noise labels, can training dynamics from LoRA fine-tuning alone (loss trajectories, gradient norms, cosine similarities) identify injected low-quality or anomalous training samples?**
 
-The three main conclusions:
+The four main conclusions:
 
 - **Detection capability depends strongly on the noise mechanism.** Garbled, template, and duplicate reach supervised AUC > 0.98, while keyword and near-duplicate reach only 0.577 and 0.674 — and the limitation for the latter is not a wrong choice of scorer but the absence of the signal from training dynamics (predicted in Section 5.2, confirmed in Section 6.11).
 - **A direction-reversal trap exists.** Memorized noise like template shows abnormally *low* loss and abnormally fast convergence, so generic outlier detection performs near chance on it (0.522); only a signed rule reaches 0.925 (Section 6.6).
-- **Ranking quality is not cleaning benefit.** On garbled, targeted removal achieved 5.7x random precision with zero downstream gain; on template, the correctly-directed scorer recovered 70% of the GSM8K gap while the wrongly-directed one was worse than not cleaning at all (Section 6.13).
+- **On the label-free route, 3 metrics beat 20** — on all 8 datasets, by 0.133 on average. Feeding IsolationForest all 20 features systematically handicaps it, and part of what looks like "direction reversal" is really dimensional dilution (Section 6.11.4).
+- **Cleaning pays off only when three conditions hold at once**: the noise genuinely harms downstream, the scorer points the right way, and the removal budget lands on the harmful portion. All three hold on template, which recovered 70% of the GSM8K gap; on mixed noise the best-ranking scorer (`pooled`) went *negative* downstream, because a quarter of its budget went to harmless types (Section 6.13).
 
 ## Chapters
 

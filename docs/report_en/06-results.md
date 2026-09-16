@@ -45,6 +45,7 @@ Section 6.3 already covers the pipeline and its commands; this subsection collec
 | `results/eval/eval_{tag}_{dataset}.json` | `evaluate` | 6.9, 6.13 |
 | `results/{tag}/feature_ablation.csv` | `scripts/feature_ablation.py` | 6.11.1-6.11.2 |
 | `results/{tag}/single_feature_ablation.csv` | `scripts/single_feature_ablation.py` | 6.11.3 |
+| `results/{tag}/minimal_feature_set.csv` | `scripts/minimal_feature_set.py` | 6.11.4 |
 | `results/{tag}/transfer_to_mixed.csv` | `scripts/transfer_to_mixed.py` | 6.12 |
 | `results/{tag}/pooled_scorer_compare.csv` | `scripts/pooled_scorer_compare.py` | 6.12.5 |
 | `data/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
@@ -423,9 +424,62 @@ This finding independently justifies Section 6.12.5's choice of max over mean fo
 
 **A previously unrecorded asymmetry: dropping `text_nn_sim` costs IF 7.8 points on template but costs RF only 0.1.** Template's IF AUC is only 0.537 to begin with (a consequence of direction reversal), and this 7.8-point drop shows that what little label-free signal it has leans heavily on the text-similarity dimension. RF, with labels, extracts 0.995 from the trajectory features alone and does not need `text_nn_sim` at all. This is the micro-level mechanism behind the 0.995 vs. 0.537 chasm between Section 6.2's "supervised = signal ceiling" and Section 6.6's "label-free = production-reachable": the signal genuinely is in the trajectory, but a label-free scorer cannot read its direction and falls back on whatever residual text-level cue remains.
 
-#### 6.11.4 Recommendations
+#### 6.11.4 Minimal feature set: on the label-free route, 3 metrics beat 20
 
-- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore (Section 6.11.4) — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed. (**Partly done**: the `pooled` scorer added in Section 6.12.5 wires `text_nn_sim`'s |z| in as its own leg, reaching per-type AUC 0.946 and 97.4% recall on duplicate within `mixed`. But `pooled` targets the unknown-composition case; a clean `text_nn_sim`-only option is still worth having for calibrated single-type use, where it is more precise.)
+Section 6.11.3's leave-one-out answers "what happens if I drop one," which is the wrong question for deciding **what to collect** — correlated features can each be individually removable while the group as a whole is essential, so twenty "individually useless" features may still be jointly necessary. Answering "what is the minimum" requires going the other way: start from nothing and greedily add whichever feature most improves AUC, recording the whole path. The k-th point is then the best achievable score using k metrics. Script: `scripts/minimal_feature_set.py`, output `results/ratio10/minimal_feature_set.csv`.
+
+**Framing first**: the greedy selection uses the same labels it is scored on, so the AUC at a given k is **optimistic**. This measures how much signal a small set *can* carry, not a label-free recipe for choosing one — Section 3.1 forbids using labels to pick features. The honest reading is "if you already knew the noise type, this is the floor on collection cost." The IF column reports `auc_dir = max(auc, 1-auc)`, because a label-free outlier score at 0.02 is not useless but inverted (Section 6.6).
+
+![Minimal feature set: AUC along a greedy forward-selection path](../../results/charts/en/minimal_feature_set.png)
+
+**Finding 1 (the most important here): on the label-free route, 3 metrics beat all 20 — on all 8 datasets, with a mean gain of 0.133.**
+
+| Dataset | IF with 3 metrics | IF with all 20 | Difference |
+|---|---|---|---|
+| template | **0.875** | 0.537 | **+0.338** |
+| duplicate | **0.744** | 0.528 | **+0.216** |
+| unrelated | **0.840** | 0.641 | **+0.199** |
+| mixed | **0.791** | 0.706 | **+0.085** |
+| keyword | 0.665 | 0.589 | +0.076 |
+| truncation | 0.650 | 0.580 | +0.070 |
+| garbled | **0.977** | 0.932 | +0.046 |
+| near_duplicate | 0.650 | 0.614 | +0.036 |
+
+This is not a marginal improvement but evidence that **the current production configuration (20 full-coverage features fed to IsolationForest) systematically handicaps itself**. Template jumps from a near-chance 0.537 to 0.875, duplicate from 0.528 to 0.744 — precisely the two types where Section 6.6's direction reversal is worst, which means part of "direction reversal" is really **dimensional dilution**: irrelevant dimensions flatten the outlier distance until the two or three that carry signal are drowned out. Section 6.11.3 found that dropping a single metric often helps IF; this is the upper bound of that effect.
+
+**Finding 2: on the RF route one metric reaches 95%, but squeezing out 99% takes 3-6.**
+
+| Dataset | All 20 | k for 95% | k for 99% |
+|---|---|---|---|
+| garbled | 0.996 | 1 | 3 |
+| duplicate | 0.984 | 1 | 6 |
+| template | 0.995 | 2 | 3 |
+| unrelated | 0.945 | 3 | 5 |
+| keyword | 0.672 | 1 | 5 |
+| mixed | 0.837 | 3 | 6 |
+| near_duplicate | 0.695 | 4 | 6 |
+| truncation | 0.784 | 4 | not reached |
+
+With labels, features are highly substitutable, so the first one or two absorb most of the signal; the remaining 1-5 points accrue slowly across more dimensions. Truncation never reaches 99% by k=6 — the one type that genuinely needs a wide feature set.
+
+**Finding 3: the first feature chosen exposes each type's mechanism, and the two routes disagree.**
+
+| Dataset | RF picks first | IF picks first |
+|---|---|---|
+| duplicate | `text_nn_sim` | `grad_norm_cv` |
+| unrelated | `text_nn_sim` | `text_nn_sim` |
+| garbled / template / mixed | `loss_curvature` | `loss_curvature` / `loss_min` / `loss_curvature` |
+| keyword / near_duplicate | `converge_epoch` | `converge_epoch` |
+| truncation | `converge_epoch` | `loss_slope` |
+
+`loss_slope` appears in 5 of the 8 k=3 sets, making it the most broadly useful single metric; `text_nn_sim` and `converge_epoch` appear 3 times each. The routes diverge most on duplicate: RF goes straight for `text_nn_sim` (with labels, it knows "resembles another sample" is the thing to look at), while IF picks `grad_norm_cv` first, because without labels it has no way to know similarity is the suspicious direction and must find anomalies in gradient variability instead.
+
+**Practical implication**: with a known, calibrated noise type, label-free scoring **should use 2-3 metrics rather than 20** — higher precision and cheaper collection. But *which* 2-3 depends on the noise type (every row above differs), and not knowing the type is the premise of the label-free setting — back to the structural difficulty in Section 5.3. The `pooled` scorer still feeds all 20 full-coverage features to its iforest leg, so that leg carries 0.04-0.34 of unrealized headroom; this is an explicit next step (Section 7.3).
+
+#### 6.11.5 Recommendations
+
+- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed. (**Partly done**: the `pooled` scorer added in Section 6.12.5 wires `text_nn_sim`'s |z| in as its own leg, reaching per-type AUC 0.946 and 97.4% recall on duplicate within `mixed`. But `pooled` targets the unknown-composition case; a clean `text_nn_sim`-only option is still worth having for calibrated single-type use, where it is more precise.)
+- **High priority**: narrow the `iforest` leg from 20 features to 2-3 (Section 6.11.4) — the only change that buys 0.04-0.34 with no new data, no new method, just feeding it fewer features.
 - **Not worth investing in right now**: improving near_duplicate/keyword requires new features rather than a new scoring method, which is a substantially larger scope of work — for now this is recorded as a known limitation (folded into Section 7.2), to be revisited only once there's clear downstream-benefit evidence (analogous to Section 6.9's verification for template).
 
 ---
@@ -531,6 +585,8 @@ Measured on `mixed` under a 10% budget (`scripts/pooled_scorer_compare.py`, outp
 | `memo_signed` | 0.380 | 0.128 | 1.52× | 5 |
 | Random | 0.500 | 0.084 | 1.00× | — |
 
+(The lift denominator is the true-noise fraction among the 1482 samples **actually** removed at random, 8.43%, taken from `metadata.json`'s `random_precision` — the same basis as Section 6.13.3. Using the full-dataset theoretical noise rate of 9.45% instead gives 3.42× / 2.84× / 2.70× / 1.36×: same ordering, slightly lower absolute values.)
+
 Per-type AUC (that type vs. clean):
 
 | Type | `iforest` | `memo_signed` | `text_nn_sim` \|z\| | `pooled` |
@@ -631,5 +687,46 @@ Template also offers a control that garbled could not: it is memorized noise, so
 **Key finding 3: removal precision did predict downstream gain here, but only within a single noise type.** Precision 53.11% → downstream +0.0096; 9.24% (random) → -0.0046; 4.04% → -0.0102 — monotone across all three. But this does not overturn Section 6.13.1's garbled conclusion: garbled's 52.1% precision was equally high and yielded no gain. **Precision converts into benefit only given that the noise type is genuinely harmful downstream** — precision decides whether the noise can be singled out, while the noise's own harmfulness decides whether singling it out is worth anything. Both conditions must hold; that is the complete conclusion the two experiment groups give jointly.
 
 **Methodological implication:** the critical decision in label-free cleaning is not "whether to clean" but "whether the scorer points the right way" — and that direction is precisely what unlabeled data cannot reveal (all of Section 6.12 is about this difficulty). On template, `memo_signed` vs. `iforest` is a 0.5231 vs. 0.4193 spread on identical data, budget, and training configuration, decided solely by which scorer was picked. This is the direct motivation for pooling three legs into `pooled` in Section 6.12.5: when the noise composition is unknown, it is better to accept a lower precision ceiling than to risk getting the direction backwards.
+
+#### 6.13.3 The `pooled` closed loop on mixed noise: best ranking quality, negative downstream gain
+
+Sections 6.13.1 and 6.13.2 both assume the noise type is known. Production does not grant that premise, so this subsection runs Section 6.12.5's `pooled` scorer through a full closed loop on `mixed`: `n_total = 14819`, `n_drop = 1482` (10% budget), `n_keep = 13337`, `seed = 42`, with the targeted and equal-size random arms each trained for 5 epochs.
+
+Ranking quality is the best of the three scorers: **targeted precision 32.32% against a random control of 8.43%, a lift of 3.83x** (`iforest` alone reaches 26.79%, `memo_signed` only 12.82%).
+
+| benchmark | n | Clean | Unclean<br>(mixed) | Random | Targeted<br>`pooled` | pooled − random |
+|---|---|---|---|---|---|---|
+| mmlu | 14042 | 0.6332 | 0.6321 | 0.6349 | 0.6303 | -0.0046 |
+| gsm8k | 1319 | 0.5497 | 0.5345 | 0.5534 | 0.5155 | **-0.0379** |
+| hellaswag | 10042 | 0.2770 | 0.2740 | 0.2710 | 0.2711 | +0.0001 |
+| arc | 1172 | 0.8046 | 0.8046 | 0.8029 | 0.7927 | -0.0102 |
+| bbh | 540 | 0.0926 | 0.0741 | 0.0944 | 0.0778 | -0.0166 |
+| truthfulqa | 817 | 0.1787 | 0.1909 | 0.1775 | 0.1848 | +0.0073 |
+| winogrande | 1267 | 0.5367 | 0.5627 | 0.5470 | 0.5517 | +0.0047 |
+| **7-benchmark mean** | — | **0.4389** | **0.4390** | **0.4402** | **0.4320** | **-0.0082** |
+
+**This is a negative result, and it points the opposite way from Section 6.13.2.** `pooled`'s 3.83x lift is the highest in any experiment here, yet downstream it lands 0.0082 below equal-size random removal and 0.0070 below not cleaning at all. GSM8K makes it starkest: random removal's 0.5534 is the best of the four, while `pooled` reaches only 0.5155.
+
+Three explanations, which are where this negative result earns its place:
+
+**First, `mixed`'s uncleaned baseline is already no worse than the clean baseline** (0.4390 vs. 0.4389). Each of the 7 subtypes contributes about 1.4%, and the only one that genuinely harms downstream performance is the 206 template rows (1.4% of the total). By Section 6.13.1's lesson — harmless noise yields no cleaning benefit — `mixed` as a whole is in exactly that regime, so a 10% data loss buys nothing back.
+
+**Second, the removal budget is consumed by the most conspicuous types, which happen to be the harmless ones.** Converting `pooled`'s per-type P@10% (`results/ratio10/pooled_scorer_compare.csv`) into where the 1482 removal slots actually go:
+
+| Type | Per-type P@10% | Approx. slots | Downstream harm |
+|---|---|---|---|
+| duplicate | 0.1367 | ~203 | near zero |
+| garbled | 0.1095 | ~162 | near zero (measured in 6.13.1) |
+| unrelated | 0.0712 | ~106 | not measured separately |
+| truncation | 0.0279 | ~41 | not measured separately |
+| **template** | **0.0228** | **~34** | **the only genuinely harmful type (GSM8K −8.95 pts)** |
+| keyword | 0.0235 | ~35 | not measured separately |
+| near_duplicate | 0.0191 | ~28 | not measured separately |
+
+Duplicate and garbled together take 365 slots — about a quarter of the budget — and neither does meaningful downstream harm, while genuinely harmful template gets roughly 34 slots, 2.3% of the budget. **High ranking quality, wrong priority order**: precision measures whether what was removed is noise, not whether what was removed is *harmful* noise. Outlier magnitude and downstream harm are nearly uncorrelated in this data, and `pooled` ranks by the former.
+
+**Third, this exposes a fundamental limit of P@10% as a selection metric.** The three scorers' lifts on `mixed` rank `pooled` (3.83x) > `iforest` (3.18x) > `memo_signed` (1.52x), and downstream gain bears no relation to that order. Taken together, the three closed loops in this chapter give a complete criterion: **cleaning pays off only when all three hold — the noise genuinely harms downstream (6.13.1), the scorer points the right way (6.13.2), and the removal budget lands on the harmful portion of the noise (this section)**. The first two were already known; the third is specific to mixed noise and only visible once the chain reaches downstream evaluation.
+
+It also sharpens Section 6.12.5's verdict that "`pooled` trades precision for coverage": on a mixed stream that coverage did not convert into benefit, because coverage itself is not weighted by harm. Harm-weighted removal — as opposed to anomaly-weighted — is listed as a next step in Section 7.3.
 
 ---

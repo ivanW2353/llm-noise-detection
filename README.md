@@ -21,8 +21,11 @@
   排到最干净的一端。用错方向的清洗精度（4.0%）比随机剔除（9.2%）还差。
 - **检测器是"窄"，不是"垮"**：单类型检测器拉到混合噪音流上整体 AUC 掉到 0.563-0.730，但限定
   "自己那一类 vs 干净"后保持率 0.96-1.23——是覆盖缺口，不是分布失效。
-- **清洗精度高不等于下游变好**：garbled 上定向剔除精度达随机的 5.7 倍，但重训后下游没有提升，
-  因为 garbled 本身下游危害接近零。清洗的收益取决于噪音是否真的有害。
+- **清洗有收益需要三个条件同时成立**：噪音确有下游危害、打分器方向正确、且剔除预算落在有害的那部分
+  噪音上。模板化上三条齐备，回收了 GSM8K 缺口的 70%；garbled 上精度达随机 5.7 倍却零收益（本身无害）；
+  混合噪音上排序最好的 `pooled` 下游反而为负，因为约四分之一预算花在了无害的 duplicate/garbled 上。
+- **免标签路线上 3 个指标胜过 20 个**，8 个数据集无一例外，平均高 0.133（template 0.537→0.875）。
+  当前把 20 个特征全喂给 IsolationForest 在系统性自我拖累——"方向反转"有一部分其实是维度稀释。
 - **两类噪音的高 AUC 名不副实**：完全重复、话题不相关的检测信号 90% 以上来自静态文本相似度，
   不是训练动态。
 
@@ -54,6 +57,7 @@
 - `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 6.12.5 节。
 - `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 6.11.1-6.11.2 节。
 - `single_feature_ablation.py`：单指标留一消融，对 20 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 6.11.3 节。
+- `minimal_feature_set.py`：最小指标集合，贪心前向选择（从零开始逐个加入最有增益的特征）回答"最少需要哪几个指标"，留一消融回答不了这个问题 → `results/ratio10/minimal_feature_set.csv`，见报告 6.11.4 节。**主要发现：免标签路线上 3 个指标胜过 20 个，8/8 数据集无例外。**
 - `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
 
 编排脚本：
