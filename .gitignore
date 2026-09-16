@@ -9,6 +9,9 @@ __pycache__/
 # Directory-level rule covers the current save_pretrained() output path;
 # extension rules are defense-in-depth if that path ever changes.
 runs/**/lora/
+# Adapters may be relocated to the large volume with a symlink left behind
+# (see docs/storage.md); the trailing-slash rule above only matches directories.
+runs/**/lora
 *.safetensors
 *.ckpt
 *.pt
@@ -19,7 +22,16 @@ runs/**/lora/
 logs/
 layer_norms.jsonl
 
+# TensorBoard event files: write-only (model.py:223), never read by any
+# analysis, and a lossier encoding of what per_sample.jsonl already holds.
+# Filenames embed the container id and pid of the machine that produced them.
+runs/**/tb/
+
 # Orchestration shell scripts (run_full.sh etc.): operational tooling tied
 # to specific runs/tags, not part of the tracked codebase deliverable.
 /*.sh
 /scripts/
+
+# Datasets held on the large volume and reached through a symlink; the pointer
+# is machine-specific, and wild_data.py rebuilds the contents from OASST.
+data/wild_oasst
