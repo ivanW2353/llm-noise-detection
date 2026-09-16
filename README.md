@@ -7,10 +7,12 @@
 
 ## 结论与报告
 
-完整分析报告：[`docs/analysis_report_zh.md`](docs/analysis_report_zh.md)（英文版
-[`analysis_report_en.md`](docs/analysis_report_en.md)，两版结构与内容同步）。
+完整分析报告按章节分文件：[`docs/report_zh/`](docs/report_zh/README.md)（英文版
+[`docs/report_en/`](docs/report_en/README.md)，两版结构与内容同步）。报告结构为
+相关工作 → 实验前提 → 实验方案 → 理论分析 → 实验过程与结果 → 结论与 future work → 附录。
 
-想快速了解做了什么、怎么做的，看报告第 2 节（实验方案与执行步骤）；想知道结论，看第 15 节。
+想快速了解做了什么、怎么做的，看第 4 章（实验方案）；想知道为什么这么设计，看第 5 章（理论分析）；
+想直接看结论，看第 7 章。原始数据展示（噪音文本对照、单样本特征值、原始 loss 曲线）都在第 8 章附录。
 几个值得先知道的结果：
 
 - **检测难度因噪音类型差异极大**，且排序稳定：乱码/模板化/完全重复 AUC > 0.98，关键词替换/近似重复
@@ -48,10 +50,10 @@
 
 一次性分析脚本（产出纳入 git 跟踪的 CSV/PNG，脚本本身不跟踪）：
 
-- `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告第 13 节。
-- `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 13.5 节。
-- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 12.1-12.2 节。
-- `single_feature_ablation.py`：单指标留一消融，对 20 个全覆盖特征逐个删除，同时测 RF（有监督，第 3 节口径）和 IsolationForest（免标签，第 7 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 12.3 节。
+- `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告 6.12 节。
+- `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 6.12.5 节。
+- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 6.11.1-6.11.2 节。
+- `single_feature_ablation.py`：单指标留一消融，对 20 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 6.11.3 节。
 - `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
 
 编排脚本：
@@ -144,11 +146,11 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
 
 `pooled` 是"用精度换覆盖面"而非免费改进：`mixed` 上它的 P@10% 0.323 高于 `iforest` 的 0.268，
 但代价是 near_duplicate 略低于随机，且剔除预算会被最显著的类型（duplicate/garbled）占据。
-噪音类型已知且已校准时，单方法精度更高。详见报告 13.5 节。
+噪音类型已知且已校准时，单方法精度更高。详见报告 6.12.5 节。
 
 ## 派生实验数据
 
-闭环清洗实验的产物（报告第 14 节）：
+闭环清洗实验的产物（报告 6.13 节）：
 
 | 目录 | 内容 |
 |---|---|
