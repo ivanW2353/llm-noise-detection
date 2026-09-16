@@ -41,7 +41,7 @@ Around the "can training dynamics detect noise" question, 10 independent analyse
 
 - **Section 2 — experimental design**. The full execution path: dataset construction, LoRA fine-tuning with per-sample metric collection, metric aggregation, the protocol behind each analysis, and closed-loop cleaning with retraining — along with the command and output files for each step. Read this section to reproduce the work, or to check where a particular number came from.
 - **Sections 3-10 — methodological findings**. Each facet of detection capability, examined in turn: within-domain detection difficulty, cross-type transfer, cross-ratio transfer, cleaning-precision lift, the direction-reversal trap, early detection, feature attribution, and actual downstream impact.
-- **Sections 11-13 — synthesis and boundaries**. The scattered findings above are consolidated into "which method to use for which noise type, and what raw data it depends on" (Section 11), a feature-ablation experiment upgrades the "is all that data actually necessary" judgment from qualitative attribution to quantitative evidence (Section 12), and then the premise the earlier sections rest on — that the noise type is known — is dismantled by testing mixed noise streams and entirely unseen noise types (Section 13).
+- **Sections 11-13 — synthesis and boundaries**. The scattered findings above are consolidated into "which method to use for which noise type, and what raw data it depends on" (Section 11), two layers of feature ablation — category-level and single-metric — upgrade the "is all that data necessary, and which metric is irreplaceable" judgment from qualitative attribution to quantitative evidence (Section 12), and then the premise the earlier sections rest on — that the noise type is known — is dismantled by testing mixed noise streams and entirely unseen noise types (Section 13).
 - **Section 14 — production application**. The validated methods are put to work in label-free closed-loop cleaning, advancing from "can score and rank" to "actually remove and retrain" — the only group of experiments in the report that produces a real downstream comparison: a negative result on garbled ("high precision, zero gain," Section 14.1), a positive gain on template ("recovers 70% of the GSM8K gap"), and the control showing that picking the wrong scorer direction is worse than not cleaning at all (Section 14.2).
 
 Section 15 summarizes conclusions and limitations; Section 16 is the appendix (precise definitions, coverage, and collection timing for every metric).
@@ -505,7 +505,7 @@ This table reveals a real effect the "mean of 7" number masks: **on GSM8K, templ
 
 ## 11. Best Screening Method per Noise Type, at a Glance
 
-Sections 2-10 separately covered each noise type's detection difficulty, feature attribution, and the direction-reversal issue, but never assembled "which method should be used for which type, what raw data it relies on, and whether that data is actually necessary" in one place. This section summarizes the current state; Section 12 upgrades the "is it necessary" judgment from qualitative attribution ranking to quantitative ablation evidence.
+Sections 3-10 separately covered each noise type's detection difficulty, feature attribution, and the direction-reversal issue, but never assembled "which method should be used for which type, what raw data it relies on, and whether that data is actually necessary" in one place. This section summarizes the current state; Section 12 upgrades the "is it necessary" judgment from qualitative attribution ranking to quantitative ablation evidence.
 
 **The mixed row differs in kind from the rest**: the other 7 rows assume the noise type is known and the method calibrated for it, while the mixed row is the "composition unknown" case. Section 13 is devoted to where the method breaks down in that case, and Section 13.5 reports what the three-leg pooled scorer actually costs.
 
@@ -524,7 +524,7 @@ One framing caveat first: the AUC numbers reported in Sections 3-10 (`unsupervis
 
 ---
 
-## 12. Feature Ablation: Is `text_nn_sim` Being Diluted? What Would Token Diagnostics Actually Buy?
+## 12. Feature Ablation: Which Data Is Necessary, and Which Metric Is Irreplaceable?
 
 ### 12.1 Motivation and Design
 
@@ -536,7 +536,7 @@ Five ablation conditions:
 
 | Condition | Feature scope | Usable by `cleaning_loop.py` today? |
 |---|---|---|
-| `full_diag` | All numeric columns (including token diagnostics, `cos_global_*`) | No — this is exactly the `unsupervised.csv` result cited in Sections 2-10 |
+| `full_diag` | All numeric columns (including token diagnostics, `cos_global_*`) | No — this is exactly the `unsupervised.csv` result cited in Sections 3-10 |
 | `full_coverage` | The 20 full-coverage features (Sections 16.1 and 16.3; what `cleaning_loop.py` actually uses in production) | **Yes — current production choice** |
 | `no_text` | `full_coverage` minus `text_nn_sim` (19 features) | Yes |
 | `text_only` | `text_nn_sim` alone | Yes |
@@ -554,9 +554,58 @@ Three quantitative findings:
 2. **Template's high detectability comes from two independent signals stacked together, not memorization alone.** `text_nn_sim` alone reaches AUC 0.805 on template — templated noise reuses a small set of fixed templates, which naturally produces high textual similarity, an entirely separate clue from the "memorized / anomalously fast convergence" signal that memo_signed captures. The current memo_signed approach (0.925) is already good enough on its own; this finding mainly explains *why* template is so detectable, rather than suggesting a new improvement.
 3. **near_duplicate and keyword are a genuine methodological blind spot, not a wrong choice of scoring method.** For near_duplicate, even adding the production-unavailable token diagnostics only gets AUC to 0.641. For keyword, all three conditions land between 0.50 and 0.59 — `text_nn_sim` (0.531) and token diagnostics (0.514) perform similarly and both weakly. This means none of the currently collected raw data categories are sufficient for these two "light, local perturbation" noise types; no recombination of existing signals fixes this — it needs a purpose-built feature (e.g., per-token local-substitution detection, rather than whole-text or whole-trajectory statistics).
 
-### 12.3 Recommendations
+### 12.3 Single-feature leave-one-out: which metric is genuinely irreplaceable?
 
-- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed. (**Partly done**: the `pooled` scorer added in Section 13.5 wires `text_nn_sim`'s |z| in as its own leg, reaching per-type AUC 0.946 and 97.4% recall on duplicate within `mixed`. But `pooled` targets the unknown-composition case; a clean `text_nn_sim`-only option is still worth having for calibrated single-type use, where it is more precise.)
+The ablation in 12.1-12.2 is **category-level** (the whole token-diagnostic group, the whole trajectory group, `text_nn_sim` on its own), which answers "is this class of data worth collecting." It cannot answer a different question: within the 20 full-coverage features, what happens if you **drop them one at a time**? Which ones actually carry signal, and which are just along for the ride?
+
+This has to be asked separately on the two detection routes, because their sensitivity to "one fewer dimension" works by entirely different mechanisms:
+
+- **The RF route** (supervised, Section 3's protocol): out-of-fold AUC from `StratifiedKFold(5)` + `RandomForestClassifier(200)` — the same construction that populates the diagonal of `cross_type.csv`.
+- **The IF route** (label-free, Section 7's protocol): per-dataset `IsolationForest(300)` AUC on standardized features — the `iforest` row of `unsupervised.csv`.
+
+Both routes run over the **same features and the same samples** (the diagnostic-subsample population), so an RF Δ and an IF Δ for the same metric are directly comparable. Script: `scripts/single_feature_ablation.py`, output `results/ratio10/single_feature_ablation.csv` (336 rows = 8 datasets × 21 conditions × 2 routes). Convention: **Δ = ablated AUC − full AUC**; negative means dropping it hurt (the feature was carrying signal), positive means dropping it helped (the feature was diluting the score).
+
+![Single-feature leave-one-out: RF and IF differ completely in their sensitivity to one fewer dimension](../results/charts/en/single_feature_ablation.png)
+
+**Finding 1: `text_nn_sim` is the only irreplaceable metric; dropping any of the other 19 individually is inconsequential.**
+
+| Dataset | IF full AUC | IF drop `text_nn_sim` | RF full AUC | RF drop `text_nn_sim` |
+|---|---|---|---|---|
+| duplicate | 0.528 | **-0.092** | 0.984 | -0.049 |
+| template | 0.537 | **-0.078** | 0.995 | -0.001 |
+| unrelated | 0.641 | **-0.070** | 0.945 | **-0.087** |
+| mixed | 0.706 | **-0.056** | 0.837 | **-0.060** |
+| near_duplicate | 0.614 | -0.007 | 0.695 | -0.012 |
+| truncation | 0.580 | +0.005 | 0.784 | -0.005 |
+| keyword | 0.589 | +0.005 | 0.672 | -0.002 |
+| garbled | 0.932 | +0.008 | 0.996 | -0.001 |
+
+It is the only feature that costs 0.05-0.09 on *both* routes, and the loss concentrates on duplicate/unrelated/mixed — exactly the types Section 9's attribution analysis found draw over 90% of their signal from static text similarity. Two independent methods agreeing. On garbled, dropping it actually helps slightly (+0.008): garbled's signal lives entirely in the training trajectory, so the text-similarity dimension is pure noise for it.
+
+**Finding 2: on the RF route no single metric is load-bearing — all 152 cells have |Δ| below 0.01.**
+
+Excluding `text_nn_sim`, **not one** of RF's 152 "dataset × dropped metric" cells exceeds |Δ| = 0.01; the mean |Δ| is just 0.0017, with a maximum of 0.0077 (near_duplicate dropping `grad_norm_std`). The reason is that these 20 trajectory features are highly correlated — `loss_mean`/`loss_last`/`loss_min`/`loss_rank` all describe different facets of the same loss curve. With labels to guide it, RF simply learns to substitute a correlated stand-in; the signal routes back in through another dimension. **Practical implication: to cut feature-collection cost for a supervised production detector, any single trajectory feature can be dropped safely — but `text_nn_sim` cannot.**
+
+**Finding 3: on the IF route "more features is better" is false — dropping a metric often raises AUC.**
+
+Across the same 152 cells excluding `text_nn_sim`, **43** have |Δ| > 0.01 (RF has zero), with mean |Δ| = 0.0088 — 5x RF's. The crucial part is that the sign goes **both ways**:
+
+| Dataset | Largest gain from dropping | Δ | Largest loss from dropping | Δ |
+|---|---|---|---|---|
+| template | `converge_epoch` | **+0.052** | `loss_slope` | -0.036 |
+| duplicate | `cos_ref_mean` | **+0.033** | `grad_norm_cv` | -0.038 |
+| unrelated | `loss_mean` | **+0.027** | `cos_ref_slope` | -0.016 |
+| near_duplicate | (all negative) | -0.002 | `converge_epoch` | -0.021 |
+
+The same `converge_epoch`: dropping it gains 5.2 points on template and 2.9 on duplicate, but loses 2.1 on near_duplicate. IF has no labels, so every dimension enters the outlier-distance computation indiscriminately, meaning **dimensions irrelevant to the current noise type purely dilute the signal**. Which dimensions count as "irrelevant" depends on the noise type — and the noise type is precisely what a label-free setting does not know. That is why one cannot simply "pick a better feature subset for IF."
+
+This finding independently justifies Section 13.5's choice of max over mean for the `pooled` scorer: if irrelevant dimensions dilute rather than cancel out, averaging three legs lets two silent legs bury the one that actually fired, and only max preserves the signal.
+
+**A previously unrecorded asymmetry: dropping `text_nn_sim` costs IF 7.8 points on template but costs RF only 0.1.** Template's IF AUC is only 0.537 to begin with (a consequence of direction reversal), and this 7.8-point drop shows that what little label-free signal it has leans heavily on the text-similarity dimension. RF, with labels, extracts 0.995 from the trajectory features alone and does not need `text_nn_sim` at all. This is the micro-level mechanism behind the 0.995 vs. 0.537 chasm between Section 3's "supervised = signal ceiling" and Section 7's "label-free = production-reachable": the signal genuinely is in the trajectory, but a label-free scorer cannot read its direction and falls back on whatever residual text-level cue remains.
+
+### 12.4 Recommendations
+
+- **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore (Section 12.4) — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed. (**Partly done**: the `pooled` scorer added in Section 13.5 wires `text_nn_sim`'s |z| in as its own leg, reaching per-type AUC 0.946 and 97.4% recall on duplicate within `mixed`. But `pooled` targets the unknown-composition case; a clean `text_nn_sim`-only option is still worth having for calibrated single-type use, where it is more precise.)
 - **Not worth investing in right now**: improving near_duplicate/keyword requires new features rather than a new scoring method, which is a substantially larger scope of work — for now this is recorded as a known limitation (folded into Section 15.2), to be revisited only once there's clear downstream-benefit evidence (analogous to Section 10's verification for template).
 
 ---
@@ -771,13 +820,15 @@ Template also offers a control that garbled could not: it is memorized noise, so
 2. **Cross-type transfer loses substantial ground (~17-20 points), cross-ratio transfer is nearly lossless**: a detector needs separate calibration per noise type, but not per noise ratio.
 3. **AUC overstates cleaning usefulness**: duplicate has AUC as high as 0.986 but P@10% lift < 1 — choosing a cleaning method requires looking at precision under a realistic budget, not just AUC.
 4. **The direction-reversal trap is a real methodological pitfall**: "hyper-typical/memorized" noise like template needs a signed prior rule (not generic outlier detection) to be caught, and this same pitfall reappears along the early-detection time axis.
-5. **Two types' high AUC is not what it appears**: over 90% of the detection signal for duplicate and unrelated comes from a static text-similarity feature, not training dynamics — these two types cannot be cited as evidence that the "training-dynamics detection" methodology works.
-6. **Real downstream harm is limited but present**: the spread across the 7 general benchmarks is small, but template at ratio10 is genuinely the worst-performing dataset downstream — the only type where "easy to detect" and "actually harmful" both hold.
-7. **Label-free closed-loop cleaning works, but only when the noise is genuinely harmful *and* the scorer points the right way**: on garbled, targeted removal reached 5.7x random precision yet produced no downstream gain (garbled is nearly harmless to begin with); switching to template, which is genuinely harmful, `memo_signed` cleaning recovered 70.3% of the 8.95-point GSM8K gap and 74.4% of the 7-benchmark mean gap — the only positive downstream cleaning gain in the whole report.
+5. **Two types' high AUC is not what it appears**: over 90% of the detection signal for duplicate and unrelated comes from a static text-similarity feature, not training dynamics — these two types cannot be cited as evidence that the "training-dynamics detection" methodology works. The single-feature leave-one-out ablation confirms this independently: `text_nn_sim` is the only metric irreplaceable on both routes (dropping it costs duplicate/unrelated/mixed 0.056-0.092), while dropping any of the other 19 trajectory features individually keeps RF's |Δ| below 0.01 across the board (Section 12.3).
 
-8. **When the scorer direction is wrong, cleaning is worse than not cleaning and worse than random removal**: on template, `iforest` (wrong direction) reached only 4.04% targeted precision, less than half of random removal's 9.24%, and after retraining GSM8K fell to 0.4193 — 4.09 points below the uncleaned baseline. The full chain reads "right direction 0.5231 > no cleaning 0.4602 > random removal 0.4526 > wrong direction 0.4193," i.e. cleaning in the wrong direction does active negative work (Section 14.2).
+6. **On the label-free route, "more features is better" is false**: 43 of 152 IF cells see AUC *rise* after dropping one metric (RF: zero), and the same `converge_epoch` gains 5.2 points when dropped on template but loses 2.1 on near_duplicate. Without labels every dimension enters the outlier distance indiscriminately, so dimensions irrelevant to the current noise type purely dilute the signal — and which ones are irrelevant depends on the very noise type that is unknown. This independently justifies `pooled` taking a max rather than a mean (Section 12.3).
+7. **Real downstream harm is limited but present**: the spread across the 7 general benchmarks is small, but template at ratio10 is genuinely the worst-performing dataset downstream — the only type where "easy to detect" and "actually harmful" both hold.
+8. **Label-free closed-loop cleaning works, but only when the noise is genuinely harmful *and* the scorer points the right way**: on garbled, targeted removal reached 5.7x random precision yet produced no downstream gain (garbled is nearly harmless to begin with); switching to template, which is genuinely harmful, `memo_signed` cleaning recovered 70.3% of the 8.95-point GSM8K gap and 74.4% of the 7-benchmark mean gap — the only positive downstream cleaning gain in the whole report.
 
-9. **Detectors are narrow, not broken, and unknown noise needs both legs pooled**: taking a single-type detector to a mixed noise stream drops overall AUC to 0.563-0.730, but restricting to "own type vs. clean" gives retention of 0.96-1.23 with no meaningful degradation — a coverage gap, not a population-shift failure. On genuinely unseen types (leave-one-out), the training-dynamics detector pool spans AUC 0.416-0.935 and `text_nn_sim` spans 0.396-0.974; they are complementary and each has types below random, so only pooling and taking the better score puts all 7 types above 0.66 (Section 13).
+9. **When the scorer direction is wrong, cleaning is worse than not cleaning and worse than random removal**: on template, `iforest` (wrong direction) reached only 4.04% targeted precision, less than half of random removal's 9.24%, and after retraining GSM8K fell to 0.4193 — 4.09 points below the uncleaned baseline. The full chain reads "right direction 0.5231 > no cleaning 0.4602 > random removal 0.4526 > wrong direction 0.4193," i.e. cleaning in the wrong direction does active negative work (Section 14.2).
+
+10. **Detectors are narrow, not broken, and unknown noise needs both legs pooled**: taking a single-type detector to a mixed noise stream drops overall AUC to 0.563-0.730, but restricting to "own type vs. clean" gives retention of 0.96-1.23 with no meaningful degradation — a coverage gap, not a population-shift failure. On genuinely unseen types (leave-one-out), the training-dynamics detector pool spans AUC 0.416-0.935 and `text_nn_sim` spans 0.396-0.974; they are complementary and each has types below random, so only pooling and taking the better score puts all 7 types above 0.66 (Section 13).
 
 ### 15.2 Limitations
 
@@ -785,13 +836,13 @@ Template also offers a control that garbled could not: it is memorized noise, so
 - The closed-loop cleaning experiment has so far been validated only on two single noise types at a single ratio (`garbled@ratio10` and `template@ratio10`); it has not been extended to the harder-to-detect keyword and near-duplicate types, nor has a full closed loop been run on the `mixed` scenario (Section 13.5 goes only as far as score-and-rank). The +0.0096 downstream gain on template comes from a single training run at a single seed, with no repeats to estimate variance; the direction of the conclusion (right direction > no cleaning > random > wrong direction) is more reliable than the specific magnitudes.
 - The finding that `text_nn_sim` dominates duplicate/unrelated detection means the core "training-dynamics detection" methodology currently has substantive support only for types like garbled, template, truncation, and keyword — this should be stated carefully to avoid over-generalizing the claim.
 - The "unseen noise types" in Section 13 are still among the 7 we injected ourselves, merely unseen by the detector pool; genuinely wild noise (mis-pasted content, encoding errors, cross-language contamination, machine-translation artifacts) may differ from these 7 in both text distribution and training dynamics, so the 0.416-0.935 range from leave-one-out cannot be extrapolated to wild data directly.
-- The ablation in Sections 11/12 confirms that `cleaning_loop.py`'s current "20-feature mixed iforest" approach for duplicate/unrelated is being diluted by weak features other than `text_nn_sim` — scoring on `text_nn_sim` alone is more precise. near_duplicate/keyword, by contrast, are a genuine methodological blind spot with the current raw data categories, not a case of picking the wrong scoring method.
+- The ablation in Sections 11 and 12 confirms that `cleaning_loop.py`'s current "20-feature mixed iforest" approach for duplicate/unrelated is being diluted by weak features other than `text_nn_sim` — scoring on `text_nn_sim` alone is more precise. near_duplicate/keyword, by contrast, are a genuine methodological blind spot with the current raw data categories, not a case of picking the wrong scoring method. Section 12.3's single-feature leave-one-out runs on the diagnostic-subsample population (~900-1200 rows per dataset), which is small enough that individual cells with Δ on the order of 0.01-0.02 should not be read one by one; what is reliable is the aggregate contrast — RF stays below 0.01 everywhere while IF exceeds it in 43 cells.
 
 ### 15.3 Next Steps
 
 - Extend closed-loop cleaning to the remaining noise types, in particular checking whether cleaning the duplicate type (whose P@10% lift is < 1) is actually harmful rather than helpful.
 - Repeat the template closed loop (Section 14.2) across multiple seeds to attach a variance estimate to the +0.0096 mean gain and the +0.0629 GSM8K recovery — both currently rest on a single training run.
-- Add a `text_sim` scoring option to `cleaning_loop.py` for duplicate/unrelated (Section 12.3) — expected to be more precise than the current mixed-feature iforest, and needs no new data collection since `text_nn_sim` is already a full-coverage feature. Section 13.5's `pooled` already includes `text_nn_sim` as a leg and confirms its effect on duplicate (per-type AUC 0.946); what remains is a pure `text_sim` option, with no other legs mixed in, for calibrated single-type use.
+- Add a `text_sim` scoring option to `cleaning_loop.py` for duplicate/unrelated (Section 12.4) — expected to be more precise than the current mixed-feature iforest, and needs no new data collection since `text_nn_sim` is already a full-coverage feature. Section 13.5's `pooled` already includes `text_nn_sim` as a leg and confirms its effect on duplicate (per-type AUC 0.946); what remains is a pure `text_sim` option, with no other legs mixed in, for calibrated single-type use.
 - Explore dedicated features for "light perturbation" noise types like keyword and near-duplicate, for which the current combination of training-dynamics and text-similarity features carries very weak signal (Section 12 confirms this holds even after adding production-unavailable token diagnostics).
 - **The scorer is wired in (Section 13.5's `pooled`); the closed-loop retrain is not yet run**: remove at a 10% budget on `mixed`, retrain, and evaluate downstream to check whether P@10% = 0.323 ranking quality converts into a downstream gain. This is currently the only experimental design that faces the fact that production dirty data is mixed, and the only way to answer whether cleaning mixed noise is worth it at all — Sections 14.1 and 14.2 together show ranking quality converts into a downstream gain only given both "the noise is genuinely harmful" and "the scorer direction is right," neither of which is verified on `mixed`.
 - Validate Section 13's conclusions on real wild noise rather than our 7 injected types — the missing step before extrapolating leave-one-out results to production.

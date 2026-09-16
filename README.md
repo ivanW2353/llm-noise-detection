@@ -50,7 +50,8 @@
 
 - `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告第 13 节。
 - `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 13.5 节。
-- `feature_ablation.py`：特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告第 12 节。
+- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 12.1-12.2 节。
+- `single_feature_ablation.py`：单指标留一消融，对 20 个全覆盖特征逐个删除，同时测 RF（有监督，第 3 节口径）和 IsolationForest（免标签，第 7 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 12.3 节。
 - `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
 
 编排脚本：
