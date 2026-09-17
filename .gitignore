@@ -22,6 +22,10 @@ runs/**/lora
 logs/
 layer_norms.jsonl
 
+# Smoke-test output: `train --smoke` writes here (train.py:5), 64 samples and
+# 8 steps just to prove the wiring works. Never an experimental result.
+runs/*/_smoke/
+
 # Per-question eval records: written by evaluate.py:368 and read by nothing.
 # The aggregate accuracies the report actually cites live in eval_{tag}_{ds}.json,
 # a few hundred KB against ~100MB for these.
@@ -39,4 +43,4 @@ runs/**/tb/
 
 # Datasets held on the large volume and reached through a symlink; the pointer
 # is machine-specific, and wild_data.py rebuilds the contents from OASST.
-data/wild_oasst
+data/wild_all
