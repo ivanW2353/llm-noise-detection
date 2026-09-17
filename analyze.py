@@ -56,7 +56,6 @@ def _load_run_metrics(metrics_dir, max_epoch=None):
             out['loss_curvature']=coeffs[:,0]; out['loss_rank']=m.rank(pct=True).mean(axis=1)
     if 'grad_norm_mean' in out and out['grad_norm_mean'].notna().any():
         out['grad_norm_cv']=out['grad_norm_std']/out['grad_norm_mean'].replace(0,np.nan)
-    if 'cos_ref_mean' in out: out['cos_ref_trend']=out['cos_ref_slope']
     if 'update_contrib' in df:
         out['update_contrib_mean']=df[df['update_contrib'].notna()].groupby('sample_id')['update_contrib'].mean()
     diag_files=[f for f in sorted(metrics_dir.glob('diag_epoch*.jsonl')) if max_epoch is None or int(f.stem.split('epoch')[-1])<=max_epoch]
@@ -113,7 +112,12 @@ def build_table(root, tag, datasets=None, max_epoch=None):
     import textsim
     root=Path(root); run_base=root/'runs'/tag; data_base=root/'data'/tag
     if datasets is None:
-        datasets=sorted(p.parent.name for p in run_base.glob('*/summary.json'))
+        # Only runs with a matching data/{tag}/{ds}/train.jsonl: cleaning-loop
+        # retrains were fed via --train-file, so they have trajectories but no
+        # label file of their own, and their noise labels live in the set they
+        # were built from.
+        datasets=sorted(p.parent.name for p in run_base.glob('*/summary.json')
+                        if (data_base/p.parent.name/'train.jsonl').exists())
     all_rows=[]
     for ds in datasets:
         metrics=_load_run_metrics(run_base/ds/'metrics', max_epoch)

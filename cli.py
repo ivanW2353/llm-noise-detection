@@ -40,6 +40,7 @@ def main(argv=None):
    if a.input: frame=pd.read_csv(a.input)
    else:
     frame=build_table(s.root,a.tag or s.tag,[a.dataset] if a.dataset else None)
+    s.results_dir().mkdir(parents=True,exist_ok=True)
     frame.to_csv(s.results_dir()/'per_sample_metrics.csv',index=False)
    features=[x for x in frame.columns if x not in ('sample_id','dataset','noise_type','category') and pd.api.types.is_numeric_dtype(frame[x])]; out=pd.DataFrame(summarize(frame,features))
   elif a.kind=='training': out=training_metrics(s.data_root,a.tag or s.tag)

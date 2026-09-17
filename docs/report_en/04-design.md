@@ -56,7 +56,7 @@ One record per sample per epoch lands in `runs/{tag}/{dataset}/metrics/per_sampl
 
 Two further **subsampled** outputs: `diag_epoch*.jsonl` (diagnostic-layer aggregates) and `token_diag_epoch*.jsonl` (the `[position, token_id, loss]` triples of each sample's 32 highest-loss tokens). Both are collected at `diag_subsample=8` — one in every 8 samples gets a pure forward diagnostic pass — giving roughly **12.5% coverage**.
 
-That coverage gap runs through the entire report and is the easiest trap when reading numbers: **13 of the 37 features have only 12.5% coverage**, and `dropna` requires all of them present, so any analysis using the full feature set actually runs on roughly 900-1,200 rows. Section 6.10 opens with an explanation of this framing difference, and Section 6.12 reports both views side by side: `full_diag` (37 features, ~919 rows) and `full_coverage` (20 features, all 14,819 rows).
+That coverage gap runs through the entire report and is the easiest trap when reading numbers: **13 of the 37 features have only 12.5% coverage**, and `dropna` requires all of them present, so any analysis using the full feature set actually runs on roughly 900-1,200 rows. Section 6.10 opens with an explanation of this framing difference, and Section 6.12 reports both views side by side: `full_diag` (37 features, ~919 rows) and `full_coverage` (19 features, all 14,819 rows).
 
 ### 4.4 Step (3): assembling the per-sample metric table
 
@@ -98,7 +98,7 @@ python3 cli.py evaluate --tag ratio10 --dataset cleaning_loop_targeted_template_
 
 The design decisions inside `cleaning_loop.py::build`:
 
-**Full-coverage features only.** Scoring targets the **entire training set**, not the diagnostic subsample — otherwise most real noise would never be a removal candidate and cleaning would be meaningless. The price is being restricted to the 20 features with no missing values in that dataset, excluding all token-level diagnostics and `cos_global_*`. This is the source of what Section 6.10 calls "reported AUC and production precision don't always agree".
+**Full-coverage features only.** Scoring targets the **entire training set**, not the diagnostic subsample — otherwise most real noise would never be a removal candidate and cleaning would be meaningless. The price is being restricted to the 19 features with no missing values in that dataset, excluding all token-level diagnostics and `cos_global_*`. This is the source of what Section 6.10 calls "reported AUC and production precision don't always agree".
 
 **Three scorers, one per noise assumption** (detailed in Sections 6.6 and 6.12.5): `iforest` (noise = outlier, undirected), `memo_signed` (noise = abnormally easy to learn, fixed negative sign), and `pooled` (three legs standardized and combined by per-sample max, for unknown composition).
 

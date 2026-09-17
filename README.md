@@ -24,8 +24,8 @@
 - **清洗有收益需要三个条件同时成立**：噪音确有下游危害、打分器方向正确、且剔除预算落在有害的那部分
   噪音上。模板化上三条齐备，回收了 GSM8K 缺口的 70%；garbled 上精度达随机 5.7 倍却零收益（本身无害）；
   混合噪音上排序最好的 `pooled` 下游反而为负，因为约四分之一预算花在了无害的 duplicate/garbled 上。
-- **免标签路线上 3 个指标胜过 20 个**，8 个数据集无一例外，平均高 0.133（template 0.537→0.875）。
-  当前把 20 个特征全喂给 IsolationForest 在系统性自我拖累——"方向反转"有一部分其实是维度稀释。
+- **免标签路线上 3 个指标胜过全部 19 个**，8 个数据集无一例外，平均高 0.133（template 0.537→0.875）。
+  当前把 19 个特征全喂给 IsolationForest 在系统性自我拖累——"方向反转"有一部分其实是维度稀释。
 - **两类噪音的高 AUC 名不副实**：完全重复、话题不相关的检测信号 90% 以上来自静态文本相似度，
   不是训练动态。
 
@@ -55,9 +55,9 @@
 
 - `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告 6.12 节。
 - `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 6.12.5 节。
-- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 6.11.1-6.11.2 节。
-- `single_feature_ablation.py`：单指标留一消融，对 20 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 6.11.3 节。
-- `minimal_feature_set.py`：最小指标集合，贪心前向选择（从零开始逐个加入最有增益的特征）回答"最少需要哪几个指标"，留一消融回答不了这个问题 → `results/ratio10/minimal_feature_set.csv`，见报告 6.11.4 节。**主要发现：免标签路线上 3 个指标胜过 20 个，8/8 数据集无例外。**
+- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 6.11.2-6.11.3 节。
+- `single_feature_ablation.py`：单指标留一消融，对 19 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 6.11.4 节。
+- `minimal_feature_set.py`：最小指标集合，贪心前向选择（从零开始逐个加入最有增益的特征）回答"最少需要哪几个指标"，留一消融回答不了这个问题 → `results/ratio10/minimal_feature_set.csv`，见报告 6.11.5 节。**主要发现：免标签路线上 3 个指标胜过全部 19 个，8/8 数据集无例外。**
 - `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
 
 编排脚本：
@@ -144,7 +144,7 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
 
 | `--method` | 假设 | 适用 | 特征 |
 |---|---|---|---|
-| `iforest`（默认） | 噪音 = 离群，无方向 | garbled / unrelated 等真正异常的噪音 | 20 个全覆盖特征 |
+| `iforest`（默认） | 噪音 = 离群，无方向 | garbled / unrelated 等真正异常的噪音 | 19 个全覆盖特征 |
 | `memo_signed` | 噪音 = 异常地**容易学**（loss 低、收敛快），符号先验固定 | template / duplicate 等记忆型噪音 | 6 个带符号轨迹特征 |
 | `pooled` | 以上两者 + `text_nn_sim` 的 \|z\|，各自标准化后取逐样本最大值 | **噪音成分未知或混合**时 | 27 项 |
 

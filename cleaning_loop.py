@@ -107,7 +107,10 @@ def build(root: str | Path, tag: str, dataset: str, budget: float = 0.10, seed: 
 
     n = len(sub); n_drop = max(1, int(round(budget * n)))
     order = np.argsort(score)
-    sample_ids = sub.sample_id.to_numpy()
+    # str(), because pandas infers sample_id's dtype from its contents: ids like
+    # '10136_dup0' force object dtype, but an all-numeric set (the wild datasets)
+    # is read back as int64 and would then miss every string key below.
+    sample_ids = sub.sample_id.astype(str).to_numpy()
     targeted_drop = set(sample_ids[order[-n_drop:]].tolist())
     rng = np.random.default_rng(seed)
     random_drop = set(rng.choice(sample_ids, size=n_drop, replace=False).tolist())
