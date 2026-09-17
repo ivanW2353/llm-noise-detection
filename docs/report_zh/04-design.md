@@ -85,7 +85,7 @@ python3 cli.py analyze --tag ratio10 --kind features
 | 早期检测（第 6.7 节） | `early_unsupervised` / `early_memorization` | `build_table(max_epoch=k)` 截断轨迹，模拟"只训了 k 个 epoch"，无需真的提前停止 |
 | 特征归因（第 6.8 节） | `feature_attribution` | permutation importance，`n_repeats=20` |
 
-**跨类型迁移与 `mixed` 的关系**：`cross_type` 在代码层面显式跳过 `mixed`（`if ds in ('clean','mixed'): continue`），所以它回答不了"混合流"的问题。第 6.12 节用一个独立脚本 `scripts/transfer_to_mixed.py` 补上这一环。
+**跨类型迁移与 `mixed` 的关系**：`cross_type` 在代码层面显式跳过 `mixed`（`if ds in ('clean','mixed'): continue`），所以它回答不了"混合流"的问题。第 6.12 节用一个独立脚本 `analyze.py::transfer_to_mixed()` 补上这一环。
 
 ### 4.6 步骤⑤-⑥：闭环清洗与重训
 

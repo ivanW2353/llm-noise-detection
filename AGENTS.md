@@ -2,8 +2,10 @@
 
 LLM-noise-detection experiment: 7 noise types injected into dolly-15k (`data/{tag}/{dataset}/train.jsonl`),
 Qwen2.5-3B-Instruct LoRA SFT with per-sample metric tracking, label-free noise-detection analysis.
-Two tags trained so far: `ratio10` (10% noise, all 9 datasets incl. clean/mixed) and `ratio5` (5% noise,
-cross-validation of the ratio10 findings). All experiments/analysis run through a single root-level
+Three tags trained so far: `ratio10` (10% noise, all 9 datasets incl. clean/mixed), `ratio5` (5% noise,
+cross-validation of the ratio10 findings), and `wild_all` (natural noise from OASST2 via `wild_data.py`,
+8.83% noise rate from human `quality` ratings rather than an injected perturbation — see `wild_data.py`'s
+module docstring for the framing caveats this implies). All experiments/analysis run through a single root-level
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
 was replaced 2026-09-11/13, see `docs/experiment_log.md`).
 
@@ -15,15 +17,23 @@ was replaced 2026-09-11/13, see `docs/experiment_log.md`).
 - `train.py` — thin `Trainer` orchestration wrapper around `model.create()`.
 - `evaluate.py` — downstream benchmark suite (mmlu/gsm8k/hellaswag/arc/bbh/truthfulqa/winogrande), resumable per-task.
 - `textsim.py` — `text_nn_sim()`: TF-IDF nearest-neighbor cosine similarity per sample (a **data-level** feature, not a training-dynamics one — see the feature-attribution gotcha below).
-- `analyze.py` — all post-hoc analysis: `build_table()` (assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation), `unsupervised_metrics()`, `memorization_score()`, `cross_type_transfer()`, `cross_ratio_transfer()`, `precision_lift_table()`, `early_detection_sweep()`, `feature_attribution()`.
-- `cleaning_loop.py` — `build()`: label-free IsolationForest-based closed-loop cleaning (targeted-drop + random-drop control training sets, full-corpus scale).
-- `cli.py` — the **only** entry point; subcommands `data` / `train` / `evaluate` / `analyze` / `clean`. `run.py` just calls `cli.main()`.
+- `analyze.py` — all post-hoc analysis: `build_table()` (assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation), `unsupervised_metrics()`, `memorization_score()`, `cross_type_transfer()`, `cross_ratio_transfer()`, `precision_lift_table()`, `early_detection_sweep()`, `feature_attribution()`, `feature_correlation()` (Spearman/PCA/VIF redundancy), `minimal_feature_set()` (greedy forward selection), `single_feature_ablation()` (leave-one-out), `transfer_to_mixed()` (single-type detectors vs. `mixed`), `feature_group_ablation()` (text/token/trajectory group ablation), `pooled_scorer_compare()` (compares `cleaning_loop.py`'s three scorers, reusing its `_score_*` helpers directly).
+- `cleaning_loop.py` — `build()`: label-free closed-loop cleaning (targeted-drop + random-drop control training sets, full-corpus scale). Three scorers via `method=`: `iforest` (undirected outlier detection), `memo_signed` (fixed-sign hyper-typicality rule for memorized/hyper-typical noise like template/duplicate), `pooled` (max of three standardized legs — iforest z-score, memo_signed z-score, |z| of `text_nn_sim` — for when the noise composition is unknown, e.g. `mixed`).
+- `wild_data.py` — builds a natural-noise dataset from OASST2, using human `quality` annotation ratings (not an injected perturbation) as the noise label; not wired through `cli.py` (run directly). Writes `data/{tag}/heldout.jsonl` (clean-only) and `data/{tag}/wild/train.jsonl`.
+- `cli.py` — the **only** entry point for the `data`/`train`/`evaluate`/`analyze`/`clean` subcommands; `run.py` just calls `cli.main()`. `analyze --kind` choices: `features`/`training`/`token`/`unsupervised`/`transfer`/`cross_type`/`cross_ratio`/`precision_lift`/`memorization`/`early_unsupervised`/`early_memorization`/`feature_attribution`/`feature_correlation`/`minimal_feature_set`/`single_feature_ablation`/`transfer_to_mixed`/`feature_group_ablation`/`pooled_scorer_compare` (see Commands below).
 
-**Placement principle (do not regress this)**: `scripts/` (gitignored, `/*.sh` + `/scripts/` in `.gitignore`)
-holds only **orchestration** — what to run, in what order, with what waiting/polling logic. Any code that
+**Placement principle**: `scripts/` (gitignored, `/*.sh` + `/scripts/` in `.gitignore`) is supposed to hold
+only **orchestration** — what to run, in what order, with what waiting/polling logic. Any code that
 implements actual experimental methodology (a detector, a scoring rule, a feature) belongs in a tracked
-root-level `.py` module wired through `cli.py`, never in `scripts/`. This was corrected once already
-(`cleaning_loop.py`/`early_detection_sweep()` were briefly misplaced in `scripts/` before being moved).
+root-level `.py` module wired through `cli.py`, never in `scripts/`. This regressed twice already
+(`cleaning_loop.py`/`early_detection_sweep()`, then `feature_ablation.py`/`feature_correlation.py`/
+`minimal_feature_set.py`/`pooled_scorer_compare.py`/`single_feature_ablation.py`/`transfer_to_mixed.py`)
+before being moved into `analyze.py` (as `feature_group_ablation()`, `feature_correlation()`,
+`minimal_feature_set()`, `pooled_scorer_compare()`, `single_feature_ablation()`, `transfer_to_mixed()`)
+and wired through `cli.py analyze --kind`, each verified byte-exact against the prior script's output
+before the `scripts/` copies were deleted. `make_report_charts.py` is the one script deliberately left in
+`scripts/` untracked (chart generation, not methodology; the PNGs it produces are tracked instead). Watch
+for this regressing a third time.
 
 ## Layout & data flow
 
@@ -42,6 +52,7 @@ python cli.py data --source /path/to/train.jsonl --tag ratio10
 python cli.py train --tag ratio10 --dataset clean --model hf-lora     # ~3.5h, 5 epochs; --model mock for interface checks
 python cli.py evaluate --tag ratio10 --dataset clean --model hf-lora [--force]   # resumable, skips done tasks
 python cli.py clean --tag ratio10 --dataset garbled --budget 0.10     # label-free closed-loop cleaning (targeted + random control)
+                     --method iforest|memo_signed|pooled              # default iforest; pooled is for unknown/mixed composition
 
 # analyze --kind:
 python cli.py analyze --kind features --tag ratio10                  # builds per_sample_metrics.csv
@@ -55,6 +66,12 @@ python cli.py analyze --kind precision_lift --tag ratio10               # P@10% 
 python cli.py analyze --kind early_unsupervised --tag ratio10           # detection AUC by training-epoch cutoff
 python cli.py analyze --kind early_memorization --tag ratio10           # same, for memo_signed rule
 python cli.py analyze --kind feature_attribution --tag ratio10          # permutation importance per noise type
+python cli.py analyze --kind feature_correlation --tag ratio10          # Spearman/PCA/VIF redundancy (+ _pairs.csv)
+python cli.py analyze --kind minimal_feature_set --tag ratio10          # greedy forward feature selection (rf + iforest routes)
+python cli.py analyze --kind single_feature_ablation --tag ratio10      # leave-one-feature-out, both routes
+python cli.py analyze --kind transfer_to_mixed --tag ratio10            # single-type detectors evaluated against mixed
+python cli.py analyze --kind feature_group_ablation --tag ratio10       # text/token/trajectory feature-group ablation
+python cli.py analyze --kind pooled_scorer_compare --tag ratio10 [--dataset mixed]  # compares cleaning_loop.py's 3 scorers
 python cli.py analyze --kind transfer --tags ratio10,ratio5             # re-read a saved transfer CSV
 ```
 

@@ -16,11 +16,11 @@
 
 ## 章节
 
-1. [1. 实验概述](01-overview.md)
-2. [2. 相关工作](02-related-work.md)
-3. [3. 实验前提](03-premises.md)
-4. [4. 实验方案](04-design.md)
-5. [5. 实验的理论分析](05-theory.md)
-6. [6. 实验过程与结果](06-results.md)
-7. [7. 结论与 future work](07-conclusions.md)
-8. [8. 附录：原始数据与指标定义](08-appendix.md)
+1. [实验概述](01-overview.md)
+2. [相关工作](02-related-work.md)
+3. [实验前提](03-premises.md)
+4. [实验方案](04-design.md)
+5. [实验的理论分析](05-theory.md)
+6. [实验过程与结果](06-results.md)
+7. [结论与 future work](07-conclusions.md)
+8. [附录：原始数据与指标定义](08-appendix.md)

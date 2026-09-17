@@ -85,7 +85,7 @@ The true `noise_type` label is read from `train.jsonl` **for evaluation only**; 
 | Early detection (Section 6.7) | `early_unsupervised` / `early_memorization` | `build_table(max_epoch=k)` truncates the trajectory to simulate "trained only k epochs", with no need to actually stop early |
 | Feature attribution (Section 6.8) | `feature_attribution` | Permutation importance, `n_repeats=20` |
 
-**How cross-type transfer relates to `mixed`**: `cross_type` explicitly skips `mixed` in code (`if ds in ('clean','mixed'): continue`), so it cannot answer the mixed-stream question. Section 6.12 fills that gap with a separate script, `scripts/transfer_to_mixed.py`.
+**How cross-type transfer relates to `mixed`**: `cross_type` explicitly skips `mixed` in code (`if ds in ('clean','mixed'): continue`), so it cannot answer the mixed-stream question. Section 6.12 fills that gap with a separate script, `analyze.py::transfer_to_mixed()`.
 
 ### 4.6 Steps (5)-(6): closed-loop cleaning and retraining
 

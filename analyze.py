@@ -31,6 +31,61 @@ def summarize(frame, features):
 DIAG_COLS=['max_token_loss','frac_hard','user_loss','entropy','token_loss_skew','token_loss_kurt']
 TOKEN_COLS=['n_hard','hard_loss_mean','hard_loss_max','hard_pos_peak','hard_pos_std_mean','hard_id_uniq','hard_pos_jaccard']
 
+# The 19 trajectory+text features with full coverage across the entire corpus
+# (unlike DIAG_COLS/TOKEN_COLS, which only populate a ~900-row/dataset
+# diagnostic subsample) — the pool cleaning_loop.py and every full-corpus
+# methodology function below actually score against.
+FULL_COVERAGE_FEATS=['text_nn_sim','loss_mean','loss_last','loss_std','loss_slope','loss_min',
+                     'converge_epoch','loss_curvature','loss_rank','grad_norm_mean','grad_norm_last',
+                     'grad_norm_std','grad_norm_slope','cos_ref_mean','cos_ref_last','cos_ref_std',
+                     'cos_ref_slope','grad_norm_cv','update_contrib_mean']
+
+# Which raw signal each full-coverage feature is derived from — used to test
+# whether redundancy follows family boundaries (it should: four views of one
+# loss curve are not four independent measurements).
+FEATURE_FAMILY={
+    'text_nn_sim':'text',
+    'loss_mean':'loss','loss_last':'loss','loss_std':'loss','loss_slope':'loss',
+    'loss_min':'loss','converge_epoch':'loss','loss_curvature':'loss','loss_rank':'loss',
+    'grad_norm_mean':'grad','grad_norm_last':'grad','grad_norm_std':'grad',
+    'grad_norm_slope':'grad','grad_norm_cv':'grad',
+    'cos_ref_mean':'cos','cos_ref_last':'cos','cos_ref_std':'cos','cos_ref_slope':'cos',
+    'update_contrib_mean':'update',
+}
+
+
+def _zs(v: np.ndarray) -> np.ndarray:
+    return (v-v.mean())/(v.std()+1e-12)
+
+
+def _cv_auc(x, y, seed=0):
+    """Supervised out-of-fold AUC: StratifiedKFold(5) + RandomForestClassifier."""
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import StratifiedKFold
+    xs=StandardScaler().fit_transform(x); oof=np.zeros(len(y))
+    for tr,te in StratifiedKFold(5,shuffle=True,random_state=seed).split(xs,y):
+        clf=RandomForestClassifier(n_estimators=200,random_state=seed,n_jobs=-1)
+        clf.fit(xs[tr],y[tr]); oof[te]=clf.predict_proba(xs[te])[:,1]
+    return roc_auc_score(y,oof)
+
+
+def _if_auc(x, y, seed=42):
+    """Label-free AUC: per-fit IsolationForest score_samples on standardized features."""
+    xs=StandardScaler().fit_transform(x)
+    score=-IsolationForest(n_estimators=300,random_state=seed,n_jobs=-1).fit(xs).score_samples(xs)
+    return roc_auc_score(y,score)
+
+
+def _fit_transfer(xtr, ytr, xte, yte, seed=0):
+    """LR + RF, best of the two by AUC, scaler fit on the source only."""
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    sc=StandardScaler().fit(xtr); best_auc,best_score=0.0,None
+    for clf in (LogisticRegression(max_iter=2000),RandomForestClassifier(n_estimators=200,random_state=seed,n_jobs=-1)):
+        clf.fit(sc.transform(xtr),ytr); score=clf.predict_proba(sc.transform(xte))[:,1]; a=roc_auc_score(yte,score)
+        if a>best_auc: best_auc,best_score=a,score
+    return best_auc,best_score
+
 def _load_run_metrics(metrics_dir, max_epoch=None):
     mp=metrics_dir/'per_sample.jsonl'
     if not mp.exists() or mp.stat().st_size==0: return pd.DataFrame()
@@ -450,3 +505,243 @@ def feature_attribution(frame: pd.DataFrame, features=None, seed=0, n_repeats=20
     if result.empty: return result
     result['rank']=result.groupby('dataset')['importance'].rank(ascending=False,method='first').astype(int)
     return result.sort_values(['dataset','rank']).reset_index(drop=True)
+
+
+def _vif(x: np.ndarray, names: list[str]) -> pd.Series:
+    """Variance inflation factor: 1/(1-R^2) of regressing each column on the
+    rest. Above ~10 conventionally signals near-collinearity."""
+    out={}
+    for j,name in enumerate(names):
+        others=np.delete(x,j,axis=1)
+        a=np.column_stack([np.ones(len(others)),others])
+        coef,*_=np.linalg.lstsq(a,x[:,j],rcond=None)
+        resid=x[:,j]-a@coef
+        ss_tot=float(((x[:,j]-x[:,j].mean())**2).sum())
+        r2=1-float((resid**2).sum())/ss_tot if ss_tot>0 else 0.0
+        out[name]=1/(1-r2) if r2<1-1e-12 else np.inf
+    return pd.Series(out)
+
+
+def feature_correlation(frame: pd.DataFrame, features=None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """How much do the full-coverage features overlap? Measured three ways per
+    dataset and pooled: Spearman correlation between every pair, effective
+    dimensionality via PCA (components to reach 90%/99% variance), and VIF per
+    feature. Backs the "highly correlated" claim behind RF's single-feature-drop
+    insensitivity and IF's dimensional-dilution improvement (feature_attribution
+    / single_feature_ablation). Returns (per-dataset summary, pooled pairwise
+    correlations) — two tables, since the pairwise detail is only meaningful
+    pooled across the whole corpus."""
+    from scipy.stats import spearmanr
+    from sklearn.decomposition import PCA
+    feats=list(features or [c for c in FULL_COVERAGE_FEATS if c in frame.columns])
+    rows,pairs=[],[]
+    datasets=[d for d in sorted(frame.dataset.unique()) if d!='clean']
+    for ds in datasets+['__pooled__']:
+        sub=frame if ds=='__pooled__' else frame[frame.dataset==ds]
+        sub=sub.dropna(subset=feats)
+        if len(sub)<50: continue
+        x=StandardScaler().fit_transform(sub[feats].to_numpy(float))
+        rho,_=spearmanr(x); abs_rho=np.abs(rho); off=abs_rho[np.triu_indices_from(abs_rho,k=1)]
+        p=PCA().fit(x); cum=np.cumsum(p.explained_variance_ratio_)
+        k90=int(np.searchsorted(cum,0.90)+1); k99=int(np.searchsorted(cum,0.99)+1)
+        ev=p.explained_variance_ratio_; eff=float(1.0/(ev**2).sum())
+        v=_vif(x,feats)
+        rows.append({'dataset':ds,'n':len(sub),'n_features':len(feats),
+                    'mean_abs_spearman':float(off.mean()),
+                    'frac_pairs_over_0.7':float((off>0.7).mean()),
+                    'frac_pairs_over_0.9':float((off>0.9).mean()),
+                    'pca_k_for_90pct':k90,'pca_k_for_99pct':k99,
+                    'effective_dims':eff,'pc1_variance':float(ev[0]),
+                    'median_vif':float(v.replace(np.inf,np.nan).median()),
+                    'n_vif_over_10':int((v>10).sum())})
+        if ds=='__pooled__':
+            for i in range(len(feats)):
+                for j in range(i+1,len(feats)):
+                    pairs.append({'a':feats[i],'b':feats[j],
+                                 'family_a':FEATURE_FAMILY.get(feats[i],'?'),
+                                 'family_b':FEATURE_FAMILY.get(feats[j],'?'),
+                                 'same_family':FEATURE_FAMILY.get(feats[i])==FEATURE_FAMILY.get(feats[j]),
+                                 'abs_spearman':float(abs_rho[i,j])})
+    return pd.DataFrame(rows), pd.DataFrame(pairs)
+
+
+def minimal_feature_set(frame: pd.DataFrame, features=None, max_k=6, seed=0, if_seed=42) -> pd.DataFrame:
+    """Greedy forward feature selection per dataset/route: starting from
+    nothing, repeatedly add whichever remaining feature most improves AUC, up
+    to max_k. Answers "what is the minimal set to collect", as opposed to
+    single_feature_ablation's "what is redundant to drop" — a group of
+    features can each be individually removable while jointly necessary.
+    Selection uses the same labels it is scored on, so the reported AUC per k
+    is optimistic (an upper bound on what a small set CAN carry, not a
+    label-free recipe for picking one)."""
+    feats=list(features or [c for c in FULL_COVERAGE_FEATS if c in frame.columns])
+    rows=[]
+    for ds in sorted(frame.dataset.unique()):
+        if ds=='clean': continue
+        sub=frame[frame.dataset==ds].dropna(subset=feats).reset_index(drop=True)
+        y=sub.noise_type.fillna('none').ne('none').astype(int).to_numpy()
+        if y.sum()<10: continue
+        x=sub[feats].to_numpy(float)
+        full={'rf':_cv_auc(x,y,seed),'iforest':_if_auc(x,y,if_seed)}
+        routes=(('rf',lambda xx,yy:_cv_auc(xx,yy,seed),False),('iforest',lambda xx,yy:_if_auc(xx,yy,if_seed),True))
+        for route,scorer,directed in routes:
+            chosen=[]
+            for step in range(min(max_k,len(feats))):
+                best=None
+                for j in range(len(feats)):
+                    if j in chosen: continue
+                    a=scorer(x[:,chosen+[j]],y)
+                    key=max(a,1-a) if directed else a
+                    if best is None or key>best[0]: best=(key,a,j)
+                key,raw,j=best; chosen.append(j)
+                rows.append({'dataset':ds,'route':route,'n':len(y),'n_noise':int(y.sum()),
+                            'full_auc':full[route],'full_auc_dir':max(full[route],1-full[route]),
+                            'k':step+1,'added':feats[j],'auc':raw,'auc_dir':max(raw,1-raw),
+                            'features':'+'.join(feats[c] for c in chosen)})
+    return pd.DataFrame(rows)
+
+
+def single_feature_ablation(frame: pd.DataFrame, features=None, seed=0, if_seed=42) -> pd.DataFrame:
+    """Single-feature leave-one-out ablation across both detection routes ('rf':
+    supervised StratifiedKFold(5)+RandomForestClassifier; 'iforest': label-free
+    per-dataset IsolationForest). delta = ablated_auc - full_auc: negative means
+    dropping the feature hurt (it carried signal), positive means dropping it
+    helped (it was diluting an undirected score)."""
+    feats=list(features or [c for c in FULL_COVERAGE_FEATS if c in frame.columns])
+    rows=[]
+    for ds in sorted(frame.dataset.unique()):
+        if ds=='clean': continue
+        sub=frame[frame.dataset==ds].dropna(subset=feats).reset_index(drop=True)
+        y=sub.noise_type.fillna('none').ne('none').astype(int).to_numpy()
+        if y.sum()<10: continue
+        x=sub[feats].to_numpy(float)
+        full={'rf':_cv_auc(x,y,seed),'iforest':_if_auc(x,y,if_seed)}
+        for route,base in full.items():
+            rows.append({'dataset':ds,'route':route,'dropped':'(none)','n':len(y),
+                        'n_noise':int(y.sum()),'auc':base,'full_auc':base,'delta':0.0})
+        for i,f in enumerate(feats):
+            xr=np.delete(x,i,axis=1)
+            for route,fn in (('rf',lambda xx,yy:_cv_auc(xx,yy,seed)),('iforest',lambda xx,yy:_if_auc(xx,yy,if_seed))):
+                a=fn(xr,y)
+                rows.append({'dataset':ds,'route':route,'dropped':f,'n':len(y),'n_noise':int(y.sum()),
+                            'auc':a,'full_auc':full[route],'delta':a-full[route]})
+    return pd.DataFrame(rows)
+
+
+def transfer_to_mixed(frame: pd.DataFrame, seed=0) -> pd.DataFrame:
+    """Evaluates each single-type detector against the `mixed` dataset — the
+    question cross_type_transfer() skips by excluding mixed entirely. Reports,
+    per source-type detector: overall AUC/P@10% on mixed (deployment number),
+    and own-type-only AUC (own noise type vs. clean within mixed, separating
+    "blind to other types" from "population-shift breakdown"). Also reports a
+    calibration-free text_nn_sim z-score control, an ensemble_all7 max-pooled
+    score, and ensemble_loo (leave-one-type-out ensembles, the actual "unseen
+    noise type" question) plus text_nn_sim on the same held-out slices. Runs
+    both the full_diag (all numeric columns) and full_coverage conditions."""
+    excluded={'sample_id','dataset','noise_type','category','noise_label'}
+    all_numeric=[c for c in frame.columns if c not in excluded and pd.api.types.is_numeric_dtype(frame[c])]
+    rows=[]
+    rows+=_transfer_to_mixed_condition(frame,all_numeric,'full_diag',seed)
+    rows+=_transfer_to_mixed_condition(frame,[c for c in FULL_COVERAGE_FEATS if c in frame.columns],'full_coverage',seed)
+    return pd.DataFrame(rows)
+
+
+def _transfer_to_mixed_condition(frame, features, condition, seed=0):
+    mixed=frame[frame.dataset=='mixed'].dropna(subset=features)
+    y_mixed=(mixed.noise_type!='none').astype(int).to_numpy()
+    x_mixed=mixed[features].to_numpy(float)
+    mixed_types=mixed.noise_type.to_numpy()
+    sources={}
+    for ds in sorted(frame.dataset.unique()):
+        if ds in ('clean','mixed'): continue
+        sub=frame[frame.dataset==ds].dropna(subset=features)
+        y=(sub.noise_type!='none').astype(int).to_numpy()
+        if y.sum()>=10: sources[ds]=(sub[features].to_numpy(float),y)
+    rows=[]; scores={}
+    for src,(xs_,ys_) in sources.items():
+        a,score=_fit_transfer(xs_,ys_,x_mixed,y_mixed,seed)
+        scores[src]=score
+        rows.append({'condition':condition,'detector':src,'scope':'overall','target_type':'any',
+                    'n':len(y_mixed),'n_noise':int(y_mixed.sum()),'auc':a,
+                    'p_at_10':precision_at_k(y_mixed,score,0.10),'random_p':float(y_mixed.mean())})
+        keep=(mixed_types==src)|(mixed_types=='none')
+        y_own=(mixed_types[keep]==src).astype(int)
+        rows.append({'condition':condition,'detector':src,'scope':'own_type_only','target_type':src,
+                    'n':int(keep.sum()),'n_noise':int(y_own.sum()),'auc':roc_auc_score(y_own,score[keep]),
+                    'p_at_10':precision_at_k(y_own,score[keep],0.10),'random_p':float(y_own.mean())})
+    text=mixed['text_nn_sim'].to_numpy(float)
+    zscore=(text-text.mean())/(text.std()+1e-12)
+    rows.append({'condition':condition,'detector':'text_nn_sim_zscore','scope':'overall','target_type':'any',
+                'n':len(y_mixed),'n_noise':int(y_mixed.sum()),'auc':roc_auc_score(y_mixed,zscore),
+                'p_at_10':precision_at_k(y_mixed,zscore,0.10),'random_p':float(y_mixed.mean())})
+    stacked=np.vstack([_zs(s) for s in scores.values()]).max(axis=0)
+    rows.append({'condition':condition,'detector':'ensemble_all7','scope':'overall','target_type':'any',
+                'n':len(y_mixed),'n_noise':int(y_mixed.sum()),'auc':roc_auc_score(y_mixed,stacked),
+                'p_at_10':precision_at_k(y_mixed,stacked,0.10),'random_p':float(y_mixed.mean())})
+    for held in scores:
+        pool=[_zs(s) for name,s in scores.items() if name!=held]
+        ens=np.vstack(pool).max(axis=0)
+        keep=(mixed_types==held)|(mixed_types=='none')
+        y_held=(mixed_types[keep]==held).astype(int)
+        rows.append({'condition':condition,'detector':'ensemble_loo','scope':'held_out_type','target_type':held,
+                    'n':int(keep.sum()),'n_noise':int(y_held.sum()),'auc':roc_auc_score(y_held,ens[keep]),
+                    'p_at_10':precision_at_k(y_held,ens[keep],0.10),'random_p':float(y_held.mean())})
+        rows.append({'condition':condition,'detector':'text_nn_sim_zscore','scope':'held_out_type','target_type':held,
+                    'n':int(keep.sum()),'n_noise':int(y_held.sum()),'auc':roc_auc_score(y_held,zscore[keep]),
+                    'p_at_10':precision_at_k(y_held,zscore[keep],0.10),'random_p':float(y_held.mean())})
+    return rows
+
+
+def feature_group_ablation(frame: pd.DataFrame) -> pd.DataFrame:
+    """Reruns unsupervised_metrics() under restricted feature-group conditions
+    (full_diag / full_coverage / no_text / text_only / token_only) to quantify
+    how much of the reported label-free AUC survives when token-level
+    diagnostics (subsample-only, unavailable to cleaning_loop.py's full-dataset
+    scoring) or text_nn_sim are removed. All conditions score the same
+    diagnostic-subsample population, so AUCs are directly comparable across
+    conditions for a given dataset."""
+    no_text=[c for c in FULL_COVERAGE_FEATS if c!='text_nn_sim']
+    conditions={'full_diag':None,'full_coverage':FULL_COVERAGE_FEATS,'no_text':no_text,
+               'text_only':['text_nn_sim'],'token_only':DIAG_COLS+TOKEN_COLS}
+    rows=[]
+    for cond,feats in conditions.items():
+        out=unsupervised_metrics(frame,features=feats)
+        out.insert(0,'condition',cond)
+        rows.append(out)
+    table=pd.concat(rows,ignore_index=True)
+    return table[table.dataset!='clean'].reset_index(drop=True)
+
+
+def pooled_scorer_compare(frame: pd.DataFrame, dataset='mixed', seed=42) -> pd.DataFrame:
+    """Compares cleaning_loop.py's three scorers (iforest/memo_signed/pooled),
+    plus the raw text_nn_sim |z| leg on its own for attribution, on one
+    dataset — overall removal quality (AUC/P@10%) and a per-type slice (type vs.
+    clean) showing which corruptions each leg is blind to. Reuses
+    cleaning_loop.py's internal _score_* helpers directly rather than
+    reimplementing them, so this can never silently drift from what `cli.py
+    clean` actually does."""
+    import cleaning_loop as cl
+    excluded={'sample_id','dataset','noise_type','category','noise_label'}
+    sub=frame[frame.dataset==dataset].reset_index(drop=True)
+    numeric=[c for c in frame.columns if c not in excluded and pd.api.types.is_numeric_dtype(frame[c])]
+    features=[c for c in numeric if sub[c].notna().all()]
+    scorers={
+        'iforest':lambda: cl._score_iforest(sub[features].to_numpy(float),seed),
+        'memo_signed':lambda: cl._score_memo_signed(sub,features)[0],
+        'text_abs_z':lambda: np.abs(_zs(sub['text_nn_sim'].to_numpy(float))),
+        'pooled':lambda: cl._score_pooled(sub,features,seed)[0],
+    }
+    noise_type=sub.noise_type.to_numpy(); y=(noise_type!='none').astype(int)
+    types=[t for t in sorted(set(noise_type.tolist())) if t!='none']
+    rows=[]
+    for name,fn in scorers.items():
+        score=fn()
+        rows.append({'scorer':name,'scope':'overall','target_type':'any','n':len(y),'n_noise':int(y.sum()),
+                    'auc':roc_auc_score(y,score),'p_at_10':precision_at_k(y,score,0.10),'random_p':float(y.mean())})
+        for t in types:
+            keep=(noise_type==t)|(noise_type=='none')
+            y_t=(noise_type[keep]==t).astype(int)
+            rows.append({'scorer':name,'scope':'per_type','target_type':t,'n':int(keep.sum()),'n_noise':int(y_t.sum()),
+                        'auc':roc_auc_score(y_t,score[keep]),'p_at_10':precision_at_k(y_t,score[keep],0.10),
+                        'random_p':float(y_t.mean())})
+    return pd.DataFrame(rows)

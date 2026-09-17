@@ -43,11 +43,11 @@ Section 6.3 already covers the pipeline and its commands; this subsection collec
 | `results/{tag}/early_*.csv` | `analyze --kind early_*` | 6.7 |
 | `results/{tag}/feature_attribution.csv` | `analyze --kind feature_attribution` | 6.8 |
 | `results/eval/eval_{tag}_{dataset}.json` | `evaluate` | 6.9, 6.13 |
-| `results/{tag}/feature_ablation.csv` | `scripts/feature_ablation.py` | 6.11.1-6.11.2 |
-| `results/{tag}/single_feature_ablation.csv` | `scripts/single_feature_ablation.py` | 6.11.3 |
-| `results/{tag}/minimal_feature_set.csv` | `scripts/minimal_feature_set.py` | 6.11.4 |
-| `results/{tag}/transfer_to_mixed.csv` | `scripts/transfer_to_mixed.py` | 6.12 |
-| `results/{tag}/pooled_scorer_compare.csv` | `scripts/pooled_scorer_compare.py` | 6.12.5 |
+| `results/{tag}/feature_ablation.csv` | `analyze.py::feature_group_ablation()` | 6.11.1-6.11.2 |
+| `results/{tag}/single_feature_ablation.csv` | `analyze.py::single_feature_ablation()` | 6.11.3 |
+| `results/{tag}/minimal_feature_set.csv` | `analyze.py::minimal_feature_set()` | 6.11.4 |
+| `results/{tag}/transfer_to_mixed.csv` | `analyze.py::transfer_to_mixed()` | 6.12 |
+| `results/{tag}/pooled_scorer_compare.csv` | `analyze.py::pooled_scorer_compare()` | 6.12.5 |
 | `data/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
 
 **Downstream evaluation protocol.** Seven benchmarks: MMLU (n=14042), GSM8K (1319), HellaSwag (10042), ARC (1172), BBH (540), TruthfulQA (817), WinoGrande (1267). The "7-benchmark mean" throughout the report is the **unweighted arithmetic mean** of those seven accuracies, not weighted by sample count — so BBH at n=540 carries the same weight as MMLU at n=14042, which amplifies single-benchmark fluctuation. Sections 6.9 and 6.13 therefore both give the per-benchmark breakdown rather than the mean alone.
@@ -349,7 +349,7 @@ One framing caveat first: the AUC numbers reported in Sections 6.2-6.9 (`unsuper
 
 #### 6.11.1 How much do these metrics overlap?
 
-Before asking which data is necessary, a more basic question: **how independent are these 19 full-coverage metrics from each other?** Two conclusions in this report lean on them being highly correlated — Section 6.11.4 uses it to explain why RF is indifferent to dropping any single metric, and Section 6.11.5 uses it to explain why removing features *helps* IF (dimensional dilution). Both were assertions until now, never measured. Script: `scripts/feature_correlation.py`, output `results/ratio10/feature_correlation.csv`.
+Before asking which data is necessary, a more basic question: **how independent are these 19 full-coverage metrics from each other?** Two conclusions in this report lean on them being highly correlated — Section 6.11.4 uses it to explain why RF is indifferent to dropping any single metric, and Section 6.11.5 uses it to explain why removing features *helps* IF (dimensional dilution). Both were assertions until now, never measured. Script: `analyze.py::feature_correlation()`, output `results/ratio10/feature_correlation.csv`.
 
 Measured three ways (Spearman rather than Pearson, since several of these are visibly heavy-tailed and Pearson would understate monotone-but-nonlinear relationships):
 
@@ -386,7 +386,7 @@ Measured three ways (Spearman rather than Pearson, since several of these are vi
 
 Two of the "necessity verdicts" in Section 6.10 are currently backed only by attribution-importance rankings (Section 6.8), not quantitative evidence: is the duplicate/unrelated detection signal really being "diluted" by irrelevant features? And how much would adding (production-unavailable) token-level diagnostics actually improve near_duplicate/keyword, and is it worth reworking the collection pipeline to get full coverage for them?
 
-Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `scripts/feature_ablation.py`, output at `results/ratio10/feature_ablation.csv`.
+Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `analyze.py::feature_group_ablation()`, output at `results/ratio10/feature_ablation.csv`.
 
 Five ablation conditions:
 
@@ -419,7 +419,7 @@ This has to be asked separately on the two detection routes, because their sensi
 - **The RF route** (supervised, Section 6.2's protocol): out-of-fold AUC from `StratifiedKFold(5)` + `RandomForestClassifier(200)` — the same construction that populates the diagonal of `cross_type.csv`.
 - **The IF route** (label-free, Section 6.6's protocol): per-dataset `IsolationForest(300)` AUC on standardized features — the `iforest` row of `unsupervised.csv`.
 
-Both routes run over the **same features and the same samples** (the diagnostic-subsample population), so an RF Δ and an IF Δ for the same metric are directly comparable. Script: `scripts/single_feature_ablation.py`, output `results/ratio10/single_feature_ablation.csv` (336 rows = 8 datasets × 21 conditions × 2 routes). Convention: **Δ = ablated AUC − full AUC**; negative means dropping it hurt (the feature was carrying signal), positive means dropping it helped (the feature was diluting the score).
+Both routes run over the **same features and the same samples** (the diagnostic-subsample population), so an RF Δ and an IF Δ for the same metric are directly comparable. Script: `analyze.py::single_feature_ablation()`, output `results/ratio10/single_feature_ablation.csv` (336 rows = 8 datasets × 21 conditions × 2 routes). Convention: **Δ = ablated AUC − full AUC**; negative means dropping it hurt (the feature was carrying signal), positive means dropping it helped (the feature was diluting the score).
 
 ![Single-feature leave-one-out: RF and IF differ completely in their sensitivity to one fewer dimension](../../results/charts/en/single_feature_ablation.png)
 
@@ -461,7 +461,7 @@ This finding independently justifies Section 6.12.5's choice of max over mean fo
 
 #### 6.11.5 Minimal feature set: on the label-free route, 3 metrics beat all 19
 
-Section 6.11.3's leave-one-out answers "what happens if I drop one," which is the wrong question for deciding **what to collect** — correlated features can each be individually removable while the group as a whole is essential, so nineteen "individually useless" features may still be jointly necessary. Answering "what is the minimum" requires going the other way: start from nothing and greedily add whichever feature most improves AUC, recording the whole path. The k-th point is then the best achievable score using k metrics. Script: `scripts/minimal_feature_set.py`, output `results/ratio10/minimal_feature_set.csv`.
+Section 6.11.3's leave-one-out answers "what happens if I drop one," which is the wrong question for deciding **what to collect** — correlated features can each be individually removable while the group as a whole is essential, so nineteen "individually useless" features may still be jointly necessary. Answering "what is the minimum" requires going the other way: start from nothing and greedily add whichever feature most improves AUC, recording the whole path. The k-th point is then the best achievable score using k metrics. Script: `analyze.py::minimal_feature_set()`, output `results/ratio10/minimal_feature_set.csv`.
 
 **Framing first**: the greedy selection uses the same labels it is scored on, so the AUC at a given k is **optimistic**. This measures how much signal a small set *can* carry, not a label-free recipe for choosing one — Section 3.1 forbids using labels to pick features. The honest reading is "if you already knew the noise type, this is the floor on collection cost." The IF column reports `auc_dir = max(auc, 1-auc)`, because a label-free outlier score at 0.02 is not useless but inverted (Section 6.6).
 
@@ -527,7 +527,7 @@ Sections 1-6.11 all rest on one premise: the noise types are known, and each has
 
 The 7×7 cross-type transfer matrix in Section 6.3 explicitly skips the `mixed` dataset in code (`if ds in ('clean', 'mixed'): continue` in `analyze.py`). It answers "does a detector trained on type A find type B?", where every test still faces a **single** noise type against a background that is 90% clean. Production is "one stream carrying 7 noise types at once, 6 of them unseen" — the population itself changed.
 
-A supplementary experiment (`scripts/transfer_to_mixed.py`, output `results/ratio10/transfer_to_mixed.csv`) evaluates all 7 single-type detectors against `mixed`. The protocol matches Section 6.3 exactly (one LR and one RF, `StandardScaler` fit on the source only, higher AUC of the two). `mixed` has 14819 rows — 13419 clean, 1400 noisy — and every row carries a `noise_type` label (near_duplicate 211, template 206, truncation 204, keyword 197, unrelated 197, garbled 194, duplicate 191), which makes per-type slicing inside the mixture possible.
+A supplementary experiment (`analyze.py::transfer_to_mixed()`, output `results/ratio10/transfer_to_mixed.csv`) evaluates all 7 single-type detectors against `mixed`. The protocol matches Section 6.3 exactly (one LR and one RF, `StandardScaler` fit on the source only, higher AUC of the two). `mixed` has 14819 rows — 13419 clean, 1400 noisy — and every row carries a `noise_type` label (near_duplicate 211, template 206, truncation 204, keyword 197, unrelated 197, garbled 194, duplicate 191), which makes per-type slicing inside the mixture possible.
 
 Two views are reported: `full_coverage` (19 full-coverage features, all 14819 rows, i.e. what `cleaning_loop.py` can actually compute in production) and `full_diag` (37 features, ~919 diagnostic-subsample rows, matching the view used elsewhere in this report). The prose below uses `full_coverage`.
 
@@ -610,7 +610,7 @@ Max rather than mean, because each leg is silent (score near 0) on the types it 
 
 **Note the difference in view**: the leave-one-out results in 12.3 use **supervised** detectors (LR/RF trained on other types' noise labels) and measure "what happens when an existing detector meets a new type"; all three legs here are **label-free** and measure "what is achievable with nothing but a pile of unlabeled dirty data". The numbers are not directly comparable, though the conclusions point the same way.
 
-Measured on `mixed` under a 10% budget (`scripts/pooled_scorer_compare.py`, output `results/ratio10/pooled_scorer_compare.csv`):
+Measured on `mixed` under a 10% budget (`analyze.py::pooled_scorer_compare()`, output `results/ratio10/pooled_scorer_compare.csv`):
 
 | Scorer | Overall AUC | Removal precision P@10% | Lift over random | Per-type cells below random |
 |---|---|---|---|---|

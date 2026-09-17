@@ -43,12 +43,12 @@
 | `results/{tag}/early_*.csv` | `analyze --kind early_*` | 6.7 |
 | `results/{tag}/feature_attribution.csv` | `analyze --kind feature_attribution` | 6.8 |
 | `results/eval/eval_{tag}_{dataset}.json` | `evaluate` | 6.9、6.13 |
-| `results/{tag}/feature_ablation.csv` | `scripts/feature_ablation.py` | 6.11.2-6.11.3 |
-| `results/{tag}/feature_correlation.csv` | `scripts/feature_correlation.py` | 6.11.1 |
-| `results/{tag}/single_feature_ablation.csv` | `scripts/single_feature_ablation.py` | 6.11.4 |
-| `results/{tag}/minimal_feature_set.csv` | `scripts/minimal_feature_set.py` | 6.11.5 |
-| `results/{tag}/transfer_to_mixed.csv` | `scripts/transfer_to_mixed.py` | 6.12 |
-| `results/{tag}/pooled_scorer_compare.csv` | `scripts/pooled_scorer_compare.py` | 6.12.5 |
+| `results/{tag}/feature_ablation.csv` | `analyze.py::feature_group_ablation()` | 6.11.2-6.11.3 |
+| `results/{tag}/feature_correlation.csv` | `analyze.py::feature_correlation()` | 6.11.1 |
+| `results/{tag}/single_feature_ablation.csv` | `analyze.py::single_feature_ablation()` | 6.11.4 |
+| `results/{tag}/minimal_feature_set.csv` | `analyze.py::minimal_feature_set()` | 6.11.5 |
+| `results/{tag}/transfer_to_mixed.csv` | `analyze.py::transfer_to_mixed()` | 6.12 |
+| `results/{tag}/pooled_scorer_compare.csv` | `analyze.py::pooled_scorer_compare()` | 6.12.5 |
 | `data/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
 
 **下游评测口径。** 7 项 benchmark：MMLU（n=14042）、GSM8K（1319）、HellaSwag（10042）、ARC（1172）、BBH（540）、TruthfulQA（817）、WinoGrande（1267）。报告中的"7 项平均"是这 7 个准确率的**无权重算术平均**，不按样本量加权——所以 n=540 的 BBH 与 n=14042 的 MMLU 权重相同，单项波动会被放大，6.9 与 6.13 节因此都同时给出分项表而非只给平均值。
@@ -350,7 +350,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 #### 6.11.1 这些指标之间有多少重叠？
 
-在问"哪些数据必要"之前，得先回答一个更基础的问题：**这 19 个全覆盖指标彼此有多独立？** 报告有两处结论依赖"它们高度相关"这个判断——6.11.4 节用它解释 RF 为什么删掉任何单个指标都无所谓，6.11.5 节用它解释 IF 为什么删掉特征反而变好（维度稀释）。这两处此前都只是断言，没有测量。脚本见 `scripts/feature_correlation.py`，输出 `results/ratio10/feature_correlation.csv`。
+在问"哪些数据必要"之前，得先回答一个更基础的问题：**这 19 个全覆盖指标彼此有多独立？** 报告有两处结论依赖"它们高度相关"这个判断——6.11.4 节用它解释 RF 为什么删掉任何单个指标都无所谓，6.11.5 节用它解释 IF 为什么删掉特征反而变好（维度稀释）。这两处此前都只是断言，没有测量。脚本见 `analyze.py::feature_correlation()`，输出 `results/ratio10/feature_correlation.csv`。
 
 用三种方式测（Spearman 而非 Pearson，因为其中几个量重尾分布明显，Pearson 会低估单调但非线性的关系）：
 
@@ -387,7 +387,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 第 6.10 节的"必要性结论"里有两处判断目前只有归因重要度排序（第 6.8 节）作支撑，不是定量证据：duplicate/unrelated 的检测信号是否真的被无关特征"稀释"了？near_duplicate/keyword 加上（生产环境拿不到的）token 级诊断能带来多大提升、值不值得改造采集流程去覆盖全量？
 
-这两个问题都可以在**不重新训练**的前提下回答：诊断子采样表（`results/ratio10/per_sample_metrics.csv`）里已经同时包含全覆盖轨迹特征、`text_nn_sim`、token 级诊断三类原始数据（各自覆盖率不同，但重合的 900-1200 行子采样人群是同一批样本），只需要用 `analyze.py::unsupervised_metrics()` 换不同的 `features=` 子集重新打分即可，CPU 上几秒跑完全部数据集。脚本见 `scripts/feature_ablation.py`，输出 `results/ratio10/feature_ablation.csv`。
+这两个问题都可以在**不重新训练**的前提下回答：诊断子采样表（`results/ratio10/per_sample_metrics.csv`）里已经同时包含全覆盖轨迹特征、`text_nn_sim`、token 级诊断三类原始数据（各自覆盖率不同，但重合的 900-1200 行子采样人群是同一批样本），只需要用 `analyze.py::unsupervised_metrics()` 换不同的 `features=` 子集重新打分即可，CPU 上几秒跑完全部数据集。脚本见 `analyze.py::feature_group_ablation()`，输出 `results/ratio10/feature_ablation.csv`。
 
 五个消融条件：
 
@@ -420,7 +420,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 - **RF 路线**（有监督，第 6.2 节口径）：`StratifiedKFold(5)` + `RandomForestClassifier(200)` 的 out-of-fold AUC，即 `cross_type.csv` 对角线的构造方式。
 - **IF 路线**（免标签，第 6.6 节口径）：per-dataset `IsolationForest(300)` 在标准化特征上的 AUC，即 `unsupervised.csv` 的 `iforest` 那一行。
 
-两条路线跑**同一批特征、同一批样本**（诊断子采样人群），所以同一个指标的 RF Δ 和 IF Δ 可以直接对比。脚本见 `scripts/single_feature_ablation.py`，输出 `results/ratio10/single_feature_ablation.csv`（336 行 = 8 数据集 × 21 条件 × 2 路线）。约定 **Δ = 删除后 AUC − 完整 AUC**，负数表示"删掉它变差了"（该指标在承载信号），正数表示"删掉它反而变好了"（该指标在稀释信号）。
+两条路线跑**同一批特征、同一批样本**（诊断子采样人群），所以同一个指标的 RF Δ 和 IF Δ 可以直接对比。脚本见 `analyze.py::single_feature_ablation()`，输出 `results/ratio10/single_feature_ablation.csv`（336 行 = 8 数据集 × 21 条件 × 2 路线）。约定 **Δ = 删除后 AUC − 完整 AUC**，负数表示"删掉它变差了"（该指标在承载信号），正数表示"删掉它反而变好了"（该指标在稀释信号）。
 
 ![单指标留一消融：RF 与 IF 对"少一维"的敏感性完全不同](../../results/charts/single_feature_ablation.png)
 
@@ -462,7 +462,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 #### 6.11.5 最小指标集合：免标签路线上 3 个指标胜过全部 19 个
 
-6.11.4 节的留一消融回答的是"删掉某一个会怎样"，这对**决定采集什么**其实是错的问题——高度相关的特征可以每个都单独可删、而整组不可删，19 个"单独看都没用"的特征完全可能是联合必要的。要回答"最少需要哪几个"，必须反过来做：从零开始，每步贪心地加入能让 AUC 涨最多的那个特征，记录整条路径。第 k 个点就是"用 k 个指标能达到的最好成绩"。脚本见 `scripts/minimal_feature_set.py`，输出 `results/ratio10/minimal_feature_set.csv`。
+6.11.4 节的留一消融回答的是"删掉某一个会怎样"，这对**决定采集什么**其实是错的问题——高度相关的特征可以每个都单独可删、而整组不可删，19 个"单独看都没用"的特征完全可能是联合必要的。要回答"最少需要哪几个"，必须反过来做：从零开始，每步贪心地加入能让 AUC 涨最多的那个特征，记录整条路径。第 k 个点就是"用 k 个指标能达到的最好成绩"。脚本见 `analyze.py::minimal_feature_set()`，输出 `results/ratio10/minimal_feature_set.csv`。
 
 **先说口径**：贪心选择用的是它自己被评分的那批标签，所以给定 k 的 AUC 是**乐观的**。这衡量的是"小特征集最多能承载多少信号"，不是一个免标签的选特征配方——第 3.1 节明确禁止用标签挑特征。诚实的读法是"如果你已经知道噪音类型，这是采集成本的下限"。IF 一列报 `auc_dir = max(auc, 1-auc)`，因为免标签离群分数掉到 0.02 不是没用而是方向反了（6.6 节）。
 
@@ -528,7 +528,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 第 6.3 节的 7×7 跨类型迁移矩阵在代码层面显式跳过了 `mixed` 数据集（`analyze.py` 里 `if ds in ('clean', 'mixed'): continue`）。它回答的是"在类型 A 上训的检测器能不能找到类型 B"，每次测试面对的仍然是**单一**噪音类型、干净样本占 90% 的干净分布。生产环境是"一条流里同时有 7 种噪音，其中 6 种没见过"——分布本身变了。
 
-补充实验（`scripts/transfer_to_mixed.py`，输出 `results/ratio10/transfer_to_mixed.csv`）把 7 个单类型检测器全部拉到 `mixed` 数据集上评估。协议与第 6.3 节完全一致（LR + RF 各训一个，`StandardScaler` 只在源域 `fit`，取两者 AUC 较高者）。`mixed` 共 14819 行，其中 13419 行干净、1400 行噪音，且每行都带 `noise_type` 标签（near_duplicate 211、template 206、truncation 204、keyword 197、unrelated 197、garbled 194、duplicate 191），因此可以在混合流内部按类型切片。
+补充实验（`analyze.py::transfer_to_mixed()`，输出 `results/ratio10/transfer_to_mixed.csv`）把 7 个单类型检测器全部拉到 `mixed` 数据集上评估。协议与第 6.3 节完全一致（LR + RF 各训一个，`StandardScaler` 只在源域 `fit`，取两者 AUC 较高者）。`mixed` 共 14819 行，其中 13419 行干净、1400 行噪音，且每行都带 `noise_type` 标签（near_duplicate 211、template 206、truncation 204、keyword 197、unrelated 197、garbled 194、duplicate 191），因此可以在混合流内部按类型切片。
 
 两个口径分别报：`full_coverage`（19 个全覆盖特征，14819 行全量，等于 `cleaning_loop.py` 在生产里真能算的东西）和 `full_diag`（37 个特征、约 919 行诊断子样本，与报告前面各节的口径一致）。以下正文用 `full_coverage`。
 
@@ -611,7 +611,7 @@ AUC 衡量的是"整体排序能力"，但实际清洗时只能剔除一小部�
 
 **注意口径差异**：6.12.3 节的留一法用的是**有监督**检测器（在其他类型的噪音标签上训过 LR/RF），衡量的是"已有检测器碰到新类型"；这里的三条腿全部**免标签**，衡量的是"手上只有一堆无标签的脏数据时能做到什么"。两者数字不可直接比较，但结论指向同一个方向。
 
-在 `mixed` 上按 10% 预算实测（`scripts/pooled_scorer_compare.py`，输出 `results/ratio10/pooled_scorer_compare.csv`）：
+在 `mixed` 上按 10% 预算实测（`analyze.py::pooled_scorer_compare()`，输出 `results/ratio10/pooled_scorer_compare.csv`）：
 
 | 打分器 | 整体 AUC | 剔除精度 P@10% | 相对随机 lift | 逐类型低于随机的格子数 |
 |---|---|---|---|---|
