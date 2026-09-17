@@ -22,6 +22,11 @@ runs/**/lora
 logs/
 layer_norms.jsonl
 
+# Per-question eval records: written by evaluate.py:368 and read by nothing.
+# The aggregate accuracies the report actually cites live in eval_{tag}_{ds}.json,
+# a few hundred KB against ~100MB for these.
+results/eval/eval_raw_*.jsonl
+
 # TensorBoard event files: write-only (model.py:223), never read by any
 # analysis, and a lossier encoding of what per_sample.jsonl already holds.
 # Filenames embed the container id and pid of the machine that produced them.
