@@ -1,0 +1,22 @@
+{
+  "tag": "ratio10",
+  "dataset": "mixed",
+  "budget": 0.1,
+  "n_total": 14819,
+  "n_drop": 1482,
+  "n_keep": 13337,
+  "seed": 42,
+  "detector": "memo_signed_fixed_sign_rule (no labels)",
+  "n_features": 6,
+  "features": [
+    "loss_mean",
+    "loss_last",
+    "loss_std",
+    "loss_curvature",
+    "converge_epoch",
+    "grad_norm_mean"
+  ],
+  "targeted_precision": 0.1282051282051282,
+  "random_precision": 0.08434547908232119,
+  "true_noise_ratio": 0.0944733112895607
+}
