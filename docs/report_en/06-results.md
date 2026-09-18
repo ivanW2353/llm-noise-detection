@@ -335,13 +335,13 @@ One framing caveat first: the AUC numbers reported in Sections 6.2-6.9 (`unsuper
 | Noise type | Best label-free method (AUC, full-training-set basis) | Supervised ceiling (RF within-type AUC, reference only) | Main raw data category relied on | Necessity verdict |
 |---|---|---|---|---|
 | garbled | iforest + full-coverage features, 0.932 | 0.998 | Full-coverage trajectory features (`loss_curvature`/`loss_rank`, etc.) | Trajectory features are already sufficient; neither `text_nn_sim` nor token diagnostics are necessary (Section 6.11 ablation: adding/removing either barely moves the number) |
-| template | **Must use memo_signed**, 0.925 (iforest is only 0.537, near-chance) | 0.999 | memo_signed's 6 signed trajectory features; but Section 6.11's ablation shows `text_nn_sim` alone also reaches 0.805 | The signed trajectory features are the necessary and sufficient production-viable option; `text_nn_sim` is an independent second signal — not necessary, but useful for cross-checking |
-| duplicate | iforest + full-coverage features, 0.528 (**weak, and diluted**) | 0.986 | In theory, `text_nn_sim` alone would suffice | **The current production choice is not optimal** — Section 6.11's ablation shows `text_nn_sim` alone (zscore) reaches 0.938, 0.41 higher than the current 19-feature mixed iforest; the other features are essentially dilutive |
-| unrelated | iforest + full-coverage features, 0.641 | 0.925 | Mostly `text_nn_sim`, with a real contribution from trajectory features too | Partially redundant — `text_nn_sim` alone reaches 0.783 (Section 6.11), already beating the current mixed approach, but trajectory features still add something, so it can't be simplified to a single feature the way duplicate can |
+| template | **Must use memo_signed**, 0.925 (iforest is only 0.551, near-chance) | 0.999 | memo_signed's 6 signed trajectory features; but Section 6.11's ablation shows `text_nn_sim` alone also reaches 0.805 | The signed trajectory features are the necessary and sufficient production-viable option; `text_nn_sim` is an independent second signal — not necessary, but useful for cross-checking |
+| duplicate | iforest + full-coverage features, 0.533 (**weak, and diluted**) | 0.986 | In theory, `text_nn_sim` alone would suffice | **The current production choice is not optimal** — Section 6.11's ablation shows `text_nn_sim` alone (zscore) reaches 0.938, 0.41 higher than the current 19-feature mixed iforest; the other features are essentially dilutive |
+| unrelated | iforest + full-coverage features, 0.639 | 0.925 | Mostly `text_nn_sim`, with a real contribution from trajectory features too | Partially redundant — `text_nn_sim` alone reaches 0.783 (Section 6.11), already beating the current mixed approach, but trajectory features still add something, so it can't be simplified to a single feature the way duplicate can |
 | truncation | zscore_max/iforest + full-coverage features, ~0.58 | 0.763 (the ceiling itself is not high) | Full-coverage trajectory features and token diagnostics each contribute a bit, with no single dominant feature | Nothing to trim — every available category is already in use and the result is still modest; this is weak detectability, not a feature-selection problem |
 | near_duplicate | iforest + full-coverage features, 0.614 (weak) | 0.674 (also on the low side) | Token-level diagnostics carry the strongest signal (0.641) but are unavailable in production; `text_nn_sim` contributes almost nothing among the full-coverage features | **Genuine raw-data coverage gap** — the signal that actually works lives in diagnostics that only cover 12.5% of samples; the current full-scale data is already near its ceiling for this type |
 | keyword | iforest/zscore + full-coverage features, 0.55-0.59 (near-chance) | 0.577 (the ceiling itself is low) | Every category contributes weakly (Section 6.11: `text_nn_sim`, full-coverage trajectory, and token diagnostics all sit between 0.50 and 0.59) | **Not a wrong method choice — every existing raw data category is insufficient.** A 1-2 word substitution barely perturbs a TF-IDF vector or a training trajectory; a genuinely new word-substitution-detection feature is needed |
-| mixed | **`pooled`, three legs combined, 0.725** (P@10% 0.323; `iforest` alone 0.706/0.268) | No attribution/within-type analysis available (`feature_attribution.csv`/`cross_type.csv` both lack a mixed row) | All three raw-data categories: full-coverage trajectory (outlier side) + signed trajectory (memorization side) + `text_nn_sim` (static text side) | Measured in Section 6.12.5: pooling beats every single method on precision, at the cost of near_duplicate falling to 0.494 (marginally below random) and a removal budget dominated by duplicate/garbled. This is the recommendation for unknown composition, not the precision-optimal choice |
+| mixed | **`pooled`, three legs combined, 0.728** (P@10% 0.321; `iforest` alone 0.714/0.270) | No attribution/within-type analysis available (`feature_attribution.csv`/`cross_type.csv` both lack a mixed row) | All three raw-data categories: full-coverage trajectory (outlier side) + signed trajectory (memorization side) + `text_nn_sim` (static text side) | Measured in Section 6.12.5: pooling beats every single method on precision, at the cost of a removal budget dominated by duplicate/garbled. This is the recommendation for unknown composition, not the precision-optimal choice |
 
 ---
 
@@ -427,37 +427,39 @@ Both routes run over the **same features and the same samples** (the diagnostic-
 
 | Dataset | IF full AUC | IF drop `text_nn_sim` | RF full AUC | RF drop `text_nn_sim` |
 |---|---|---|---|---|
-| duplicate | 0.528 | **-0.092** | 0.984 | -0.049 |
-| template | 0.537 | **-0.078** | 0.995 | -0.001 |
-| unrelated | 0.641 | **-0.070** | 0.945 | **-0.087** |
-| mixed | 0.706 | **-0.056** | 0.837 | **-0.060** |
-| near_duplicate | 0.614 | -0.007 | 0.695 | -0.012 |
-| truncation | 0.580 | +0.005 | 0.784 | -0.005 |
-| keyword | 0.589 | +0.005 | 0.672 | -0.002 |
-| garbled | 0.932 | +0.008 | 0.996 | -0.001 |
+| duplicate | 0.533 | **-0.093** | 0.984 | -0.046 |
+| unrelated | 0.639 | **-0.079** | 0.944 | **-0.085** |
+| template | 0.551 | **-0.052** | 0.994 | -0.001 |
+| mixed | 0.714 | **-0.051** | 0.838 | **-0.052** |
+| near_duplicate | 0.607 | -0.002 | 0.696 | -0.014 |
+| keyword | 0.590 | -0.003 | 0.676 | -0.007 |
+| truncation | 0.573 | +0.004 | 0.787 | -0.006 |
+| garbled | 0.932 | +0.012 | 0.996 | -0.001 |
 
-It is the only feature that costs 0.05-0.09 on *both* routes, and the loss concentrates on duplicate/unrelated/mixed — exactly the types Section 6.8's attribution analysis found draw over 90% of their signal from static text similarity. Two independent methods agreeing. On garbled, dropping it actually helps slightly (+0.008): garbled's signal lives entirely in the training trajectory, so the text-similarity dimension is pure noise for it.
+It is the only feature that costs 0.05-0.09 on *both* routes, and the loss concentrates on duplicate/unrelated/mixed — exactly the types Section 6.8's attribution analysis found draw over 90% of their signal from static text similarity. Two independent methods agreeing. On garbled, dropping it actually helps slightly (+0.012): garbled's signal lives entirely in the training trajectory, so the text-similarity dimension is pure noise for it.
 
-**Finding 2: on the RF route no single metric is load-bearing — all 152 cells have |Δ| below 0.01.**
+**Finding 2: on the RF route no single metric is load-bearing — all 144 cells have |Δ| below 0.01.**
 
-Excluding `text_nn_sim`, **not one** of RF's 152 "dataset × dropped metric" cells exceeds |Δ| = 0.01; the mean |Δ| is just 0.0017, with a maximum of 0.0077 (near_duplicate dropping `grad_norm_std`). The reason is that these 19 trajectory features are highly correlated — `loss_mean`/`loss_last`/`loss_min`/`loss_rank` all describe different facets of the same loss curve. With labels to guide it, RF simply learns to substitute a correlated stand-in; the signal routes back in through another dimension. **Practical implication: to cut feature-collection cost for a supervised production detector, any single trajectory feature can be dropped safely — but `text_nn_sim` cannot.**
+Excluding `text_nn_sim`, **not one** of RF's 144 "dataset × dropped metric" cells (18 droppable features × 8 datasets, since the 19 full-coverage features minus `text_nn_sim` itself leaves 18) exceeds |Δ| = 0.01; the mean |Δ| is just 0.0011, with a maximum of 0.0056 (mixed dropping `cos_ref_last`). The reason is that these 19 trajectory features are highly correlated — `loss_mean`/`loss_last`/`loss_min`/`loss_rank` all describe different facets of the same loss curve. With labels to guide it, RF simply learns to substitute a correlated stand-in; the signal routes back in through another dimension. **Practical implication: to cut feature-collection cost for a supervised production detector, any single trajectory feature can be dropped safely — but `text_nn_sim` cannot.**
 
 **Finding 3: on the IF route "more features is better" is false — dropping a metric often raises AUC.**
 
-Across the same 152 cells excluding `text_nn_sim`, **43** have |Δ| > 0.01 (RF has zero), with mean |Δ| = 0.0088 — 5x RF's. The crucial part is that the sign goes **both ways**:
+Across the same 144 cells excluding `text_nn_sim`, **46** have |Δ| > 0.01 (RF has zero), with mean |Δ| = 0.0096 — 9x RF's. The crucial part is that the sign goes **both ways**:
 
 | Dataset | Largest gain from dropping | Δ | Largest loss from dropping | Δ |
 |---|---|---|---|---|
-| template | `converge_epoch` | **+0.052** | `loss_slope` | -0.036 |
-| duplicate | `cos_ref_mean` | **+0.033** | `grad_norm_cv` | -0.038 |
-| unrelated | `loss_mean` | **+0.027** | `cos_ref_slope` | -0.016 |
-| near_duplicate | (all negative) | -0.002 | `converge_epoch` | -0.021 |
+| template | `loss_last` | **+0.034** | `grad_norm_cv` | -0.061 |
+| duplicate | `converge_epoch` | **+0.041** | `cos_ref_last` | -0.026 |
+| unrelated | `grad_norm_cv` | **+0.014** | `converge_epoch` | -0.013 |
+| near_duplicate | `grad_norm_cv` | **+0.010** | `converge_epoch` | -0.014 |
 
-The same `converge_epoch`: dropping it gains 5.2 points on template and 2.9 on duplicate, but loses 2.1 on near_duplicate. IF has no labels, so every dimension enters the outlier-distance computation indiscriminately, meaning **dimensions irrelevant to the current noise type purely dilute the signal**. Which dimensions count as "irrelevant" depends on the noise type — and the noise type is precisely what a label-free setting does not know. That is why one cannot simply "pick a better feature subset for IF."
+The same `converge_epoch`: dropping it gains 4.1 points on duplicate, but loses 1.3 and 1.4 points on unrelated and near_duplicate respectively. IF has no labels, so every dimension enters the outlier-distance computation indiscriminately, meaning **dimensions irrelevant to the current noise type purely dilute the signal**. Which dimensions count as "irrelevant" depends on the noise type — and the noise type is precisely what a label-free setting does not know. That is why one cannot simply "pick a better feature subset for IF."
 
 This finding independently justifies Section 6.12.5's choice of max over mean for the `pooled` scorer: if irrelevant dimensions dilute rather than cancel out, averaging three legs lets two silent legs bury the one that actually fired, and only max preserves the signal.
 
-**A previously unrecorded asymmetry: dropping `text_nn_sim` costs IF 7.8 points on template but costs RF only 0.1.** Template's IF AUC is only 0.537 to begin with (a consequence of direction reversal), and this 7.8-point drop shows that what little label-free signal it has leans heavily on the text-similarity dimension. RF, with labels, extracts 0.995 from the trajectory features alone and does not need `text_nn_sim` at all. This is the micro-level mechanism behind the 0.995 vs. 0.537 chasm between Section 6.2's "supervised = signal ceiling" and Section 6.6's "label-free = production-reachable": the signal genuinely is in the trajectory, but a label-free scorer cannot read its direction and falls back on whatever residual text-level cue remains.
+**A methodological caveat**: `IsolationForest` sums floats internally with `n_jobs=-1` multithreading, so summation order is not fixed and rerunning the same data produces AUC jitter on the order of 1e-2 — rerun the "largest gain/loss from dropping" table above and the specific winning feature name can change (for example, template's largest-gain entry has shown up as both `converge_epoch` and `loss_last` across different reruns, both in the +0.03 to +0.05 range). **The directional conclusion is stable, but an exact ranking of "which single feature comes first" should not be over-interpreted** — the numbers cited in this section and in Section 6.11.5 reflect one particular rerun.
+
+**A previously unrecorded asymmetry: dropping `text_nn_sim` costs IF 5.2 points on template but costs RF only 0.1.** Template's IF AUC is only 0.551 to begin with (a consequence of direction reversal), and this 5.2-point drop shows that what little label-free signal it has leans heavily on the text-similarity dimension. RF, with labels, extracts 0.994 from the trajectory features alone and does not need `text_nn_sim` at all. This is the micro-level mechanism behind the 0.994 vs. 0.551 chasm between Section 6.2's "supervised = signal ceiling" and Section 6.6's "label-free = production-reachable": the signal genuinely is in the trajectory, but a label-free scorer cannot read its direction and falls back on whatever residual text-level cue remains.
 
 #### 6.11.5 Minimal feature set: on the label-free route, 3 metrics beat all 19
 
@@ -467,20 +469,20 @@ Section 6.11.3's leave-one-out answers "what happens if I drop one," which is th
 
 ![Minimal feature set: AUC along a greedy forward-selection path](../../results/charts/en/minimal_feature_set.png)
 
-**Finding 1 (the most important here): on the label-free route, 3 metrics beat all 19 — on all 8 datasets, with a mean gain of 0.133.**
+**Finding 1 (the most important here): on the label-free route, 3 metrics beat all 19 — on all 8 datasets, with a mean gain of 0.132.**
 
 | Dataset | IF with 3 metrics | IF with all 19 | Difference |
 |---|---|---|---|
-| template | **0.875** | 0.537 | **+0.338** |
-| duplicate | **0.744** | 0.528 | **+0.216** |
-| unrelated | **0.840** | 0.641 | **+0.199** |
-| mixed | **0.791** | 0.706 | **+0.085** |
-| keyword | 0.665 | 0.589 | +0.076 |
-| truncation | 0.650 | 0.580 | +0.070 |
-| garbled | **0.977** | 0.932 | +0.046 |
-| near_duplicate | 0.650 | 0.614 | +0.036 |
+| template | **0.875** | 0.551 | **+0.324** |
+| duplicate | **0.744** | 0.533 | **+0.211** |
+| unrelated | **0.840** | 0.639 | **+0.201** |
+| truncation | 0.650 | 0.573 | +0.077 |
+| mixed | **0.791** | 0.714 | **+0.077** |
+| keyword | 0.665 | 0.590 | +0.075 |
+| garbled | **0.977** | 0.932 | +0.045 |
+| near_duplicate | 0.650 | 0.607 | +0.043 |
 
-This is not a marginal improvement but evidence that **the current production configuration (19 full-coverage features fed to IsolationForest) systematically handicaps itself**. Template jumps from a near-chance 0.537 to 0.875, duplicate from 0.528 to 0.744 — precisely the two types where Section 6.6's direction reversal is worst, which means part of "direction reversal" is really **dimensional dilution**: irrelevant dimensions flatten the outlier distance until the two or three that carry signal are drowned out. Section 6.11.3 found that dropping a single metric often helps IF; this is the upper bound of that effect.
+This is not a marginal improvement but evidence that **the current production configuration (19 full-coverage features fed to IsolationForest) systematically handicaps itself**. Template jumps from a near-chance 0.551 to 0.875, duplicate from 0.533 to 0.744 — precisely the two types where Section 6.6's direction reversal is worst, which means part of "direction reversal" is really **dimensional dilution**: irrelevant dimensions flatten the outlier distance until the two or three that carry signal are drowned out. Section 6.11.3 found that dropping a single metric often helps IF; this is the upper bound of that effect.
 
 **Finding 2: on the RF route one metric reaches 95%, but squeezing out 99% takes 3-6.**
 
@@ -488,12 +490,12 @@ This is not a marginal improvement but evidence that **the current production co
 |---|---|---|---|
 | garbled | 0.996 | 1 | 3 |
 | duplicate | 0.984 | 1 | 6 |
-| template | 0.995 | 2 | 3 |
-| unrelated | 0.945 | 3 | 5 |
-| keyword | 0.672 | 1 | 5 |
-| mixed | 0.837 | 3 | 6 |
-| near_duplicate | 0.695 | 4 | 6 |
-| truncation | 0.784 | 4 | not reached |
+| template | 0.994 | 2 | 3 |
+| unrelated | 0.944 | 3 | 5 |
+| keyword | 0.676 | 1 | 5 |
+| mixed | 0.838 | 3 | 6 |
+| near_duplicate | 0.696 | 4 | 6 |
+| truncation | 0.787 | 5 | not reached |
 
 With labels, features are highly substitutable, so the first one or two absorb most of the signal; the remaining 1-5 points accrue slowly across more dimensions. Truncation never reaches 99% by k=6 — the one type that genuinely needs a wide feature set.
 
@@ -509,12 +511,12 @@ With labels, features are highly substitutable, so the first one or two absorb m
 
 `loss_slope` appears in 5 of the 8 k=3 sets, making it the most broadly useful single metric; `text_nn_sim` and `converge_epoch` appear 3 times each. The routes diverge most on duplicate: RF goes straight for `text_nn_sim` (with labels, it knows "resembles another sample" is the thing to look at), while IF picks `grad_norm_cv` first, because without labels it has no way to know similarity is the suspicious direction and must find anomalies in gradient variability instead.
 
-**Practical implication**: with a known, calibrated noise type, label-free scoring **should use 2-3 metrics rather than 19** — higher precision and cheaper collection. But *which* 2-3 depends on the noise type (every row above differs), and not knowing the type is the premise of the label-free setting — back to the structural difficulty in Section 5.3. The `pooled` scorer still feeds all 19 full-coverage features to its iforest leg, so that leg carries 0.04-0.34 of unrealized headroom; this is an explicit next step (Section 7.3).
+**Practical implication**: with a known, calibrated noise type, label-free scoring **should use 2-3 metrics rather than 19** — higher precision and cheaper collection. But *which* 2-3 depends on the noise type (every row above differs), and not knowing the type is the premise of the label-free setting — back to the structural difficulty in Section 5.3. The `pooled` scorer still feeds all 19 full-coverage features to its iforest leg, so that leg carries 0.04-0.32 of unrealized headroom; this is an explicit next step (Section 7.3).
 
 #### 6.11.6 Recommendations
 
 - **High priority, low cost**: add a third `method` option to `cleaning_loop.py` (e.g. `text_sim`) that scores duplicate/unrelated directly with `text_nn_sim`'s zscore — expected to meaningfully improve removal precision, and `text_nn_sim` is already a full-coverage feature, so no new data collection is needed. (**Partly done**: the `pooled` scorer added in Section 6.12.5 wires `text_nn_sim`'s |z| in as its own leg, reaching per-type AUC 0.946 and 97.4% recall on duplicate within `mixed`. But `pooled` targets the unknown-composition case; a clean `text_nn_sim`-only option is still worth having for calibrated single-type use, where it is more precise.)
-- **High priority**: narrow the `iforest` leg from 19 features to 2-3 (Section 6.11.4) — the only change that buys 0.04-0.34 with no new data, no new method, just feeding it fewer features.
+- **High priority**: narrow the `iforest` leg from 19 features to 2-3 (Section 6.11.4) — the only change that buys 0.04-0.32 with no new data, no new method, just feeding it fewer features.
 - **Not worth investing in right now**: improving near_duplicate/keyword requires new features rather than a new scoring method, which is a substantially larger scope of work — for now this is recorded as a known limitation (folded into Section 7.2), to be revisited only once there's clear downstream-benefit evidence (analogous to Section 6.9's verification for template).
 
 ---
@@ -614,35 +616,35 @@ Measured on `mixed` under a 10% budget (`analyze.py::pooled_scorer_compare()`, o
 
 | Scorer | Overall AUC | Removal precision P@10% | Lift over random | Per-type cells below random |
 |---|---|---|---|---|
-| `pooled` | **0.725** | **0.323** | **3.83×** | 1 |
-| `iforest` | 0.706 | 0.268 | 3.18× | **0** |
-| `text_nn_sim` \|z\| alone | 0.636 | 0.255 | 3.03× | 2 |
+| `pooled` | **0.728** | **0.321** | **3.81×** | **0** |
+| `iforest` | 0.714 | 0.270 | 3.20× | **0** |
+| `text_nn_sim` \|z\| alone | 0.636 | 0.255 | 3.02× | 2 |
 | `memo_signed` | 0.380 | 0.128 | 1.52× | 5 |
 | Random | 0.500 | 0.084 | 1.00× | — |
 
-(The lift denominator is the true-noise fraction among the 1482 samples **actually** removed at random, 8.43%, taken from `metadata.json`'s `random_precision` — the same basis as Section 6.13.3. Using the full-dataset theoretical noise rate of 9.45% instead gives 3.42× / 2.84× / 2.70× / 1.36×: same ordering, slightly lower absolute values.)
+(The lift denominator is the true-noise fraction among the 1482 samples **actually** removed at random, 8.43%, taken from `metadata.json`'s `random_precision` — the same basis as Section 6.13.3. Using the full-dataset theoretical noise rate of 9.45% instead gives 3.40× / 2.86× / 2.70× / 1.36×: same ordering, slightly lower absolute values.)
 
 Per-type AUC (that type vs. clean):
 
 | Type | `iforest` | `memo_signed` | `text_nn_sim` \|z\| | `pooled` |
 |---|---|---|---|---|
-| duplicate | 0.703 | 0.651 | **0.967** | 0.946 |
-| garbled | **0.968** | 0.008 | 0.513 | 0.926 |
-| unrelated | 0.734 | 0.230 | 0.809 | **0.842** |
-| template | 0.603 | **0.866** | 0.736 | 0.822 |
-| keyword | **0.642** | 0.319 | 0.513 | 0.545 |
-| truncation | **0.687** | 0.255 | 0.472 | 0.527 |
-| near_duplicate | **0.620** | 0.318 | 0.465 | 0.494 |
+| duplicate | 0.689 | 0.651 | **0.967** | 0.946 |
+| garbled | **0.972** | 0.008 | 0.513 | 0.935 |
+| unrelated | 0.743 | 0.230 | 0.809 | **0.842** |
+| template | 0.657 | **0.866** | 0.736 | 0.818 |
+| keyword | **0.641** | 0.319 | 0.513 | 0.548 |
+| truncation | **0.685** | 0.255 | 0.472 | 0.526 |
+| near_duplicate | **0.625** | 0.318 | 0.465 | 0.505 |
 
 Three points that need stating honestly.
 
-**First, `pooled` wins on precision, not on "eliminating every below-random cell".** It lifts P@10% from `iforest`'s 0.268 to 0.323 (a 20% relative gain), at the cost of near_duplicate falling to 0.494 — 0.006 below random. `iforest` alone, meanwhile, happens to have no below-random cell on `mixed`. The 12.3 conclusion that "pooling eliminates every below-random cell" does not fully reproduce here, because the label-free `memo_signed` leg is itself below random on 5 of 7 types (garbled at 0.008 — it ranks garbled text at the cleanest end), so it contributes far more noise to the pool than a supervised detector pool would. `pooled` should therefore be read as "trading precision for coverage under unknown noise", not as a free improvement.
+**First, `pooled` wins on precision, and in this rerun it also clears every below-random cell.** It lifts P@10% from `iforest`'s 0.270 to 0.321 (a 19% relative gain); the weakest type, near_duplicate, moves from (`iforest` alone's) 0.625 to 0.505 — just over the 0.5 random line, no longer "below random", but nowhere near reliable either — 0.505 carries almost no discrimination, it simply is no longer ranking backwards like `memo_signed` does. The 6.12.3 leave-one-out conclusion that "pooling eliminates every below-random cell" holds directionally here too, but at the cost that near_duplicate is, in substance, still an abandoned detection target — it just isn't actively reversed anymore. The label-free `memo_signed` leg is itself below random on 5 of 7 types (garbled at 0.008 — it ranks garbled text at the cleanest end), so it contributes far more noise to the pool than a supervised detector pool would. `pooled` should therefore be read as "trading precision for coverage under unknown noise", not as a free improvement.
 
 **Second, `memo_signed` alone on a mixed stream is catastrophic (AUC 0.380, 0.12 worse than random).** That is not a bug but its design boundary: a fixed-sign rule only works on memorized, hyper-typical noise, and 5 of the 7 types in a mixed stream are ordinary outlier noise that it actively **ranks in reverse**. Section 6.6 already stated the rule must score below 0.5 on non-memorized noise; this is what that costs in a real mixed setting — the 0.531 removal precision on single-type template (vs. `iforest`'s 0.040) does not extrapolate to a mixed stream.
 
-**Third, the removal budget gets eaten by the easiest types.** Look at the composition of the 1482 removed rows: `pooled` catches 186 duplicate rows (97.4% of that type removed) and 141 garbled (72.7%), but only 14 template (6.8%), even though template's per-type AUC is 0.822. The budget is finite and duplicate's scores are simply higher across the board — **a good per-type AUC does not mean the type gets caught under a shared budget**. This is the same phenomenon as Section 6.5's "high AUC doesn't mean useful under a budget", made worse in a mixed stream because types compete for the same budget.
+**Third, the removal budget gets eaten by the easiest types.** Look at the composition of the 1482 removed rows: `pooled` catches 186 duplicate rows (97.4% of that type removed) and 141 garbled (72.7%), but only 14 template (6.8%), even though template's per-type AUC is 0.818. The budget is finite and duplicate's scores are simply higher across the board — **a good per-type AUC does not mean the type gets caught under a shared budget**. This is the same phenomenon as Section 6.5's "high AUC doesn't mean useful under a budget", made worse in a mixed stream because types compete for the same budget.
 
-Taken together, the production recommendation is tiered: **use a single method when the noise type is known and calibrated** (`memo_signed` for template, `iforest` for garbled, `text_nn_sim` directly for duplicate/unrelated) — precision is clearly higher; **use `pooled` when the noise composition is unknown or mixed** — it is the only option that avoids severe failure on any of the 7 types, at the price of a precision ceiling around 0.32 and a budget dominated by the most salient types. A full closed-loop retrain on `mixed` (remove, retrain, evaluate downstream) has not been run yet; it is listed as a next step in Section 7.3.
+Taken together, the production recommendation is tiered: **use a single method when the noise type is known and calibrated** (`memo_signed` for template, `iforest` for garbled, `text_nn_sim` directly for duplicate/unrelated) — precision is clearly higher; **use `pooled` when the noise composition is unknown or mixed** — it is currently the only option that avoids actively ranking backwards on any of the 7 types, at the price of a precision ceiling around 0.32 and a budget dominated by the most salient types; a weak-signal type like near_duplicate isn't really usable just because it's "no longer below random." A full closed-loop retrain on `mixed` (remove, retrain, evaluate downstream) has not been run yet; it is listed as a next step in Section 7.3.
 ---
 
 ### 6.13 Label-Free Closed-Loop Cleaning: From "Can Detect" to "Cleaning Actually Works"
