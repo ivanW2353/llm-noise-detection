@@ -44,3 +44,10 @@ runs/**/tb/
 # Datasets held on the large volume and reached through a symlink; the pointer
 # is machine-specific, and wild_data.py rebuilds the contents from OASST.
 data/wild_all
+
+# Comparison-method / external-baseline code: kept local only, never pushed.
+/baselines.py
+
+# Personal Claude Code config, not a project deliverable.
+/CLAUDE.md
+/.claude/

@@ -712,6 +712,67 @@ def feature_group_ablation(frame: pd.DataFrame) -> pd.DataFrame:
     return table[table.dataset!='clean'].reset_index(drop=True)
 
 
+def length_confound(frame: pd.DataFrame, root: str | Path, tag: str, dataset: str = 'wild',
+                    features=None, seed: int = 42, n_bins: int = 10) -> pd.DataFrame:
+    """Wild-noise length confound: OASST `quality` correlates with response
+    length (see wild_data.py's docstring/summarize()), and length is trivially
+    visible to every feature derived from the loss curve (a short reply gets
+    fewer label tokens, a different loss trajectory shape, etc.), so any
+    wild-noise AUC needs to state how much of it survives once length is
+    controlled for. Reports, for the pooled cleaning_loop.py detector score
+    and for each individual FULL_COVERAGE_FEATS column, four numbers side by
+    side:
+      raw_auc        - AUC of the score/feature against the noise label, as-is.
+      length_auc     - AUC of response length alone (the confound's own ceiling,
+                       same for every row since it does not depend on `signal`).
+      residual_auc   - AUC after linearly regressing the score on length and
+                       scoring the residual.
+      stratified_auc - AUC computed within length-decile bins and averaged
+                       (weighted by bin size), a nonparametric correction that
+                       does not assume the score-vs-length relationship is linear.
+    A raw_auc close to length_auc, with residual_auc/stratified_auc near 0.5,
+    means the signal is mostly rediscovering "short replies are rated worse"
+    rather than detecting anything about training dynamics."""
+    import cleaning_loop as cl
+    from data import read as read_rows
+    root = Path(root)
+    sub = frame[frame.dataset == dataset].reset_index(drop=True).copy()
+    resp_len = {r.id: len(r.messages[-1].get('content', '')) if r.messages else 0
+               for r in read_rows(root / 'data' / tag / dataset / 'train.jsonl')}
+    sub['response_len'] = sub.sample_id.astype(str).map(resp_len)
+    sub = sub.dropna(subset=['response_len']).reset_index(drop=True)
+    y = sub.noise_type.fillna('none').ne('none').astype(int).to_numpy()
+    length = sub['response_len'].to_numpy(float)
+
+    feats = list(features or [c for c in FULL_COVERAGE_FEATS if c in sub.columns])
+    core = [c for c in feats if sub[c].notna().all()]
+    scores = {f: sub[f].to_numpy(float) for f in core}
+    if core:
+        scores = {'pooled_detector': cl._score_pooled(sub, core, seed)[0], **scores}
+
+    def residual_auc(score):
+        a = np.column_stack([np.ones_like(length), length])
+        coef, *_ = np.linalg.lstsq(a, score, rcond=None)
+        return auc(y, score - a @ coef)
+
+    def stratified_auc(score):
+        order = np.argsort(length); bins = np.array_split(order, n_bins)
+        aucs, weights = [], []
+        for b in bins:
+            yb = y[b]
+            if len(set(yb)) < 2: continue
+            aucs.append(auc(yb, score[b])); weights.append(len(b))
+        return float(np.average(aucs, weights=weights)) if aucs else float('nan')
+
+    length_auc_value = auc(y, length)
+    rows = []
+    for name, score in scores.items():
+        rows.append({'dataset': dataset, 'signal': name, 'n': len(y), 'n_noise': int(y.sum()),
+                    'raw_auc': auc(y, score), 'length_auc': length_auc_value,
+                    'residual_auc': residual_auc(score), 'stratified_auc': stratified_auc(score)})
+    return pd.DataFrame(rows)
+
+
 def pooled_scorer_compare(frame: pd.DataFrame, dataset='mixed', seed=42) -> pd.DataFrame:
     """Compares cleaning_loop.py's three scorers (iforest/memo_signed/pooled),
     plus the raw text_nn_sim |z| leg on its own for attribution, on one
