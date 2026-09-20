@@ -8,4 +8,6 @@ dependencies = ["numpy", "pandas", "pyyaml", "scikit-learn"]
 [project.scripts]
 noisedetect = "cli:main"
 [tool.setuptools]
-py-modules = ["cli", "settings", "data", "model", "train", "evaluate", "analyze"]
+py-modules = ["cli", "settings", "data", "model", "train", "evaluate", "analyze",
+              "textsim", "cleaning_loop", "wild_data", "run"]
+packages = ["datalib", "lora", "analysis"]
