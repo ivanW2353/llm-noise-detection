@@ -12,7 +12,9 @@ import glob
 import json
 import os
 import re
+import string
 import time
+from collections import Counter
 from pathlib import Path
 
 MAX_LEN = 2048          # generation room (long CoT few-shot + output)
@@ -108,6 +110,75 @@ def _generate(model, tokenizer, prompts, max_new_tokens=256, bs=32):
         outs.extend(tokenizer.batch_decode(gen, skip_special_tokens=True))
     model.config.use_cache = False
     return outs
+
+
+# ----------------------------------------------------------------------------
+# TriviaQA official EM/F1 (github.com/mandarjoshi90/triviaqa evaluation script)
+# ----------------------------------------------------------------------------
+def _normalize_answer(s):
+    def remove_articles(text):
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def handle_punc(text):
+        exclude = set(string.punctuation + ''.join(["'", '’', '´', '`']))
+        return ''.join(ch if ch not in exclude else ' ' for ch in text)
+
+    def lower(text):
+        return text.lower()
+
+    def replace_underscore(text):
+        return text.replace('_', ' ')
+
+    return white_space_fix(remove_articles(handle_punc(lower(replace_underscore(s))))).strip()
+
+
+def _exact_match_score(prediction, ground_truth):
+    return _normalize_answer(prediction) == _normalize_answer(ground_truth)
+
+
+def _f1_score(prediction, ground_truth):
+    pred_tokens = _normalize_answer(prediction).split()
+    gt_tokens = _normalize_answer(ground_truth).split()
+    common = Counter(pred_tokens) & Counter(gt_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(gt_tokens)
+    return 2 * precision * recall / (precision + recall)
+
+
+def _metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
+    return max(metric_fn(prediction, gt) for gt in ground_truths)
+
+
+def _parse_qa_answer(text):
+    text = text.strip()
+    return text.splitlines()[0].strip() if text else ''
+
+
+def _load_qa_correctness(seed=42, max_samples=2000):
+    """Official TriviaQA rc.nocontext validation split (never used by our data pipeline,
+    which trains on the official train split -- see AGENTS.md). Subsampled for eval-time
+    cost since generation is far slower per-sample than MC scoring."""
+    import random
+    from datasets import load_dataset
+    tr = load_dataset('mandarjoshi/trivia_qa', 'rc.nocontext', split='train')
+    val = load_dataset('mandarjoshi/trivia_qa', 'rc.nocontext', split='validation')
+    shot_txt = ''.join(
+        f"Question: {s['question']}\nAnswer: {s['answer']['value']}\n\n" for s in tr.select(range(5)))
+    idx = list(range(len(val)))
+    random.Random(seed).shuffle(idx)
+    idx = idx[:max_samples]
+    samples, answers = [], []
+    for i in idx:
+        r = val[i]
+        samples.append(shot_txt + f"Question: {r['question']}\nAnswer:")
+        answers.append(r['answer']['aliases'])
+    return samples, answers, '5-shot', len(idx)
 
 
 # ----------------------------------------------------------------------------
@@ -264,6 +335,17 @@ TASKS = {
 
 
 def _run_task(model, tokenizer, task, bbh_dir=None, smoke=False):
+    if task == 'qa_correctness':
+        samples, aliases, _, n = _load_qa_correctness(max_samples=50 if smoke else 2000)
+        if smoke:
+            samples, aliases, n = samples[:50], aliases[:50], 50
+        gens = _generate(model, tokenizer, _chat_wrap(tokenizer, samples), max_new_tokens=32)
+        preds = [_parse_qa_answer(t) for t in gens]
+        em = [_metric_max_over_ground_truths(_exact_match_score, p, a) for p, a in zip(preds, aliases)]
+        f1 = [_metric_max_over_ground_truths(_f1_score, p, a) for p, a in zip(preds, aliases)]
+        raw = [{'qid': i, 'em': int(e), 'f1': round(f, 4), 'aliases': a, 'pred': p}
+               for i, (e, f, a, p) in enumerate(zip(em, f1, aliases, preds))]
+        return {'acc': sum(em) / n, 'em': sum(em) / n, 'f1': sum(f1) / n, 'n': n, 'raw': raw}
     if task == 'gsm8k':
         samples, answers, _, n = _load_gsm8k()
         if smoke:
@@ -353,7 +435,7 @@ class Evaluator:
         print(f"[{time.strftime('%F %T')}] model loaded in {time.time()-t_load:.0f}s", flush=True)
         bbh_dir = self.settings.data_root / 'datasets' / 'benchmarks' / 'bbh'
         for task in tasks:
-            if smoke and task not in ('mmlu', 'gsm8k'):
+            if smoke and task not in ('mmlu', 'gsm8k', 'qa_correctness'):
                 continue
             if task in results and not force:
                 print(f'  {task}: cached')
