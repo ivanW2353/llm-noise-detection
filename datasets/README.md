@@ -3,7 +3,7 @@
 Each experiment is isolated by tag:
 
 ```
-data/<tag>/
+datasets/<tag>/
 ├── manifest.json
 ├── heldout.jsonl
 └── <dataset>/train.jsonl
