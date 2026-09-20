@@ -49,7 +49,7 @@
 | `results/{tag}/minimal_feature_set.csv` | `analyze.py::minimal_feature_set()` | 6.11.5 |
 | `results/{tag}/transfer_to_mixed.csv` | `analyze.py::transfer_to_mixed()` | 6.12 |
 | `results/{tag}/pooled_scorer_compare.csv` | `analyze.py::pooled_scorer_compare()` | 6.12.5 |
-| `data/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
+| `datasets/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
 
 **下游评测口径。** 7 项 benchmark：MMLU（n=14042）、GSM8K（1319）、HellaSwag（10042）、ARC（1172）、BBH（540）、TruthfulQA（817）、WinoGrande（1267）。报告中的"7 项平均"是这 7 个准确率的**无权重算术平均**，不按样本量加权——所以 n=540 的 BBH 与 n=14042 的 MMLU 权重相同，单项波动会被放大，6.9 与 6.13 节因此都同时给出分项表而非只给平均值。
 
@@ -766,5 +766,70 @@ duplicate 和 garbled 两类拿掉 365 席（约四分之一预算），而它�
 **第三，这暴露了 P@10% 作为选型指标的根本局限。** 三个打分器在 `mixed` 上的 lift 排序是 `pooled`(3.83×) > `iforest`(3.18×) > `memo_signed`(1.52×)，但下游收益排序与之无关。合起来看，本章三组闭环给出的完整判据是：**清洗有收益要求三个条件同时成立——噪音确有下游危害（6.13.1）、打分器方向正确（6.13.2）、且剔除预算落在有害的那部分噪音上（本节）**。前两条此前已知，第三条是混合噪音特有的，只有走到下游才看得见。
 
 这也说明 6.12.5 节"`pooled` 是用精度换覆盖面"这个判断还不够——在混合流上它换来的覆盖面并没有转化为收益，因为覆盖面本身没有按危害加权。按危害加权的剔除（而非按异常程度加权）是 7.3 节列出的下一步。
+
+### 6.14 外部基线对比：本项目的训练动态检测器 vs. 文献里的 EL2N/GraNd/TracIn 代理指标
+
+前面各节把本项目的检测器（`iforest`/`zscore`/`memo_signed`/`pooled`）互相比较，但没有和数据剪枝/影响函数文献里常引用的方法对齐过。`baselines.py`（不纳入 Git，见该文件 docstring 及 CLAUDE.md 的"不推送到GitHub"约定，仅本地留存供报告引用）用已经收集好的轨迹数据，无需重新训练，复刻了三个代理指标：
+
+- **`el2n_proxy`**：只用**第一个 epoch**的 loss。EL2N（Paul et al. 2021）原定义是训练早期误差向量的 L2 范数，因果语言模型没有固定标签词表构造 softmax 误差向量，loss 是最直接的类比。
+- **`grand_proxy`**：只用**第一个 epoch**的梯度范数（GraNd，同一篇论文）。
+- **`tracin_proxy`**：直接复用已经算好的 `cos_ref_mean`（样本自身梯度方向与留出集参考方向的余弦相似度，对全轨迹取平均）——这本身就是一个 TracIn 式（Pruthi et al. 2020）的自/交叉影响力分数，只是此前没有点名。
+- **`loss_rank`**：现有特征之一，一并列入作为参照。
+
+**`ratio10`（8 个注入噪音数据集）：**
+
+| 数据集 | `el2n_proxy` | `grand_proxy` | `tracin_proxy` | `loss_rank` | 本项目现有最佳（`iforest`/`zscore`/`memo_signed`） |
+|---|---|---|---|---|---|
+| duplicate | 0.587 | 0.510 | 0.534 | **0.666** | 0.612（iforest） |
+| garbled | **0.983** | 0.813 | 0.585 | 0.940 | 0.936（iforest） |
+| keyword | **0.682** | 0.569 | 0.566 | 0.619 | 0.552（iforest） |
+| mixed | 0.640 | 0.603 | 0.507 | 0.564 | 0.662（iforest） |
+| near_duplicate | **0.657** | 0.565 | 0.607 | 0.617 | 0.599（iforest） |
+| template | **0.931** | 0.765 | 0.877 | 0.911 | 0.925（memo_signed，带符号规则） |
+| truncation | 0.684 | **0.716** | 0.580 | 0.518 | 0.657（zscore_max） |
+| unrelated | **0.771** | 0.635 | 0.558 | 0.632 | 0.703（iforest） |
+
+（本项目"现有最佳"取自 `results/ratio10/unsupervised.csv` 与 `memorization.csv` 中每个数据集的最高值，完整数据见 `results/ratio10/external_baselines.csv`。）
+
+**`wild_all`（天然噪音，全量 68,762 行）：**
+
+| baseline | AUC |
+|---|---|
+| `grand_proxy` | **0.805** |
+| `el2n_proxy` | 0.760 |
+| `tracin_proxy` | 0.604 |
+| `loss_rank` | 0.545 |
+
+**核心发现：只用第一个 epoch 的 loss/梯度范数（`el2n_proxy`/`grand_proxy`），在多个类型上追平甚至反超本项目当前跑满 5 个 epoch 的多特征检测器**——garbled（0.983 vs 0.936）、keyword（0.682 vs 0.552）、near_duplicate（0.657 vs 0.599）、unrelated（0.771 vs 0.703）都是 `el2n_proxy` 更高，且只用了 1/5 的训练轮数。这与第 6.7 节"早期检测"一节的发现方向完全一致，互相印证：噪音信号大多在训练早期就已经显现，本项目当前的免标签生产方案未必需要跑满 5 个 epoch 才能拿到可用信号。`wild_all` 上同样是 `grand_proxy`/`el2n_proxy` 领先，`tracin_proxy`/`loss_rank` 落后，模式一致。
+
+**`tracin_proxy`（即 `cos_ref_mean`）单独使用是全部四个基线里最弱的**（ratio10 上 0.51-0.61，wild_all 上 0.604），说明文献中常被引用为影响函数"金标准"的这个量，单独作检测信号价值有限——它更适合作为组合打分（如 `pooled`）里的一条腿，而不是独立指标。
+
+**必须一起报告的口径限制：** 本节和全报告其余章节一样，AUC 由 `analyze.py::auc()` 取 `max(value, 1-value)`，即方向未知——高 AUC 不代表可以直接部署。template 上 `el2n_proxy` 达到 0.931，但第 6.6 节的方向反转陷阱同样可能适用于它（`iforest` 在同一数据集上方向恰好反了，实测 AUC 仅 0.522，第 6.13.2 节的定向清洗因此比随机剔除更差）；`el2n_proxy` 是否真的指向"噪音=高loss"的正确方向、能否直接拿来做真实清洗，本报告未验证，使用前需要像 `memo_signed` 一样先确认符号，不能只看这张表的数字就下结论。
+
+### 6.15 天然噪音的检测信号里，多少是回复长度混淆？
+
+第 7.3 节此前提到，OASST2 的人工 `quality` 标签与回复长度相关（相关系数 −0.20，噪音回复中位数 101 字符 vs 全体 674），而长度对任何从 loss 曲线导出的特征都是显而易见的（短回复标签token少，loss 轨迹形状天然不同）。`analyze.py::length_confound()` 把这个警示量化：对 `pooled_detector`（`cleaning_loop.py` 的组合打分）和 19 个全覆盖轨迹特征，各报告四个数字——`raw_auc`（原始）、`length_auc`（只用回复长度，混淆本身的天花板，对每一行都相同）、`residual_auc`（对长度线性回归后用残差算 AUC）、`stratified_auc`（按长度十分位分层后加权平均，不假设线性关系）。
+
+| 信号 | raw_auc | length_auc | residual_auc | stratified_auc | 分层后残留信号占比* |
+|---|---|---|---|---|---|
+| `pooled_detector` | 0.700 | 0.799 | 0.657 | **0.589** | 44.5% |
+| `text_nn_sim` | 0.507 | 0.799 | 0.533 | 0.554 | 26.9% |
+| `loss_mean` | 0.614 | 0.799 | 0.605 | **0.633** | 117% |
+| `loss_std` | 0.803 | 0.799 | 0.750 | 0.588 | 29.0% |
+| `loss_slope` | 0.802 | 0.799 | 0.748 | 0.587 | 28.8% |
+| `grad_norm_mean` | 0.790 | 0.799 | 0.742 | 0.592 | 31.7% |
+| `converge_epoch` | 0.682 | 0.799 | 0.602 | 0.606 | 58.2% |
+| `cos_ref_mean` | 0.604 | 0.799 | 0.581 | 0.567 | 64.4% |
+| `update_contrib_mean` | 0.787 | 0.799 | 0.720 | 0.579 | 27.5% |
+
+*残留信号占比 = (stratified_auc − 0.5) / (raw_auc − 0.5)，衡量分层校正后还剩下原始"高于随机"部分的多少；完整 20 行（全部 19 个特征 + `pooled_detector`）见 `results/wild_all/length_confound.csv`。
+
+**核心发现一：长度混淆的天花板（0.799）本身已经逼近 `pooled_detector` 的原始 AUC（0.700）。** 分层校正后 `pooled_detector` 降到 0.589，只保留了原始"高于随机"信号的 44.5%——多数信号确实来自长度，但校正后仍显著高于 0.5，说明存在长度之外的真实训练动态信号，只是量级要打四折以上来看。
+
+**核心发现二：各个特征受长度污染的程度并不均匀，分两组。** `loss_std`/`loss_slope`/`grad_norm_mean`/`update_contrib_mean` 这一组原始 AUC 都逼近 0.799 的长度天花板，分层后集体崩到 0.58-0.59（残留仅 27%-32%）——几乎完全是长度的代理；`loss_mean`/`cos_ref_mean`/`converge_epoch` 这一组原始 AUC 更低，但分层后不降反升或降幅小得多（残留 58%-117%），说明这几个特征捕捉的是与长度相对独立的信号。`pooled_detector` 的表现介于两组之间，说明组合打分本身部分依赖了受长度污染较重的那些腿。
+
+**核心发现三：`text_nn_sim` 在天然噪音上几乎没有独立贡献**（raw_auc 仅 0.507，接近随机；分层后 0.554），与 AGENTS.md 记录的"`text_nn_sim` 在注入的 duplicate/unrelated 类型上占据主导地位"形成鲜明对照——同一个特征，在"复制粘贴/话题不相关"这种文本层面就能判断的注入噪音上是最强信号，换到人工质量判断的天然噪音上却几乎失效，说明它的解释力是高度类型特定的，不能泛化为"天然噪音里也一样有效"。
+
+**结论：** 对 `wild_all` 的免标签检测能力，更审慎的估计应该用 stratified_auc（`pooled_detector` 约 0.589）而不是 raw_auc（0.700）——后者相当一部分是在重新发现"回复越短评分越低"这条已知规律，不是训练动态本身的判别力。
 
 ---

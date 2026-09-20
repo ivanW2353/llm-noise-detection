@@ -351,7 +351,7 @@ class Evaluator:
         t_load = time.time()
         model, tokenizer = _load_model(self.settings, dataset)
         print(f"[{time.strftime('%F %T')}] model loaded in {time.time()-t_load:.0f}s", flush=True)
-        bbh_dir = self.settings.data_root / 'data' / 'benchmarks' / 'bbh'
+        bbh_dir = self.settings.data_root / 'datasets' / 'benchmarks' / 'bbh'
         for task in tasks:
             if smoke and task not in ('mmlu', 'gsm8k'):
                 continue

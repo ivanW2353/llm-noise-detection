@@ -1,6 +1,6 @@
 # AGENTS.md
 
-LLM-noise-detection experiment: 7 noise types injected into dolly-15k (`data/{tag}/{dataset}/train.jsonl`),
+LLM-noise-detection experiment: 7 noise types injected into dolly-15k (`datasets/{tag}/{dataset}/train.jsonl`),
 Qwen2.5-3B-Instruct LoRA SFT with per-sample metric tracking, label-free noise-detection analysis.
 Three tags trained so far: `ratio10` (10% noise, all 9 datasets incl. clean/mixed), `ratio5` (5% noise,
 cross-validation of the ratio10 findings), and `wild_all` (natural noise from OASST2 via `wild_data.py`,
@@ -9,17 +9,28 @@ module docstring for the framing caveats this implies). All experiments/analysis
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
 was replaced 2026-09-11/13, see `docs/experiment_log.md`).
 
-## Code structure (root-level modules, no subpackages)
+## Code structure (root-level entry points + facades, three subpackages)
+
+Implementation modules are grouped into three packages; root-level files that other unmovable
+consumers (`cli.py`, `textsim.py`, `cleaning_loop.py`, the untracked `baselines.py`) import from
+directly stay at the root as thin facades re-exporting from the packages, so those imports never
+had to change:
+
+- `datalib/` — `sample.py` (`Sample` dataclass, `Provider` Protocol), `data_io.py` (`Jsonl` read/write, `read()`/`write()`, `load_rows()` incl. `hf://...`, `validate()`), `data_split.py` (`split_holdout()`, `reindex()`, `split_fractions()`), `noise.py` (noise injection: `apply()`, `TRANSFORMS`, `NOISE_TYPES`, corruption helpers).
+- `lora/` — `lora_train.py` (`LoRA` class, the real `hf-lora` backend) and `lora_internals.py` (its per-sample gradient/loss/cos-sim helper functions).
+- `analysis/` — `metrics_common.py` (shared low-level primitives — `auc()`, `_cv_auc()`, `_if_auc()`, `_fit_transfer()`, `precision_at_k()`, `FULL_COVERAGE_FEATS`, `FEATURE_FAMILY`, `MEMO_FEATS`, `DIAG_COLS`/`TOKEN_COLS`), `metrics_table.py` (`build_table()` — assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation — plus `training_metrics()`/`token_metrics()`/`token_metrics_for_tag()`), `detect_unsupervised.py` (`unsupervised_metrics()`, `memorization_score()`, `early_detection_sweep()`, `precision_lift_table()`, `pooled_scorer_compare()` — compares `cleaning_loop.py`'s three scorers, reusing its `_score_*` helpers directly), `detect_transfer.py` (`cross_type_transfer()`, `cross_ratio_transfer()`, `transfer_to_mixed()`), `feature_diagnostics.py` (`feature_attribution()`, `feature_correlation()` — Spearman/PCA/VIF redundancy, `minimal_feature_set()` — greedy forward selection, `single_feature_ablation()` — leave-one-out, `feature_group_ablation()` — text/token/trajectory group ablation, `length_confound()` — wild-noise response-length confound control).
+
+Root-level entry points and facades:
 
 - `settings.py` — config loading (`load(path, tag)` → `Settings`), tag-based path helpers (`data_dir()`, `runs_dir()`, `results_dir()`).
-- `data.py` — `Jsonl` read/write, `Provider.rows()` loaders (local file or `hf://...`), noise injection (`apply()`), holdout split.
-- `model.py` — `mock` (CPU/interface testing) and `hf-lora` (real Qwen2.5-3B LoRA) backends; per-sample gradient/loss/cos-sim capture lives here.
+- `data.py` — facade, re-exports from `datalib/`.
+- `model.py` — facade: `Model` Protocol, `Mock` (CPU/interface testing) backend, and `create()` factory live here; the real `hf-lora` backend is re-exported from `lora/lora_train.py` (`LoRA` class). `LoRA.fit()` is decomposed into module-level phase functions (`_setup_run`, `_load_or_init_reference`, `_open_run_io`, `_run_epoch`, `_finalize_epoch`, `_finalize_run`, plus `_save_checkpoint`/`_flush_window`) sharing state via a `_TrainState` dataclass. It checkpoints to `run_dir/checkpoint/` at each epoch boundary (adapter + optimizer state + `ref_buf`/`v_buf`/`epoch_stats`, overwritten in place via write-temp-then-rename — latest epoch only, no history kept) and auto-resumes from it if present; a plain re-run of the same `train` command continues from the last completed epoch with no new flag needed, and `checkpoint/` is deleted once the run finishes normally.
 - `train.py` — thin `Trainer` orchestration wrapper around `model.create()`.
 - `evaluate.py` — downstream benchmark suite (mmlu/gsm8k/hellaswag/arc/bbh/truthfulqa/winogrande), resumable per-task.
 - `textsim.py` — `text_nn_sim()`: TF-IDF nearest-neighbor cosine similarity per sample (a **data-level** feature, not a training-dynamics one — see the feature-attribution gotcha below).
-- `analyze.py` — all post-hoc analysis: `build_table()` (assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation), `unsupervised_metrics()`, `memorization_score()`, `cross_type_transfer()`, `cross_ratio_transfer()`, `precision_lift_table()`, `early_detection_sweep()`, `feature_attribution()`, `feature_correlation()` (Spearman/PCA/VIF redundancy), `minimal_feature_set()` (greedy forward selection), `single_feature_ablation()` (leave-one-out), `transfer_to_mixed()` (single-type detectors vs. `mixed`), `feature_group_ablation()` (text/token/trajectory group ablation), `pooled_scorer_compare()` (compares `cleaning_loop.py`'s three scorers, reusing its `_score_*` helpers directly).
+- `analyze.py` — facade, re-exports from `analysis/`.
 - `cleaning_loop.py` — `build()`: label-free closed-loop cleaning (targeted-drop + random-drop control training sets, full-corpus scale). Three scorers via `method=`: `iforest` (undirected outlier detection), `memo_signed` (fixed-sign hyper-typicality rule for memorized/hyper-typical noise like template/duplicate), `pooled` (max of three standardized legs — iforest z-score, memo_signed z-score, |z| of `text_nn_sim` — for when the noise composition is unknown, e.g. `mixed`).
-- `wild_data.py` — builds a natural-noise dataset from OASST2, using human `quality` annotation ratings (not an injected perturbation) as the noise label; not wired through `cli.py` (run directly). Writes `data/{tag}/heldout.jsonl` (clean-only) and `data/{tag}/wild/train.jsonl`.
+- `wild_data.py` — builds a natural-noise dataset from OASST2, using human `quality` annotation ratings (not an injected perturbation) as the noise label; not wired through `cli.py` (run directly). Writes `datasets/{tag}/heldout.jsonl` (clean-only) and `datasets/{tag}/wild/train.jsonl`.
 - `cli.py` — the **only** entry point for the `data`/`train`/`evaluate`/`analyze`/`clean` subcommands; `run.py` just calls `cli.main()`. `analyze --kind` choices: `features`/`training`/`token`/`unsupervised`/`transfer`/`cross_type`/`cross_ratio`/`precision_lift`/`memorization`/`early_unsupervised`/`early_memorization`/`feature_attribution`/`feature_correlation`/`minimal_feature_set`/`single_feature_ablation`/`transfer_to_mixed`/`feature_group_ablation`/`pooled_scorer_compare` (see Commands below).
 
 **Placement principle**: `scripts/` (gitignored, `/*.sh` + `/scripts/` in `.gitignore`) is supposed to hold
@@ -38,12 +49,12 @@ for this regressing a third time.
 ## Layout & data flow
 
 - **Large data lives in the repo dir but is gitignored where noted above** (LoRA weights, logs). Paths are tag-based:
-  - `data/{tag}/{dataset}/train.jsonl` + shared `data/{tag}/heldout.jsonl`; `data/benchmarks/bbh/` (test + cot-prompts).
+  - `datasets/{tag}/{dataset}/train.jsonl` + shared `datasets/{tag}/heldout.jsonl`; `datasets/benchmarks/bbh/` (test + cot-prompts).
   - `runs/{tag}/{dataset}/{metrics,tb,lora}` — `metrics/per_sample.jsonl` (per-epoch loss/grad_norm/cos_sim), `metrics/diag_epoch*.jsonl` + `metrics/token_diag_epoch*.jsonl` (diagnostic-layer, ~900-row/dataset subsample only).
   - `results/{tag}/per_sample_metrics.csv` (built by `cli.py analyze --kind features`) + per-analysis CSVs (`unsupervised.csv`, `cross_type.csv`, `precision_lift.csv`, `memorization.csv`, `early_unsupervised.csv`, `early_memorization.csv`, `feature_attribution.csv`); `results/transfer_cross_ratio.csv` (cross-tag, at `results/` root); `results/eval/eval_{tag}_{dataset}.json`.
-  - `data/{tag}/cleaning_loop/{dataset}/{train_targeted,train_random}.jsonl` + `metadata.json` — closed-loop cleaning outputs.
+  - `datasets/{tag}/cleaning_loop/{dataset}/{train_targeted,train_random}.jsonl` + `metadata.json` — closed-loop cleaning outputs.
 - `experiment_tag` defaults to `ratio10` in `config.yaml`; every `cli.py` subcommand takes `--tag`.
-- GPU: **NVIDIA RTX PRO 6000 Blackwell Server Edition, ~98GB**, sm_120. torch 2.8.0+cu128, transformers 5.13.1, peft 0.19.1. **Single GPU** — only one training/eval job can run at a time; queue others (see tmux convention below).
+- GPU: **NVIDIA GeForce RTX 4090, ~49GB**. torch 2.8.0+cu128, transformers 5.13.1, peft 0.19.1. **Single GPU** — only one training/eval job can run at a time; queue others (see tmux convention below).
 
 ## Commands
 
@@ -115,14 +126,15 @@ python cli.py analyze --kind transfer --tags ratio10,ratio5             # re-rea
 - LoRA B is zero-initialized → A gradients are 0 early → `update_contrib` must use B-only offsets.
 - Per-sample grad capture: snapshot `p.grad` before backward, subtract after (preallocated flat buffer) — don't reintroduce per-param python loops.
 - Never run a training/eval command against a real `--dataset` without confirming the `--tag`; tag-scoped paths (`runs/{tag}/...`) are the only thing preventing cross-experiment overwrites.
-- Data files contain ONLY training rows; held-out lives in `data/{tag}/heldout.jsonl`, never sliced out of `train.jsonl`.
+- Data files contain ONLY training rows; held-out lives in `datasets/{tag}/heldout.jsonl`, never sliced out of `train.jsonl`.
+- Interrupted training can be continued by just re-running the same `train` command — resume is auto-detected from `run_dir/checkpoint/` (epoch-boundary checkpoints; no separate flag). Never edit `run_dir/checkpoint/` by hand or delete it mid-run: on resume, `model.py::LoRA.fit()` trims `per_sample.jsonl`/`layer_norms.jsonl` back to the checkpointed epoch/step before appending, so a hand-edited or partially-written checkpoint will desync those files from `state.pt`.
 
 **Evaluation**
 - Flash-attn generation is broken with right padding → `tokenizer.padding_side = 'left'`.
 - MC scoring caps at `SCORE_MAX_LEN=1024` in `evaluate.py`; `MAX_LEN=2048` is only for generation. Raising the score cap OOMs (logits `[B, 2048, 151936]`).
 - GSM8K needs chat-template prompts + `max_new_tokens=512` + parse `####`/`\boxed{...}`/last-number fallback.
 - Eval is resumable (per-task save); results dict is nested `{task: {acc, n, subjects/raw}}`.
-- BBH data lives at `data/benchmarks/bbh/{test,cot-prompts}` (`_load_bbh` in `evaluate.py`).
+- BBH data lives at `datasets/benchmarks/bbh/{test,cot-prompts}` (`_load_bbh` in `evaluate.py`).
 
 **Analysis (model internals)**
 - `PEFT from_pretrained` sets `requires_grad=False` → re-enable `lora_` params before any backward.

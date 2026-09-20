@@ -217,7 +217,7 @@ def length_confound(frame: pd.DataFrame, root: str | Path, tag: str, dataset: st
     root = Path(root)
     sub = frame[frame.dataset == dataset].reset_index(drop=True).copy()
     resp_len = {r.id: len(r.messages[-1].get('content', '')) if r.messages else 0
-               for r in read_rows(root / 'data' / tag / dataset / 'train.jsonl')}
+               for r in read_rows(root / 'datasets' / tag / dataset / 'train.jsonl')}
     sub['response_len'] = sub.sample_id.astype(str).map(resp_len)
     sub = sub.dropna(subset=['response_len']).reset_index(drop=True)
     y = sub.noise_type.fillna('none').ne('none').astype(int).to_numpy()

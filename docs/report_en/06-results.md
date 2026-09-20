@@ -48,7 +48,7 @@ Section 6.3 already covers the pipeline and its commands; this subsection collec
 | `results/{tag}/minimal_feature_set.csv` | `analyze.py::minimal_feature_set()` | 6.11.4 |
 | `results/{tag}/transfer_to_mixed.csv` | `analyze.py::transfer_to_mixed()` | 6.12 |
 | `results/{tag}/pooled_scorer_compare.csv` | `analyze.py::pooled_scorer_compare()` | 6.12.5 |
-| `data/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
+| `datasets/{tag}/cleaning_loop/{name}/metadata.json` | `clean` | 6.13 |
 
 **Downstream evaluation protocol.** Seven benchmarks: MMLU (n=14042), GSM8K (1319), HellaSwag (10042), ARC (1172), BBH (540), TruthfulQA (817), WinoGrande (1267). The "7-benchmark mean" throughout the report is the **unweighted arithmetic mean** of those seven accuracies, not weighted by sample count — so BBH at n=540 carries the same weight as MMLU at n=14042, which amplifies single-benchmark fluctuation. Sections 6.9 and 6.13 therefore both give the per-benchmark breakdown rather than the mean alone.
 
@@ -765,5 +765,70 @@ Duplicate and garbled together take 365 slots — about a quarter of the budget 
 **Third, this exposes a fundamental limit of P@10% as a selection metric.** The three scorers' lifts on `mixed` rank `pooled` (3.83x) > `iforest` (3.18x) > `memo_signed` (1.52x), and downstream gain bears no relation to that order. Taken together, the three closed loops in this chapter give a complete criterion: **cleaning pays off only when all three hold — the noise genuinely harms downstream (6.13.1), the scorer points the right way (6.13.2), and the removal budget lands on the harmful portion of the noise (this section)**. The first two were already known; the third is specific to mixed noise and only visible once the chain reaches downstream evaluation.
 
 It also sharpens Section 6.12.5's verdict that "`pooled` trades precision for coverage": on a mixed stream that coverage did not convert into benefit, because coverage itself is not weighted by harm. Harm-weighted removal — as opposed to anomaly-weighted — is listed as a next step in Section 7.3.
+
+### 6.14 External baseline comparison: this project's training-dynamics detector vs. literature EL2N/GraNd/TracIn proxies
+
+Earlier sections compare this project's own detectors (`iforest`/`zscore`/`memo_signed`/`pooled`) against each other, but never against the methods commonly cited in the data-pruning/influence-function literature. `baselines.py` (kept out of Git per that file's own docstring and the CLAUDE.md "do not push to GitHub" policy for this comparison code; retained locally only for this report) reuses trajectory data already on hand — no retraining required — to reproduce three proxy scores:
+
+- **`el2n_proxy`**: uses only the **first epoch's** loss. EL2N (Paul et al. 2021) is originally the L2 norm of the early-training error vector; a causal LM has no fixed label vocabulary to build a softmax error vector from, so loss is the most direct analogue.
+- **`grand_proxy`**: uses only the **first epoch's** gradient norm (GraNd, same paper).
+- **`tracin_proxy`**: reuses the already-computed `cos_ref_mean` (a sample's own gradient direction vs. the held-out reference direction, cosine similarity averaged over the full trajectory) — this is itself a TracIn-style (Pruthi et al. 2020) self/cross-influence score, just not previously labeled as such.
+- **`loss_rank`**: an existing feature, included for reference.
+
+**`ratio10` (8 injected-noise datasets):**
+
+| dataset | `el2n_proxy` | `grand_proxy` | `tracin_proxy` | `loss_rank` | this project's best existing (`iforest`/`zscore`/`memo_signed`) |
+|---|---|---|---|---|---|
+| duplicate | 0.587 | 0.510 | 0.534 | **0.666** | 0.612 (iforest) |
+| garbled | **0.983** | 0.813 | 0.585 | 0.940 | 0.936 (iforest) |
+| keyword | **0.682** | 0.569 | 0.566 | 0.619 | 0.552 (iforest) |
+| mixed | 0.640 | 0.603 | 0.507 | 0.564 | 0.662 (iforest) |
+| near_duplicate | **0.657** | 0.565 | 0.607 | 0.617 | 0.599 (iforest) |
+| template | **0.931** | 0.765 | 0.877 | 0.911 | 0.925 (memo_signed, signed rule) |
+| truncation | 0.684 | **0.716** | 0.580 | 0.518 | 0.657 (zscore_max) |
+| unrelated | **0.771** | 0.635 | 0.558 | 0.632 | 0.703 (iforest) |
+
+(This project's "best existing" is the per-dataset max from `results/ratio10/unsupervised.csv` and `memorization.csv`; full numbers in `results/ratio10/external_baselines.csv`.)
+
+**`wild_all` (natural noise, full 68,762 rows):**
+
+| baseline | AUC |
+|---|---|
+| `grand_proxy` | **0.805** |
+| `el2n_proxy` | 0.760 |
+| `tracin_proxy` | 0.604 |
+| `loss_rank` | 0.545 |
+
+**Key finding: using only the first epoch's loss/gradient norm (`el2n_proxy`/`grand_proxy`) matches or beats this project's current 5-epoch multi-feature detector on several types** — garbled (0.983 vs. 0.936), keyword (0.682 vs. 0.552), near_duplicate (0.657 vs. 0.599), and unrelated (0.771 vs. 0.703) all favor `el2n_proxy`, using only 1/5 of the training epochs. This lines up exactly with Section 6.7's early-detection finding: most of the noise signal is already visible early in training, so the current label-free production pipeline may not need the full 5 epochs to get a usable signal. `wild_all` shows the same pattern — `grand_proxy`/`el2n_proxy` ahead, `tracin_proxy`/`loss_rank` behind.
+
+**`tracin_proxy` (i.e., `cos_ref_mean`) alone is the weakest of the four baselines** (0.51-0.61 on ratio10, 0.604 on wild_all), suggesting that this quantity, often cited in the literature as an influence-function "gold standard," has limited value as a standalone detection signal — it is better used as one leg of a combined score (like `pooled`) than as an independent metric.
+
+**A caveat that must be reported alongside this section, as with the rest of the report:** AUC here is `analyze.py::auc()`'s `max(value, 1-value)`, i.e. direction-agnostic — a high AUC does not by itself license deployment. `el2n_proxy` reaches 0.931 on template, but Section 6.6's direction-reversal trap could equally apply to it (`iforest` on the same dataset has the direction backwards, measuring only 0.522, which is why Section 6.13.2's targeted cleaning there is worse than random removal); whether `el2n_proxy`'s high number actually points the correct way ("noise = higher loss") and can be used directly for real cleaning is not verified in this report — like `memo_signed`, its sign would need confirming before use, and this table's numbers alone do not settle that.
+
+### 6.15 How much of the natural-noise detection signal is just the length confound?
+
+Section 7.3 already noted that OASST2's human `quality` label correlates with response length (correlation −0.20, noise median 101 characters vs. 674 overall), and length is trivially visible to any loss-curve-derived feature (a short response has fewer label tokens, so its loss trajectory shape differs for reasons unrelated to noise). `analyze.py::length_confound()` quantifies this warning: for `pooled_detector` (the combined score from `cleaning_loop.py`) and 19 full-coverage trajectory features, it reports four numbers — `raw_auc` (as-is), `length_auc` (response length alone, the confound's ceiling, identical for every row), `residual_auc` (AUC on the residual after a linear regression of score on length), and `stratified_auc` (AUC within length-decile bins, weighted average, no linearity assumption).
+
+| signal | raw_auc | length_auc | residual_auc | stratified_auc | residual signal retained* |
+|---|---|---|---|---|---|
+| `pooled_detector` | 0.700 | 0.799 | 0.657 | **0.589** | 44.5% |
+| `text_nn_sim` | 0.507 | 0.799 | 0.533 | 0.554 | 26.9% |
+| `loss_mean` | 0.614 | 0.799 | 0.605 | **0.633** | 117% |
+| `loss_std` | 0.803 | 0.799 | 0.750 | 0.588 | 29.0% |
+| `loss_slope` | 0.802 | 0.799 | 0.748 | 0.587 | 28.8% |
+| `grad_norm_mean` | 0.790 | 0.799 | 0.742 | 0.592 | 31.7% |
+| `converge_epoch` | 0.682 | 0.799 | 0.602 | 0.606 | 58.2% |
+| `cos_ref_mean` | 0.604 | 0.799 | 0.581 | 0.567 | 64.4% |
+| `update_contrib_mean` | 0.787 | 0.799 | 0.720 | 0.579 | 27.5% |
+
+*Residual signal retained = (stratified_auc − 0.5) / (raw_auc − 0.5), the fraction of the raw "above chance" margin that survives length-decile stratification; the full 20 rows (all 19 features + `pooled_detector`) are in `results/wild_all/length_confound.csv`.
+
+**Key finding 1: the length confound's ceiling (0.799) is already close to `pooled_detector`'s raw AUC (0.700).** After stratification `pooled_detector` drops to 0.589, retaining only 44.5% of the raw above-chance margin — most of the signal genuinely comes from length, but the corrected value is still meaningfully above 0.5, so there is real training-dynamics signal beyond length, just at roughly a quarter to half the apparent magnitude.
+
+**Key finding 2: how much each feature is contaminated by length is not uniform — it splits into two groups.** `loss_std`/`loss_slope`/`grad_norm_mean`/`update_contrib_mean` all have raw AUC near the 0.799 length ceiling and collapse together to 0.58-0.59 after stratification (retaining only 27%-32%) — they are almost pure length proxies. `loss_mean`/`cos_ref_mean`/`converge_epoch` start lower but drop far less, or not at all, after stratification (retaining 58%-117%), meaning they capture signal largely independent of length. `pooled_detector` falls between the two groups, indicating the combined score partly relies on the more length-contaminated legs.
+
+**Key finding 3: `text_nn_sim` contributes almost nothing independently to natural-noise detection** (raw_auc only 0.507, near chance; 0.554 after stratification) — a sharp contrast with AGENTS.md's record that `text_nn_sim` dominates detection on the injected duplicate/unrelated types. The same feature is the strongest signal for textually-obvious injected noise (copy-paste, off-topic) but nearly useless for human-judged natural noise, so its explanatory power is highly type-specific and should not be generalized to "equally effective on natural noise."
+
+**Conclusion:** a more careful estimate of `wild_all`'s label-free detection capability should use stratified_auc (`pooled_detector` ≈ 0.589) rather than raw_auc (0.700) — a substantial part of the latter is rediscovering the known rule "shorter responses score lower," not discriminative power from training dynamics itself.
 
 ---

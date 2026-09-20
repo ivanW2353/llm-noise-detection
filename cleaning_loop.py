@@ -115,12 +115,12 @@ def build(root: str | Path, tag: str, dataset: str, budget: float = 0.10, seed: 
     rng = np.random.default_rng(seed)
     random_drop = set(rng.choice(sample_ids, size=n_drop, replace=False).tolist())
 
-    rows = [json.loads(l) for l in open(root / 'data' / tag / dataset / 'train.jsonl')]
+    rows = [json.loads(l) for l in open(root / 'datasets' / tag / dataset / 'train.jsonl')]
     is_noise = {r['sample_id']: r.get('noise_type', 'none') != 'none' for r in rows}
     precision = lambda ids: sum(is_noise[i] for i in ids) / len(ids)
 
     out_name = dataset if method == 'iforest' else f'{dataset}_{method}'
-    out_dir = root / 'data' / tag / 'cleaning_loop' / out_name
+    out_dir = root / 'datasets' / tag / 'cleaning_loop' / out_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def write(path, drop_ids):

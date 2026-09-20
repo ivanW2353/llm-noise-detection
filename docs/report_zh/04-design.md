@@ -5,13 +5,13 @@
 ### 4.1 整体流程
 
 ```
-① 构造数据集      cli.py data      → data/{tag}/{dataset}/train.jsonl
+① 构造数据集      cli.py data      → datasets/{tag}/{dataset}/train.jsonl
 ② LoRA 微调       cli.py train     → runs/{tag}/{dataset}/metrics/*.jsonl
 ③ 汇总逐样本指标  cli.py analyze --kind features
                                    → results/{tag}/per_sample_metrics.csv
 ④ 各项分析        cli.py analyze --kind {unsupervised,cross_type,...}
                                    → results/{tag}/{kind}.csv
-⑤ 闭环清洗        cli.py clean     → data/{tag}/cleaning_loop/{name}/train_{targeted,random}.jsonl
+⑤ 闭环清洗        cli.py clean     → datasets/{tag}/cleaning_loop/{name}/train_{targeted,random}.jsonl
 ⑥ 清洗后重训+评测 cli.py train / evaluate（回到步骤②）
 ```
 
@@ -24,7 +24,7 @@ python3 cli.py data --source dolly --tag ratio10 --ratio 0.10 \
   --datasets clean,garbled,template,duplicate,unrelated,truncation,near_duplicate,keyword,mixed
 ```
 
-以 dolly-15k 为基座，先切出 400 条留出集（`data/{tag}/heldout.jsonl`，9 个数据集共用同一份；`ref_samples=200` 条做参考梯度、`heldout_samples=200` 条做 held-out loss 监控），剩余 14,611 条作为训练集。噪音注入逻辑在 `data.py::apply`：用 `np.random.default_rng(seed=42)` 抽取 `int(len(rows) * ratio)` 条样本索引，对命中的样本做对应变换，未命中的原样保留。
+以 dolly-15k 为基座，先切出 400 条留出集（`datasets/{tag}/heldout.jsonl`，9 个数据集共用同一份；`ref_samples=200` 条做参考梯度、`heldout_samples=200` 条做 held-out loss 监控），剩余 14,611 条作为训练集。噪音注入逻辑在 `data.py::apply`：用 `np.random.default_rng(seed=42)` 抽取 `int(len(rows) * ratio)` 条样本索引，对命中的样本做对应变换，未命中的原样保留。
 
 两个细节会影响后续读数：
 
@@ -92,7 +92,7 @@ python3 cli.py analyze --tag ratio10 --kind features
 ```bash
 python3 cli.py clean --tag ratio10 --dataset template --method memo_signed --budget 0.10
 python3 cli.py train    --tag ratio10 --dataset cleaning_loop_targeted_template_signed \
-  --train-file data/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
+  --train-file datasets/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
 python3 cli.py evaluate --tag ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
 ```
 

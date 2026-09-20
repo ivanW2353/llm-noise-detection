@@ -86,7 +86,7 @@ def build_table(root, tag, datasets=None, max_epoch=None):
     aggregating — used to simulate "early" detection from a partially-trained run
     without needing to actually stop training early."""
     import textsim
-    root=Path(root); run_base=root/'runs'/tag; data_base=root/'data'/tag
+    root=Path(root); run_base=root/'runs'/tag; data_base=root/'datasets'/tag
     if datasets is None:
         # Only runs with a matching data/{tag}/{ds}/train.jsonl: cleaning-loop
         # retrains were fed via --train-file, so they have trajectories but no

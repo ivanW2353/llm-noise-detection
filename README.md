@@ -1,6 +1,6 @@
 # NoiseDetect
 
-一个按领域组织的 LLM 噪声实验项目。实验数据位于 `data/`，结果位于 `results/`，报告位于 `docs/`；所有运行代码都在根目录，避免多层命令/工作流目录。
+一个按领域组织的 LLM 噪声实验项目。实验数据位于 `datasets/`，结果位于 `results/`，报告位于 `docs/`；所有运行代码都在根目录，避免多层命令/工作流目录。
 
 研究的核心问题：**在完全不使用噪音标签的前提下，能否仅凭 LoRA 微调过程中的训练动态（loss 轨迹、
 梯度范数、余弦相似度等）识别出被注入的低质量训练样本？**
@@ -136,7 +136,7 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
 
 `clean`（`cli.py clean --tag <tag> --dataset <ds> --budget <frac> [--method ...]`）：免标签闭环清洗——
 在**全量**训练集（而非诊断子样本）上打分，剔除疑似噪音最多的 `budget` 比例，另建等量随机剔除对照组，
-产出 `data/{tag}/cleaning_loop/{name}/{train_targeted,train_random}.jsonl` 供重新训练+评测对比。
+产出 `datasets/{tag}/cleaning_loop/{name}/{train_targeted,train_random}.jsonl` 供重新训练+评测对比。
 随机对照是必须的：剔除 10% 样本本身就减少 10% 训练数据，只跟未清洗基线比无法区分"去噪收益"和"数据量损失"。
 
 三个 `--method` 对应三种噪音假设，选错方向的代价很大（同为 template 剔 1461 条，`iforest` 命中精度
@@ -158,15 +158,15 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
 
 | 目录 | 内容 |
 |---|---|
-| `data/{tag}/cleaning_loop/{name}/` | 清洗后训练集 `train_targeted.jsonl` / `train_random.jsonl` + `metadata.json`（含剔除精度、用到的特征列表） |
+| `datasets/{tag}/cleaning_loop/{name}/` | 清洗后训练集 `train_targeted.jsonl` / `train_random.jsonl` + `metadata.json`（含剔除精度、用到的特征列表） |
 | `runs/{tag}/cleaning_loop_*/` | 重训练的逐样本指标 |
 | `results/eval/eval_{tag}_cleaning_loop_*.json` | 重训练后的 7 项 benchmark 结果 |
 
 `{name}` 为数据集名（`iforest` 默认方法）或 `{dataset}_{method}`（其他打分器），已跑完的有
 `garbled`、`template`、`template_memo_signed`、`mixed`、`mixed_memo_signed`、`mixed_pooled`。
 
-清洗增益实验的原始数据仍归档在 `data/ratio10/cleaning_gain/unrelated/`（`train_random.jsonl`/`train_targeted.jsonl` 及对应的 `training_commands.sh`）。其训练产物目录 `runs/ratio10/cleaning_gain/` 及汇总表 `results/cleaning_gain_comparison.csv` 已在后续清理中删除；若需要该项对比结论，需重新执行 `data/ratio10/cleaning_gain/unrelated/training_commands.sh` 并重新汇总。
+清洗增益实验的原始数据仍归档在 `datasets/ratio10/cleaning_gain/unrelated/`（`train_random.jsonl`/`train_targeted.jsonl` 及对应的 `training_commands.sh`）。其训练产物目录 `runs/ratio10/cleaning_gain/` 及汇总表 `results/cleaning_gain_comparison.csv` 已在后续清理中删除；若需要该项对比结论，需重新执行 `datasets/ratio10/cleaning_gain/unrelated/training_commands.sh` 并重新汇总。
 
 ## 数据契约
 
-每行 JSONL 必须包含 `sample_id`、`messages`、`noise_type`。详见 `data/README.md`。已有实验结果和报告不会被 CLI 覆盖。
+每行 JSONL 必须包含 `sample_id`、`messages`、`noise_type`。详见 `datasets/README.md`。已有实验结果和报告不会被 CLI 覆盖。

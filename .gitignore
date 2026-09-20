@@ -12,6 +12,10 @@ runs/**/lora/
 # Adapters may be relocated to the large volume with a symlink left behind
 # (see docs/storage.md); the trailing-slash rule above only matches directories.
 runs/**/lora
+# Latest-only training checkpoint (model.py::LoRA.fit(), overwritten every epoch
+# for resume-after-interruption); .tmp is the write-then-atomic-rename staging dir.
+runs/**/checkpoint/
+runs/**/checkpoint.tmp/
 *.safetensors
 *.ckpt
 *.pt
@@ -43,7 +47,7 @@ runs/**/tb/
 
 # Datasets held on the large volume and reached through a symlink; the pointer
 # is machine-specific, and wild_data.py rebuilds the contents from OASST.
-data/wild_all
+datasets/wild_all
 
 # Comparison-method / external-baseline code: kept local only, never pushed.
 /baselines.py

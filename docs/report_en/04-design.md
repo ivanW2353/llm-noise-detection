@@ -5,13 +5,13 @@ This section lays out the full execution path: the command for each step, the fi
 ### 4.1 Overall pipeline
 
 ```
-(1) Build datasets       cli.py data      -> data/{tag}/{dataset}/train.jsonl
+(1) Build datasets       cli.py data      -> datasets/{tag}/{dataset}/train.jsonl
 (2) LoRA fine-tune       cli.py train     -> runs/{tag}/{dataset}/metrics/*.jsonl
 (3) Aggregate per-sample cli.py analyze --kind features
                                           -> results/{tag}/per_sample_metrics.csv
 (4) Run analyses         cli.py analyze --kind {unsupervised,cross_type,...}
                                           -> results/{tag}/{kind}.csv
-(5) Closed-loop cleaning cli.py clean     -> data/{tag}/cleaning_loop/{name}/train_{targeted,random}.jsonl
+(5) Closed-loop cleaning cli.py clean     -> datasets/{tag}/cleaning_loop/{name}/train_{targeted,random}.jsonl
 (6) Retrain + evaluate   cli.py train / evaluate (back to step 2)
 ```
 
@@ -24,7 +24,7 @@ python3 cli.py data --source dolly --tag ratio10 --ratio 0.10 \
   --datasets clean,garbled,template,duplicate,unrelated,truncation,near_duplicate,keyword,mixed
 ```
 
-Starting from dolly-15k, 400 rows are split off as a holdout set (`data/{tag}/heldout.jsonl`, shared by all 9 datasets; `ref_samples=200` for the reference gradient, `heldout_samples=200` for held-out loss monitoring), leaving 14,611 rows as the training set. Injection happens in `data.py::apply`: `np.random.default_rng(seed=42)` draws `int(len(rows) * ratio)` sample indices, the selected samples get the corresponding transform, and the rest pass through untouched.
+Starting from dolly-15k, 400 rows are split off as a holdout set (`datasets/{tag}/heldout.jsonl`, shared by all 9 datasets; `ref_samples=200` for the reference gradient, `heldout_samples=200` for held-out loss monitoring), leaving 14,611 rows as the training set. Injection happens in `data.py::apply`: `np.random.default_rng(seed=42)` draws `int(len(rows) * ratio)` sample indices, the selected samples get the corresponding transform, and the rest pass through untouched.
 
 Two details affect later readings:
 
@@ -92,7 +92,7 @@ The true `noise_type` label is read from `train.jsonl` **for evaluation only**; 
 ```bash
 python3 cli.py clean --tag ratio10 --dataset template --method memo_signed --budget 0.10
 python3 cli.py train    --tag ratio10 --dataset cleaning_loop_targeted_template_signed \
-  --train-file data/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
+  --train-file datasets/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
 python3 cli.py evaluate --tag ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
 ```
 

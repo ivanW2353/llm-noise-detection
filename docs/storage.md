@@ -7,7 +7,7 @@
 | 仓库路径 | 实际位置 | 大小 | 为什么可以搬 |
 |---|---|---|---|
 | `runs/{tag}/{dataset}/lora` | `/root/autodl-tmp/noisedetect_runs/runs/{tag}/{dataset}/lora` | 6.3 GB（25 个适配器 × 251 MB） | 已被 `.gitignore` 排除，从不入库；`evaluate.py:34` 按 `runs_dir()/dataset/lora` 读取，软链接照常解析 |
-| `data/wild_all` | `/root/autodl-tmp/noisedetect_data/wild_all` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建 |
+| `datasets/wild_all` | `/root/autodl-tmp/noisedetect_data/wild_all` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建 |
 | HuggingFace 缓存（OASST） | `/root/autodl-tmp/hf` | 365 MB | 通过 `HF_HOME=/root/autodl-tmp/hf` 指定 |
 
 搬移用"先复制 → 校验 md5 → 再删除原件 → 建软链接"的顺序，不先删后拷。
@@ -15,7 +15,7 @@
 ## 留在主盘的内容
 
 - `runs/{tag}/{dataset}/metrics/*.jsonl`（除 `layer_norms.jsonl`）——**git 跟踪**，是全部分析的输入，不能搬。
-- `results/`、`docs/`、`data/{tag}/`——体积小且大部分入库。
+- `results/`、`docs/`、`datasets/{tag}/`——体积小且大部分入库。
 
 ## 大文件走 Git LFS，不在 git 历史里
 
@@ -24,7 +24,7 @@
 | LFS 规则 | 文件数 | 为什么值得留 |
 |---|---|---|
 | `runs/**/metrics/*.jsonl` | 253 | `analyze.py` 的直接输入，报告每个数字的源头 |
-| `data/**/*.jsonl` | 31 | 定义"实验用的到底是哪批数据"，缺了无法核对结论 |
+| `datasets/**/*.jsonl` | 31 | 定义"实验用的到底是哪批数据"，缺了无法核对结论 |
 | `results/*/per_sample_metrics.csv` | 2 | 全部分析的汇总表 |
 
 含意：**清理仓库体积不需要重写历史**。历史本身就小，体积在 LFS 缓存里，`git lfs prune` 即可回收。克隆时也可以用 `GIT_LFS_SKIP_SMUDGE=1 git clone` 只拿代码与报告，按需再拉数据。
@@ -49,6 +49,6 @@
 
 **`runs/**/lora` 在 `.gitignore` 里有两条规则。** 带斜杠的 `runs/**/lora/` 只匹配目录，软链接不是目录，所以额外加了不带斜杠的一条。少了它，25 个软链接会以未跟踪文件的形式出现，可能被误提交成指向本机绝对路径的死链。
 
-**换机器要重建软链接。** 链接内容是本机绝对路径。适配器可以由对应数据集重新训练得到，或从备份复制；`data/wild_oasst` 用 `wild_data.py` 重建。
+**换机器要重建软链接。** 链接内容是本机绝对路径。适配器可以由对应数据集重新训练得到，或从备份复制；`datasets/wild_oasst` 用 `wild_data.py` 重建。
 
 **`layer_norms.jsonl`（198 MB）** 已被 gitignore 且全项目无任何代码读取（见附录 8.4），可以直接删除以再腾空间，此处保留仅为人工在 TensorBoard 里查看。

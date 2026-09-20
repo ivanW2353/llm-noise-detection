@@ -13,7 +13,7 @@ class Settings:
     def data_root(self): return Path(self.raw.get('paths',{}).get('data_root',self.root))
     def section(self, name): return self.raw.get(name,{})
     def path(self, kind, tag=None): return self.data_root / kind / (tag or self.tag)
-    def data_dir(self, tag=None): return self.data_root / 'data' / (tag or self.tag)
+    def data_dir(self, tag=None): return self.data_root / 'datasets' / (tag or self.tag)
     def runs_dir(self, tag=None): return self.data_root / 'runs' / (tag or self.tag)
     def results_dir(self, tag=None): return self.root / 'results' / (tag or self.tag)
 def load(path='config.yaml', tag=None):
