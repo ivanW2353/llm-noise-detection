@@ -210,3 +210,59 @@ ratio10 实验的历史执行记录。
 根目录的 `cleaning_loop.py`（+ `cli.py clean` 子命令）和 `analyze.py::early_detection_sweep()`
 （+ `cli.py analyze --kind early_unsupervised|early_memorization`），`scripts/` 下只保留
 真正的编排脚本 `run_cleaning_loop_garbled.sh`。
+
+## 2026-09-19：训练 checkpoint/resume 支持 + 多任务（QA/推理）数据集管线
+
+### 背景
+
+`wild_all` 标签下的 `cleaning_loop_targeted_wild` 训练在第 5 个 epoch 刚开始时中断——`model.py::LoRA.fit()`
+此前只在全部 epoch 跑完后才保存一次权重，已完成的 4 个 epoch（约 12 小时 GPU 时间）训练状态完全没有
+落盘，中断后只能从 epoch 0 重新开始。同时，Plan 2 计划验证检测方法在 QA/推理这类不同任务类型上是否
+同样有效，需要新的任务型数据源和按比例的 train/val/test 拆分。本阶段完成这两项改动。
+
+### 1. 训练 checkpoint/resume（`model.py::LoRA.fit()`）
+
+- 按 epoch 边界保存，且只保留**最新一份**（覆盖式，不为每个 epoch 单独保留，避免磁盘膨胀——单份
+  LoRA adapter ≈229MB）。写入 `run_dir/checkpoint/`，内容：`adapter/`（`model.save_pretrained`）、
+  `optimizer.pt`（AdamW 状态，续训必须还原，否则等价于重置优化器）、`state.pt`
+  （`epoch_done`/`global_step`/`v_ready`/`v_buf`/`ref_buf`/`epoch_stats`）。
+  - `ref_buf`（训练开始前、LoRA B 还是零初始化时算出的参考梯度方向）必须保存并在续训时直接复用，不能
+    重新计算——续训时模型权重已非零，重新算会破坏 `cos_ref_*` 系列特征在已训练 epoch 与续训 epoch
+    之间的可比性。
+  - 保存用"写临时目录 `checkpoint.tmp/` + 原子改名"模式，防止"只保留最新一份"在覆盖过程中崩溃导致
+    仅有的检查点被写坏。
+- Resume 逻辑：若 `checkpoint/state.pt` 存在，用 `PeftModel.from_pretrained(..., is_trainable=True)`
+  代替零初始化的 `get_peft_model`，跳过 `_compute_reference_direction` 直接加载 `ref_buf`，
+  `opt.load_state_dict(...)` 还原优化器状态，训练起点从 `state['epoch_done']+1` 续上；
+  `per_sample.jsonl`/`layer_norms.jsonl` 用追加模式打开前先按 checkpoint 的 epoch/step 裁掉多余尾部
+  （避免中断前部分写入的最后一个 epoch 留下重复行）。**不新增 CLI 参数**——同一条 `train` 命令自动判断
+  是否续训。训练正常跑完后删除 `checkpoint/`。
+- `.gitignore` 新增 `runs/**/checkpoint/`、`runs/**/checkpoint.tmp/`。`AGENTS.md` 补充说明该机制，并
+  顺带更正过时的 GPU 型号描述（RTX PRO 6000 Blackwell → 实测已换成 RTX GeForce RTX 4090）。
+- 已在真实的 `wild_all`/`cleaning_loop_targeted_wild` 重跑中验证生效（`run_wild_all.log` 可见训练
+  正常进行）。
+
+### 2. 多任务（QA/推理）数据集管线（`data.py`/`cli.py`/`config.yaml`）
+
+- `data.py::load_rows()` 扩展：支持 `hf://org/name#config` 语法（gsm8k 需要 `#main`）；支持
+  `extra_splits` 把多个官方 HF split 先合并成一个池子；新增 squad 式嵌套答案字段映射
+  （`row['answers']['text'][0]` → response，`context`+`question` 拼接 → prompt）。
+- `data.py::split_fractions(rows, fractions, seed)`（新函数）：复用 `split_holdout` 的确定性洗牌方式，
+  按累积比例切成多路，每路重新编号。用于把 squad/gsm8k 的官方 split 合并重切成 IID 的 train/val/test——
+  不直接采用官方 validation/test，因为 squad 官方 validation 是按文章划分、与 train 主题不重叠，直接
+  当测试集会让"噪音检测效果"与"模型对新主题的泛化能力"混在一起。
+- 新增两个任务特化噪音类型，登记进 `TRANSFORMS`/`NOISE_TYPES`：
+  - `wrong_answer`（QA）：整体替换 assistant 回答为看起来合理但错误的短答案，问题原文不变。
+  - `wrong_final_answer`（推理）：只替换 gsm8k 答案里 `#### N` 的最终数字，保留推理链条文字不变——
+    模拟"过程通顺但结果算错"的静默错误。
+- `data.py::apply()` 加 `ratio` 边界校验（不在 `[0,1]` 时 `raise ValueError`），此前会静默 clamp。
+- `cli.py data` 子命令新增 `--extra-split`（可重复）、`--val-frac`/`--test-frac` 参数；`config.yaml`
+  新增 `tasks:` 约定块，登记 squad/gsm8k 的 source 路径供以后编排脚本直接读取。
+- 已用真实 HF 数据（`hf://rajpurkar/squad`、`hf://openai/gsm8k#main`）跑通 `data`/`train --smoke`
+  全流程验证，生成的 `train.jsonl`/`val.jsonl`/`test.jsonl` 行数比例正确，`wrong_answer`/
+  `wrong_final_answer` 转换后样本人工抽查符合预期。
+
+### 当前进行中
+
+Plan 2 Part B 提出的实验矩阵（2 任务类型 × 3 数据集 × 2 噪音比例 = 12 次训练，约 42 小时）尚未启动，
+需等 GPU 上正在跑的 `wild_all_loop` 完成，且需用户确认后才会开始真实训练。

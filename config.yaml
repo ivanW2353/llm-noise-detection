@@ -44,3 +44,13 @@ components:
 data:
   split: train_sft
   max_samples: 200000
+
+# Task-specialized dataset sources (QA/reasoning), for `cli.py data --source ...`
+# invocations; not read automatically, just a lookup convenience for orchestration.
+tasks:
+  qa:
+    source: "hf://mandarjoshi/trivia_qa#rc.nocontext"
+    official_val_split: validation
+  reasoning:
+    source: "hf://openai/gsm8k#main"
+    official_val_split: test

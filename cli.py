@@ -1,14 +1,14 @@
 import argparse
 from pathlib import Path
 from settings import load
-from data import Jsonl,read,write,apply,load_rows,split_holdout
+from data import Jsonl,read,write,apply,load_rows,split_holdout,split_fractions
 from model import create
 from train import Trainer
 from evaluate import Evaluator
 
 def parser():
  p=argparse.ArgumentParser(prog='noisedetect',description='LLM noise experiment runner'); sub=p.add_subparsers(dest='command',required=True)
- d=sub.add_parser('data',help='build tagged datasets'); d.add_argument('--config',default='config.yaml'); d.add_argument('--tag'); d.add_argument('--source',required=True); d.add_argument('--split'); d.add_argument('--datasets',default='clean,garbled,duplicate,unrelated,keyword,mixed'); d.add_argument('--ratio',type=float); d.add_argument('--mixed-types',help='comma-separated noise types composing "mixed" (default: noise.types in config)')
+ d=sub.add_parser('data',help='build tagged datasets'); d.add_argument('--config',default='config.yaml'); d.add_argument('--tag'); d.add_argument('--source',required=True); d.add_argument('--split'); d.add_argument('--extra-split',dest='extra_splits',action='append',help='additional HF split merged into the same pool before val/test/train are cut (repeatable)'); d.add_argument('--val-frac',type=float,default=0.0); d.add_argument('--test-frac',type=float,default=0.0); d.add_argument('--datasets',default='clean,garbled,duplicate,unrelated,keyword,mixed'); d.add_argument('--ratio',type=float); d.add_argument('--mixed-types',help='comma-separated noise types composing "mixed" (default: noise.types in config)')
  t=sub.add_parser('train',help='train one dataset'); t.add_argument('--config',default='config.yaml'); t.add_argument('--tag'); t.add_argument('--dataset',required=True); t.add_argument('--train-file'); t.add_argument('--model',default='mock',choices=['mock','hf-lora']); t.add_argument('--smoke',action='store_true')
  e=sub.add_parser('evaluate',help='evaluate configured tasks'); e.add_argument('--config',default='config.yaml'); e.add_argument('--tag'); e.add_argument('--dataset',required=True); e.add_argument('--model',default='mock',choices=['mock','hf-lora']); e.add_argument('--tasks'); e.add_argument('--force',action='store_true')
  a=sub.add_parser('analyze',help='run metric analysis'); a.add_argument('--config',default='config.yaml'); a.add_argument('--tag'); a.add_argument('--tags'); a.add_argument('--kind',choices=['features','training','token','unsupervised','transfer','cross_type','cross_ratio','precision_lift','memorization','early_unsupervised','early_memorization','feature_attribution','feature_correlation','minimal_feature_set','single_feature_ablation','transfer_to_mixed','feature_group_ablation','pooled_scorer_compare','length_confound','external_baselines'],default='features'); a.add_argument('--dataset'); a.add_argument('--input'); a.add_argument('--output')
@@ -19,9 +19,18 @@ def main(argv=None):
  a=parser().parse_args(argv); s=load(a.config,a.tag)
  if a.command=='data':
   ratio=a.ratio if a.ratio is not None else s.section('noise').get('ratio',.1); names=a.datasets.split(','); seed=s.section('noise').get('seed',42)
-  base=load_rows(a.source, split=a.split or s.section('data').get('split','train'), max_samples=s.section('data').get('max_samples'))
+  base=load_rows(a.source, split=a.split or s.section('data').get('split','train'), extra_splits=a.extra_splits, max_samples=s.section('data').get('max_samples'))
   n_holdout=s.section('train').get('ref_samples',200)+s.section('train').get('heldout_samples',200)
-  heldout,train_pool=split_holdout(base,n_holdout,seed); write(heldout,s.data_dir()/'heldout.jsonl')
+  heldout,pool=split_holdout(base,n_holdout,seed); write(heldout,s.data_dir()/'heldout.jsonl')
+  val_frac=a.val_frac or 0.0; test_frac=a.test_frac or 0.0
+  if val_frac or test_frac:
+   train_frac=1.0-val_frac-test_frac
+   if train_frac<=0: raise ValueError(f'val_frac+test_frac must be <1, got {val_frac}+{test_frac}')
+   val_pool,test_pool,train_pool=split_fractions(pool,[val_frac,test_frac,train_frac],seed)
+   if val_frac: write(val_pool,s.data_dir()/'val.jsonl')
+   if test_frac: write(test_pool,s.data_dir()/'test.jsonl')
+  else:
+   train_pool=pool
   mixed_types=a.mixed_types.split(',') if a.mixed_types else s.section('noise').get('types')
   for n in names: write(apply(train_pool,n,ratio,seed,mixed_types=mixed_types) if n!='clean' else train_pool,s.data_dir()/n/'train.jsonl')
   return 0
