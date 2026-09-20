@@ -20,7 +20,7 @@ Steps (1)-(4) answer "can it be detected"; (5)-(6) answer "does cleaning actuall
 ### 4.2 Step (1): dataset construction and noise injection
 
 ```bash
-python3 cli.py data --source dolly --tag ratio10 --ratio 0.10 \
+python3 cli.py data --source dolly --tag dolly-ratio10 --ratio 0.10 \
   --datasets clean,garbled,template,duplicate,unrelated,truncation,near_duplicate,keyword,mixed
 ```
 
@@ -32,12 +32,12 @@ Two details affect later readings:
 
 **Per-type counts in `mixed` fluctuate.** `data.py:175` injects each of the 7 subtypes independently at `ratio/len(types)` = 0.10/7 ≈ 1.43%, reseeding with `seed + offset` each time. The theoretical count per type is 14611 × 0.0143 ≈ 209; the measured counts are 191-211 (near_duplicate 211, template 206, truncation 204, keyword 197, unrelated 197, garbled 194, duplicate 191), the deviation coming from independent draws occasionally hitting the same row, where the later transform overwrites the earlier one. Total noise is 1400 rows, 9.4% of 14,819. The per-type slicing in Section 6.12 rests on these labels.
 
-Nine datasets in all: `clean` (no injection, the downstream comparison baseline), the 7 single types, and `mixed`. Two noise ratios, `ratio10` (10%) and `ratio5` (5%), the latter to confirm the conclusions are not an accident of one particular ratio (Section 6.4).
+Nine datasets in all: `clean` (no injection, the downstream comparison baseline), the 7 single types, and `mixed`. Two noise ratios, `dolly-ratio10` (10%) and `dolly-ratio5` (5%), the latter to confirm the conclusions are not an accident of one particular ratio (Section 6.4).
 
 ### 4.3 Step (2): LoRA fine-tuning and per-sample metric collection
 
 ```bash
-python3 cli.py train --tag ratio10 --dataset garbled --model hf-lora
+python3 cli.py train --tag dolly-ratio10 --dataset garbled --model hf-lora
 ```
 
 Qwen2.5-3B-Instruct + LoRA (r=32, alpha=64, dropout=0.05), 5 epochs, `micro_batch=1` with `grad_accum=16` (effective batch 16), lr=2e-4, `max_len=1024`. A single NVIDIA RTX PRO 6000 Blackwell (~98GB), 9 datasets run serially at roughly 1.5 hours each (Section 8.5 has the measured breakdown).
@@ -61,7 +61,7 @@ That coverage gap runs through the entire report and is the easiest trap when re
 ### 4.4 Step (3): assembling the per-sample metric table
 
 ```bash
-python3 cli.py analyze --tag ratio10 --kind features
+python3 cli.py analyze --tag dolly-ratio10 --kind features
 ```
 
 `analyze.py::build_table` joins four sources into one wide table, `results/{tag}/per_sample_metrics.csv`:
@@ -79,7 +79,7 @@ The true `noise_type` label is read from `train.jsonl` **for evaluation only**; 
 |---|---|---|
 | Within-domain difficulty (Section 6.2) | `unsupervised` | IsolationForest and MAD z-score fit **independently per dataset**, never pooled (a global fit would let garbled's extreme magnitudes raise the outlier baseline for a low-variance dataset like template) |
 | Cross-type transfer (Section 6.3) | `cross_type` | Train LR + RF on the source, `StandardScaler` fit on the source only and `transform`-ed on the target, higher AUC of the two. The diagonal reuses the 5-fold CV result so it is on the same scale as the off-diagonal |
-| Cross-ratio transfer (Section 6.4) | `cross_ratio` | ratio10 ↔ ratio5, both directions |
+| Cross-ratio transfer (Section 6.4) | `cross_ratio` | dolly-ratio10 ↔ dolly-ratio5, both directions |
 | Cleaning-precision lift (Section 6.5) | `precision_lift` | P@10% ÷ random baseline |
 | Direction reversal (Section 6.6) | `memorization` | Fixed-sign rule, **direction never re-fit per dataset** |
 | Early detection (Section 6.7) | `early_unsupervised` / `early_memorization` | `build_table(max_epoch=k)` truncates the trajectory to simulate "trained only k epochs", with no need to actually stop early |
@@ -90,10 +90,10 @@ The true `noise_type` label is read from `train.jsonl` **for evaluation only**; 
 ### 4.6 Steps (5)-(6): closed-loop cleaning and retraining
 
 ```bash
-python3 cli.py clean --tag ratio10 --dataset template --method memo_signed --budget 0.10
-python3 cli.py train    --tag ratio10 --dataset cleaning_loop_targeted_template_signed \
-  --train-file datasets/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
-python3 cli.py evaluate --tag ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
+python3 cli.py clean --tag dolly-ratio10 --dataset template --method memo_signed --budget 0.10
+python3 cli.py train    --tag dolly-ratio10 --dataset cleaning_loop_targeted_template_signed \
+  --train-file datasets/dolly-ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
+python3 cli.py evaluate --tag dolly-ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
 ```
 
 The design decisions inside `cleaning_loop.py::build`:

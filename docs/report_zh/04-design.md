@@ -20,7 +20,7 @@
 ### 4.2 步骤①：数据集构造与噪音注入
 
 ```bash
-python3 cli.py data --source dolly --tag ratio10 --ratio 0.10 \
+python3 cli.py data --source dolly --tag dolly-ratio10 --ratio 0.10 \
   --datasets clean,garbled,template,duplicate,unrelated,truncation,near_duplicate,keyword,mixed
 ```
 
@@ -32,12 +32,12 @@ python3 cli.py data --source dolly --tag ratio10 --ratio 0.10 \
 
 **`mixed` 的每类实际数量有随机波动。** `data.py:175` 对 7 个子类型各按 `ratio/len(types)` = 0.10/7 ≈ 1.43% 独立注入，每次用 `seed + offset` 换种子。理论每类应为 14611 × 0.0143 ≈ 209 条，实测 191-211 条（near_duplicate 211、template 206、truncation 204、keyword 197、unrelated 197、garbled 194、duplicate 191），偏差来自独立抽样可能命中同一条样本时后一次覆盖前一次。总噪音 1400 条，占 14819 行的 9.4%。第 6.12 节的逐类型切片就建立在这批标签上。
 
-9 个数据集：`clean`（不注入，作为下游对比基线）、7 个单类型、`mixed`。两个噪音比例 `ratio10`（10%）与 `ratio5`（5%），后者用于验证结论不是特定比例下的偶然（第 6.4 节）。
+9 个数据集：`clean`（不注入，作为下游对比基线）、7 个单类型、`mixed`。两个噪音比例 `dolly-ratio10`（10%）与 `dolly-ratio5`（5%），后者用于验证结论不是特定比例下的偶然（第 6.4 节）。
 
 ### 4.3 步骤②：LoRA 微调与逐样本指标采集
 
 ```bash
-python3 cli.py train --tag ratio10 --dataset garbled --model hf-lora
+python3 cli.py train --tag dolly-ratio10 --dataset garbled --model hf-lora
 ```
 
 Qwen2.5-3B-Instruct + LoRA（r=32, alpha=64, dropout=0.05），5 epochs，`micro_batch=1` + `grad_accum=16`（等效 batch 16），lr=2e-4，`max_len=1024`。单卡 NVIDIA RTX PRO 6000 Blackwell（~98GB），9 个数据集串行排队，每个约 1.5 小时（第 8.5 节有实测分解）。
@@ -61,7 +61,7 @@ Qwen2.5-3B-Instruct + LoRA（r=32, alpha=64, dropout=0.05），5 epochs，`micro
 ### 4.4 步骤③：汇总逐样本指标表
 
 ```bash
-python3 cli.py analyze --tag ratio10 --kind features
+python3 cli.py analyze --tag dolly-ratio10 --kind features
 ```
 
 `analyze.py::build_table` 把四个来源拼成一张宽表 `results/{tag}/per_sample_metrics.csv`：
@@ -79,7 +79,7 @@ python3 cli.py analyze --tag ratio10 --kind features
 |---|---|---|
 | 域内检测难度（第 6.2 节） | `unsupervised` | 每个数据集**独立**拟合 IsolationForest 与 MAD z-score，不跨数据集合并（否则 garbled 的极端量级会抬高 template 的离群基线） |
 | 跨类型迁移（第 6.3 节） | `cross_type` | 源域训 LR + RF，`StandardScaler` 只在源域 `fit`，目标域只 `transform`；取两者 AUC 较高值。对角线复用 5-fold CV 结果，保证与非对角线同尺 |
-| 跨比例迁移（第 6.4 节） | `cross_ratio` | ratio10 ↔ ratio5 双向 |
+| 跨比例迁移（第 6.4 节） | `cross_ratio` | dolly-ratio10 ↔ dolly-ratio5 双向 |
 | 清洗精度 lift（第 6.5 节） | `precision_lift` | P@10% ÷ 随机基线 |
 | 方向反转（第 6.6 节） | `memorization` | 固定符号规则，**从不按数据集重拟合方向** |
 | 早期检测（第 6.7 节） | `early_unsupervised` / `early_memorization` | `build_table(max_epoch=k)` 截断轨迹，模拟"只训了 k 个 epoch"，无需真的提前停止 |
@@ -90,10 +90,10 @@ python3 cli.py analyze --tag ratio10 --kind features
 ### 4.6 步骤⑤-⑥：闭环清洗与重训
 
 ```bash
-python3 cli.py clean --tag ratio10 --dataset template --method memo_signed --budget 0.10
-python3 cli.py train    --tag ratio10 --dataset cleaning_loop_targeted_template_signed \
-  --train-file datasets/ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
-python3 cli.py evaluate --tag ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
+python3 cli.py clean --tag dolly-ratio10 --dataset template --method memo_signed --budget 0.10
+python3 cli.py train    --tag dolly-ratio10 --dataset cleaning_loop_targeted_template_signed \
+  --train-file datasets/dolly-ratio10/cleaning_loop/template_memo_signed/train_targeted.jsonl --model hf-lora
+python3 cli.py evaluate --tag dolly-ratio10 --dataset cleaning_loop_targeted_template_signed --model hf-lora
 ```
 
 `cleaning_loop.py::build` 的关键设计：

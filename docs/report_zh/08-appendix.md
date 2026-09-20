@@ -43,7 +43,7 @@
 |---|---|---|
 | `text_nn_sim` | 对同一数据集全部样本的 `prompt+response` 拼接文本构建 TF-IDF 向量（`textsim.py:10`：`TfidfVectorizer(ngram_range=(1,2), min_df=min(10,N), sublinear_tf=True, max_features=200_000)`，即同时用 1-gram 和 2-gram、对数缩放词频、词表上限 20 万），再用余弦距离的 `NearestNeighbors(k=2)` 为每个样本找最近邻（`k=2` 是因为第 1 近邻永远是样本自身，取第 2 个才是"除自己以外最像的样本"），相似度 = `1 - 该距离` | 这个样本的文字表达（词汇+局部搭配）在训练集里是否能找到几乎一样的"孪生"样本——对完全重复、近似重复这类"复制/轻改写"噪音非常敏感，但对关键词替换这种"整体结构不变、只换 1-2 个词"的噪音几乎不敏感（TF-IDF 向量几乎不受影响） |
 
-实测：对 `keyword@ratio10`（14611 条样本）计算全量 `text_nn_sim` 耗时约 7.3 秒（含 TF-IDF 构建 + 最近邻检索），是全部指标里计算成本最低的一类，且完全不需要 GPU。
+实测：对 `keyword@dolly-ratio10`（14611 条样本）计算全量 `text_nn_sim` 耗时约 7.3 秒（含 TF-IDF 构建 + 最近邻检索），是全部指标里计算成本最低的一类，且完全不需要 GPU。
 
 ### 8.4 已产出但未进入检测流程的诊断量
 
@@ -51,9 +51,9 @@
 |---|---|---|
 | `layer_norms.jsonl` / TensorBoard `lora_layer_gradnorm/layer{li}` | 每个优化器 step（即每完成一次 16 样本的梯度累积窗口）调用一次，对该 step 累积的梯度，按 LoRA 所在的 transformer 层号分别求和后取 L2 范数（`_window_layer_grad_norms`，`model.py:80-86`：按层号分组，`sqrt(sum(grad**2))`）。仅监控三层：`target_ids={0, n_layers//2, n_layers-1}`——对当前 Qwen2.5-3B-Instruct（36 层）即第 0、18、35 层（`model.py:227`）。每次训练 5 epoch × 914 个优化器 step ≈ 4570 行 | 这是**按训练 step 聚合的全局量**，不是按样本的量——一个 step 里 16 个样本的梯度贡献已经被加在一起，无法反推出"某个样本单独在某一层的梯度是多少"。因此即使想把它塞进 `per_sample_metrics.csv`，现有数据形态也做不到，必须改造成类似 `cos_global`/`grad_norm` 那样的逐样本-逐层拆分（在 `flush_window` 里按层号重新做一遍范数计算），这需要修改训练代码并重新训练，而不是简单的后处理脚本能解决的。目前全项目代码中没有任何位置读取或合并这份数据，仅用于人工在 TensorBoard 里观察各层梯度量级随训练的变化曲线 |
 
-### 8.5 采集耗时（实测，`keyword@ratio10`，单卡 NVIDIA RTX PRO 6000 Blackwell Server Edition）
+### 8.5 采集耗时（实测，`keyword@dolly-ratio10`，单卡 NVIDIA RTX PRO 6000 Blackwell Server Edition）
 
-耗时数据来自 `runs/ratio10/keyword/metrics/diag_epoch*.jsonl` 等文件的磁盘写入时间戳（`stat` mtime），并与 `logs/full_run.log` 中记录的该数据集训练起止时间（2026-09-12 09:26:36 → 12:33:55，实测总耗时 187.3 分钟）交叉核对，两者一致。
+耗时数据来自 `runs/dolly-ratio10/keyword/metrics/diag_epoch*.jsonl` 等文件的磁盘写入时间戳（`stat` mtime），并与 `logs/full_run.log` 中记录的该数据集训练起止时间（2026-09-12 09:26:36 → 12:33:55，实测总耗时 187.3 分钟）交叉核对，两者一致。
 
 **单 epoch 内部构成**（基于 `config.yaml` 当前配置推算）：
 
@@ -76,11 +76,11 @@
 
 **推论**：229 个 batch 的诊断前向推理耗时 34 秒，平均每 batch 约 0.15 秒；若将 `diag_subsample` 从 8 改为 1（全量诊断，14611 个样本、批大小 8、`⌈14611/8⌉=1827` 个 batch），诊断阶段预计增至约 **270 秒（4.5 分钟）**，单数据集 5 epoch 总耗时预计从 187 分钟增至约 **209 分钟（3.5 小时）**，即增加约 12%（诊断推理本身不含反向传播和优化器更新，理论上应与 batch 数近似线性缩放，此处按线性外推）。
 
-**跨数据集/整体项目重训成本外推**：若只对当前判定"有提升空间"的 `near_duplicate` 类型（8.2 节结论）做全量诊断重训，需要 `ratio10` + `ratio5` 两个 tag 各一次，预计合计增加约 **44 分钟**（每个 tag 约 22 分钟的增量）；若对全部 9 类噪音数据集 × 2 个比例（18 个 run）都改为全量诊断，预计合计增加约 **6.6 小时**（每个 run 约 22 分钟增量 × 18）。以上数据来自单一数据集、单台机器的一次实测，不同数据集（文本长度、样本数）与 GPU 负载下会有波动，仅供量级参考，不构成精确排期承诺。
+**跨数据集/整体项目重训成本外推**：若只对当前判定"有提升空间"的 `near_duplicate` 类型（8.2 节结论）做全量诊断重训，需要 `dolly-ratio10` + `dolly-ratio5` 两个 tag 各一次，预计合计增加约 **44 分钟**（每个 tag 约 22 分钟的增量）；若对全部 9 类噪音数据集 × 2 个比例（18 个 run）都改为全量诊断，预计合计增加约 **6.6 小时**（每个 run 约 22 分钟增量 × 18）。以上数据来自单一数据集、单台机器的一次实测，不同数据集（文本长度、样本数）与 GPU 负载下会有波动，仅供量级参考，不构成精确排期承诺。
 
 ### 8.6 噪音样本示例（原始文本对照）
 
-后续所有章节讨论的"检测难度""特征归因"都是抽象的统计结论，这里先给出真实数据，让读者能直接看到 7 种噪音在原始文本层面到底做了什么。以下除关键词替换外均取自 `datasets/ratio10/{类型}/train.jsonl` 中同一条样本 `sample_id=20`（原问题 "Why do home power outages occur?"，干净回答共 1055 字符，开头为 "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."），关键词替换取自 `sample_id=74`（另一个样本，因为 20 号样本的关键词替换恰好落在未展示的片段上，不便说明）：
+后续所有章节讨论的"检测难度""特征归因"都是抽象的统计结论，这里先给出真实数据，让读者能直接看到 7 种噪音在原始文本层面到底做了什么。以下除关键词替换外均取自 `datasets/dolly-ratio10/{类型}/train.jsonl` 中同一条样本 `sample_id=20`（原问题 "Why do home power outages occur?"，干净回答共 1055 字符，开头为 "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."），关键词替换取自 `sample_id=74`（另一个样本，因为 20 号样本的关键词替换恰好落在未展示的片段上，不便说明）：
 
 | 噪音类型 | 制造方式（实测） | 噪音后文本（节选） |
 |---|---|---|
@@ -99,7 +99,7 @@
 
 ### 8.7 原始特征值示例：一条噪音样本 vs. 一条干净样本
 
-以 `garbled@ratio10` 为例，取一条被检测为噪音的真实样本（`sample_id=10136`，落在诊断子采样里）与一条干净样本（`sample_id=0`）在 `per_sample_metrics.csv` 里的实际取值对比：
+以 `garbled@dolly-ratio10` 为例，取一条被检测为噪音的真实样本（`sample_id=10136`，落在诊断子采样里）与一条干净样本（`sample_id=0`）在 `per_sample_metrics.csv` 里的实际取值对比：
 
 | 特征 | 噪音样本（乱码，`sample_id=10136`） | 干净样本（`sample_id=0`） | 说明 |
 |---|---|---|---|
@@ -114,7 +114,7 @@
 
 用随机森林分类器（有监督，见 6.2.1 节口径说明）在训练动态特征上做 5-fold 交叉验证，得到每种噪音类型的"域内检测 AUC"：
 
-| 噪音类型 | ratio10 AUC | ratio5 AUC |
+| 噪音类型 | dolly-ratio10 AUC | dolly-ratio5 AUC |
 |---|---|---|
 | 模板化 | 0.999 | 1.000 |
 | 乱码 | 0.998 | 0.993 |
@@ -128,7 +128,7 @@
 
 - 模板化、乱码、完全重复三类几乎"满分可检测"（AUC > 0.98），说明这类噪音在训练动态上留下的痕迹非常显著。
 - 关键词替换和近似重复是两个明显的难点，AUC 只比随机基线（0.5）高出不多，说明这两类"轻度扰动"式噪音在训练动态层面几乎不留痕迹。
-- 两个噪音比例（10% vs 5%）下的排序完全一致，且 ratio5 在较难的三类（unrelated/truncation/near_duplicate/keyword）上 AUC 反而略高于 ratio10——初步证据表明这个排序是稳定的，不是噪音比例特定的偶然结果，第 6.4 节的跨比例迁移分析会进一步验证这一点。
+- 两个噪音比例（10% vs 5%）下的排序完全一致，且 dolly-ratio5 在较难的三类（unrelated/truncation/near_duplicate/keyword）上 AUC 反而略高于 dolly-ratio10——初步证据表明这个排序是稳定的，不是噪音比例特定的偶然结果，第 6.4 节的跨比例迁移分析会进一步验证这一点。
 
 ---
 
@@ -136,7 +136,7 @@
 
 ![原始 loss 轨迹](../../results/charts/raw_loss_trajectory.png)
 
-前面几节大量使用 AUC 作为主要口径，是因为跨 7 种噪音类型 × 多种方法 × 多个 epoch 做横向比较时，各特征的原始数值本身没有共同尺度（乱码的异常是"loss 偏高"，模板化的异常是"loss 偏低"，直接放一张表里没法比）；但 AUC 终究是从原始数据聚合出来的统计量，这里直接把驱动 AUC 的原始信号画出来：对 `ratio10` 全部 8 个非 clean 数据集，分别取该数据集内"该类型噪音样本"和"`noise_type=='none'` 的干净样本（同数据集内对照）两组，在每个 epoch 上直接对 `runs/ratio10/{类型}/metrics/per_sample.jsonl` 里的原始逐样本 loss 取算术平均——不做任何 z-score、曲率拟合等特征工程，是最原始的数字。
+前面几节大量使用 AUC 作为主要口径，是因为跨 7 种噪音类型 × 多种方法 × 多个 epoch 做横向比较时，各特征的原始数值本身没有共同尺度（乱码的异常是"loss 偏高"，模板化的异常是"loss 偏低"，直接放一张表里没法比）；但 AUC 终究是从原始数据聚合出来的统计量，这里直接把驱动 AUC 的原始信号画出来：对 `dolly-ratio10` 全部 8 个非 clean 数据集，分别取该数据集内"该类型噪音样本"和"`noise_type=='none'` 的干净样本（同数据集内对照）两组，在每个 epoch 上直接对 `runs/dolly-ratio10/{类型}/metrics/per_sample.jsonl` 里的原始逐样本 loss 取算术平均——不做任何 z-score、曲率拟合等特征工程，是最原始的数字。
 
 - **乱码**：噪音组 loss 从 epoch1 的 4.62 一路降到 epoch5 的 2.56，但**始终**远高于同数据集干净对照组（1.61→0.61），两条线全程分离得很开——这正是第 6.2 节域内 AUC 高达 0.998、第 6.6 节 iforest AUC 达 0.936 的原始数字依据：模型确实学不会这些乱码文本。
 - **模板化**：这是"方向反转"最极端的例子——噪音组 loss 在 epoch1 就只有 0.257，到 epoch5 直接降到 0.021，反而**远低于**干净对照组（1.62→0.61）。不是"看起来正常"，而是比正常样本更"正常"：模型几乎从第一个 epoch 就把这批高度模板化的样本记得滚瓜烂熟，这就是第 6.6 节 memo_signed AUC 达到 0.925 而 iforest 只有 0.522（因为 iforest 默认"离群=噪音"，找错了方向）背后的真实原始曲线长什么样。

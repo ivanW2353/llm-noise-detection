@@ -29,7 +29,7 @@ Section by section:
 
 Section 6.3 already covers the pipeline and its commands; this subsection collects only the three things worth having at hand while reading results.
 
-**Data scale.** 14,611 training samples per dataset (`duplicate` has 16,072, since it appends copies), plus a 400-sample held-out set (200 for the reference gradient, 200 for monitoring held-out loss, shared across all 9 datasets). Noise ratios are `ratio10` = 10% and `ratio5` = 5%, with all 9 datasets complete at both ratios.
+**Data scale.** 14,611 training samples per dataset (`duplicate` has 16,072, since it appends copies), plus a 400-sample held-out set (200 for the reference gradient, 200 for monitoring held-out loss, shared across all 9 datasets). Noise ratios are `dolly-ratio10` = 10% and `dolly-ratio5` = 5%, with all 9 datasets complete at both ratios.
 
 **Which file each section draws on.**
 
@@ -87,11 +87,11 @@ Each dataset effectively uses only about 900-1000 samples (vs. roughly 14,611-16
 
 ![Cross-noise-type detector transfer matrix](../../results/charts/en/cross_type_heatmap.png)
 
-The figure above is the 7×7 transfer matrix under `ratio10`: each row is the noise type the detector was trained on, each column is the noise type it was tested on, and the diagonal reproduces the within-domain AUC from Section 2.
+The figure above is the 7×7 transfer matrix under `dolly-ratio10`: each row is the noise type the detector was trained on, each column is the noise type it was tested on, and the diagonal reproduces the within-domain AUC from Section 2.
 
 **Method**: for each off-diagonal cell `(source type → target type)`, the code (`analyze.py::fit_transfer`) trains both a `LogisticRegression(max_iter=2000)` and a `RandomForestClassifier(n_estimators=200)` on the **source** type's dataset (the `StandardScaler` is fit only on the source data and merely applied via `transform` on the target — never refit — so what's being measured is the detector's actual transfer ability, not the convenience of re-normalizing on the target), evaluates both on the target type's dataset, and keeps whichever gives the higher AUC as that cell's value. The matrix's **diagonal is not a fresh "train and test on the same data" run — it directly reuses the within-domain AUC from Section 6.2's 5-fold cross-validation**, so the diagonal and off-diagonal cells are on the same footing (otherwise the diagonal would be inflated by training and testing on the same data).
 
-A few representative off-diagonal cells (from `results/ratio10/cross_type.csv`): `template→garbled` is only 0.403 (well below the 0.5 random baseline — a directional reversal); `unrelated→template` is only 0.321 (also reversed, and even more extreme than `template→garbled`); yet `template→duplicate` reaches 0.896 — showing a detector trained on template is not uniformly bad on every target: it transfers positively to the structurally similar duplicate type, while completely failing (or reversing) on the structurally very different garbled type.
+A few representative off-diagonal cells (from `results/dolly-ratio10/cross_type.csv`): `template→garbled` is only 0.403 (well below the 0.5 random baseline — a directional reversal); `unrelated→template` is only 0.321 (also reversed, and even more extreme than `template→garbled`); yet `template→duplicate` reaches 0.896 — showing a detector trained on template is not uniformly bad on every target: it transfers positively to the structurally similar duplicate type, while completely failing (or reversing) on the structurally very different garbled type.
 
 **Key findings**:
 
@@ -110,9 +110,9 @@ A few representative off-diagonal cells (from `results/ratio10/cross_type.csv`):
 
 In contrast to the cross-type transfer in Section 6.3, this section fixes the noise type and tests whether a detector trained at a 10% noise ratio transfers to 5% (and vice versa).
 
-**Method**: uses the same `fit_transfer` function as Section 6.3's cross-type transfer (`analyze.py::cross_ratio_transfer`); the only difference is how "source/target" are paired — here source and target are the **same noise type at two different noise ratios** (e.g. `ratio10→ratio5` means fitting on `ratio10/garbled` and evaluating on the corresponding `ratio5/garbled`), rather than being paired by noise type as in Section 3. Both directions (`ratio10→ratio5`, `ratio5→ratio10`) are trained independently, and the diagonal (not shown in this table, i.e. "within-tag within-domain AUC") likewise reuses Section 6.2's already-computed within-domain CV result rather than being recomputed.
+**Method**: uses the same `fit_transfer` function as Section 6.3's cross-type transfer (`analyze.py::cross_ratio_transfer`); the only difference is how "source/target" are paired — here source and target are the **same noise type at two different noise ratios** (e.g. `dolly-ratio10→dolly-ratio5` means fitting on `dolly-ratio10/garbled` and evaluating on the corresponding `dolly-ratio5/garbled`), rather than being paired by noise type as in Section 3. Both directions (`dolly-ratio10→dolly-ratio5`, `dolly-ratio5→dolly-ratio10`) are trained independently, and the diagonal (not shown in this table, i.e. "within-tag within-domain AUC") likewise reuses Section 6.2's already-computed within-domain CV result rather than being recomputed.
 
-| Noise type | ratio10→ratio5 AUC | ratio5→ratio10 AUC |
+| Noise type | dolly-ratio10→dolly-ratio5 AUC | dolly-ratio5→dolly-ratio10 AUC |
 |---|---|---|
 | Template | 1.000 | 1.000 |
 | Garbled | 0.996 | 0.997 |
@@ -122,7 +122,7 @@ In contrast to the cross-type transfer in Section 6.3, this section fixes the no
 | Near-duplicate | 0.895 | 0.790 |
 | Keyword | 0.898 | 0.751 |
 
-**Key finding: cross-ratio transfer AUC is ≥0.75 across the board, mostly ≥0.88, and retention (transferred AUC / within-domain AUC) is mostly ≥1.0 — transfer loses almost nothing, and in some cases actually improves.** For example, keyword ratio10→ratio5 reaches 0.898, well above ratio5's own within-domain CV of 0.634; near-duplicate ratio10→ratio5 reaches 0.895, well above its own within-domain CV of 0.759. This suggests that pooling training-dynamics data across the two noise ratios actually produces a more robust decision boundary, rather than overfitting to one specific noise density.
+**Key finding: cross-ratio transfer AUC is ≥0.75 across the board, mostly ≥0.88, and retention (transferred AUC / within-domain AUC) is mostly ≥1.0 — transfer loses almost nothing, and in some cases actually improves.** For example, keyword dolly-ratio10→dolly-ratio5 reaches 0.898, well above dolly-ratio5's own within-domain CV of 0.634; near-duplicate dolly-ratio10→dolly-ratio5 reaches 0.895, well above its own within-domain CV of 0.759. This suggests that pooling training-dynamics data across the two noise ratios actually produces a more robust decision boundary, rather than overfitting to one specific noise density.
 
 **Conclusion when compared with Section 6.3**: the discriminative signal that training-dynamics features carry for "noise type" is stable across noise ratios (and can even transfer positively) — a detector does not need to be retrained for every noise ratio. **The real transfer bottleneck is cross-noise-type, not cross-noise-ratio.** This is practically significant: if the production noise ratio fluctuates over time, the detector does not need to be retrained because of that alone.
 
@@ -139,7 +139,7 @@ AUC measures overall ranking ability, but in practice cleaning can only remove a
 - `zscore_max` / `zscore_mean`: a robust z-score per feature, `(x - median) / (1.4826 * MAD)` (MAD = median absolute deviation), then either the **max** or the **mean** of the absolute values across features as the sample's anomaly score.
 - `iforest`: after `StandardScaler` normalization, an `IsolationForest(n_estimators=300)` is fit **independently per dataset** (never pooled across datasets), using the negative `score_samples` (higher = more anomalous) as the score.
 
-The table below is the complete raw result for every dataset × all 3 methods under `ratio10` (the main summary table in this section only shows, per dataset, the single row with the highest lift — which can hide the fact that switching methods on the same dataset can flip the conclusion entirely):
+The table below is the complete raw result for every dataset × all 3 methods under `dolly-ratio10` (the main summary table in this section only shows, per dataset, the single row with the highest lift — which can hide the fact that switching methods on the same dataset can flip the conclusion entirely):
 
 | Dataset | Method | n | n_noise | AUC | P@10% | random_p | lift |
 |---|---|---|---|---|---|---|---|
@@ -170,7 +170,7 @@ The table below is the complete raw result for every dataset × all 3 methods un
 
 (Bold = the "best method" shown in this section's main summary table; `n`/`n_noise` match Section 6.2, since unsupervised scoring is likewise computed only on the diagnostic-subsample rows where all 37 features are non-null.) This full table reveals two details the summary table hides: **the spread across methods for garbled is huge** (iforest 5.91x vs. zscore_max 0.95x — the same dataset flips from "highly useful" to "worse than random" depending on the scoring method); **template's zscore_max method (0.23x) is one of the worst combinations in the entire table**, even though the same dataset reaches 1.72x under zscore_mean — showing that "choosing the right method" matters as much as "choosing the right dataset."
 
-| Noise type | ratio10 best-method lift | ratio5 best-method lift |
+| Noise type | dolly-ratio10 best-method lift | dolly-ratio5 best-method lift |
 |---|---|---|
 | Garbled | 5.91 (iforest) | 7.40 (iforest) |
 | Mixed | 2.28 (iforest) | 2.96 (iforest) |
@@ -181,7 +181,7 @@ The table below is the complete raw result for every dataset × all 3 methods un
 | Keyword | 1.14 (zscore_max) | 1.99 (zscore_max) |
 | **Duplicate** | **0.56 (zscore_mean)** | **0.89 (zscore_max)** |
 
-**Key warning**: for **duplicate** noise, despite a within-domain AUC as high as 0.986 (Section 6.2), the P@10% lift is below 1 (only 0.56x at ratio10, 0.89x at ratio5) — meaning that removing the top-10%-scored samples according to this detector actually hits *fewer* true noise samples than removing a random 10%. This happens because the duplicate score distribution can be tightly clustered outside the "useful" region for a strict top-k cut; AUC, being a global ranking metric, masks this local failure under a budget constraint.
+**Key warning**: for **duplicate** noise, despite a within-domain AUC as high as 0.986 (Section 6.2), the P@10% lift is below 1 (only 0.56x at dolly-ratio10, 0.89x at dolly-ratio5) — meaning that removing the top-10%-scored samples according to this detector actually hits *fewer* true noise samples than removing a random 10%. This happens because the duplicate score distribution can be tightly clustered outside the "useful" region for a strict top-k cut; AUC, being a global ranking metric, masks this local failure under a budget constraint.
 
 **Methodological implication**: ranking cleaning methods by AUC and by P@10% lift produces different "best method" conclusions — choosing a cleaning strategy by AUC alone is biased. Any detection method claimed to be usable for automated cleaning should report precision under a realistic cleaning budget, not just AUC.
 
@@ -195,7 +195,7 @@ This is one of the project's most important methodological findings. Standard un
 
 **Exact construction** (`analyze.py::memorization_score`, `MEMO_FEATS`): `memo_signed` uses only 6 fully-covered trajectory features — `loss_mean, loss_last, loss_std, loss_curvature, converge_epoch, grad_norm_mean` — and, unlike iforest's "data-driven, algorithm learns its own direction" approach, **fixes the sign coefficient of all 6 features to -1 a priori** (no fitting involved at all): each feature gets a robust z-score, multiplied by -1, and the results are averaged. In other words, this rule explicitly encodes the prior assumption "lower loss, faster convergence (smaller `converge_epoch`), smaller gradients = more likely to be perfectly-memorized hyper-typical noise" — rather than letting the model discover the outlier direction on its own. This is exactly why it reverses iforest's failure on template: iforest is a direction-agnostic generic anomaly detector, while `memo_signed` is a rule with a built-in directional prior.
 
-**A note on sample size**: because `memo_signed`/`low_loss_only` (the "signed memorization rule" column below, from `results/ratio10/memorization.csv`) depends only on these 6 fully-covered features, it is computed on the **full sample** (roughly 14,611-16,072 rows, slightly more for duplicate since that noise process adds new rows). The left column below, "generic unsupervised iforest AUC" (from `results/ratio10/unsupervised.csv`), follows the same 37-feature, all-non-null constraint described in Section 6.2.1, and is only computed on the ~900-1000-row diagnostic subsample. **The two columns in this same table differ in sample size by roughly 15x — they are two different sample populations, not the same samples scored two different ways.** This is another place in the report, besides Section 6.2.1, where the sample-size basis needs to be flagged explicitly.
+**A note on sample size**: because `memo_signed`/`low_loss_only` (the "signed memorization rule" column below, from `results/dolly-ratio10/memorization.csv`) depends only on these 6 fully-covered features, it is computed on the **full sample** (roughly 14,611-16,072 rows, slightly more for duplicate since that noise process adds new rows). The left column below, "generic unsupervised iforest AUC" (from `results/dolly-ratio10/unsupervised.csv`), follows the same 37-feature, all-non-null constraint described in Section 6.2.1, and is only computed on the ~900-1000-row diagnostic subsample. **The two columns in this same table differ in sample size by roughly 15x — they are two different sample populations, not the same samples scored two different ways.** This is another place in the report, besides Section 6.2.1, where the sample-size basis needs to be flagged explicitly.
 
 | Noise type | Generic unsupervised iforest AUC | Signed memorization rule (memo_signed) AUC |
 |---|---|---|
@@ -249,7 +249,7 @@ Every analysis so far answers "can it be detected." This section uses permutatio
 
 **Exact computation** (`analyze.py::feature_attribution`): reuses the exact same 5-fold cross-validation RF setup as Section 6.2.1 (the same ~900-1000-row diagnostic subsample, the same `RandomForestClassifier(n_estimators=200)`), but instead of reading RF's built-in `feature_importances_` (impurity-based, with a known systematic bias toward high-cardinality/continuous features), each fold calls `sklearn.inspection.permutation_importance(n_repeats=20, scoring='roc_auc')` — shuffling one feature column's values in the test fold 20 times and measuring how much AUC drops relative to the unshuffled baseline each time; the mean across 20 shuffles is that feature's importance for that fold (and the standard deviation reflects how much the 20 shuffles disagreed), then this is averaged again across the 5 folds. The direct meaning of "importance" here is therefore "how much does shuffling this feature hurt AUC" rather than "how often this feature was used to split a tree" — closer to a causal notion of contribution.
 
-Taking keyword substitution (the single hardest-to-detect type of the 7) as an example, here is the complete top-8 feature-attribution ranking (`results/ratio10/feature_attribution.csv`):
+Taking keyword substitution (the single hardest-to-detect type of the 7) as an example, here is the complete top-8 feature-attribution ranking (`results/dolly-ratio10/feature_attribution.csv`):
 
 | Rank | Feature | Importance | Importance std |
 |---|---|---|---|
@@ -289,7 +289,7 @@ This table makes concrete exactly why keyword substitution is hard to detect: th
 
 Everything above answers "can noise be detected." This section addresses a more fundamental question: **does injecting noise actually degrade the model's downstream task performance?** (Mean accuracy across 7 benchmarks: MMLU / GSM8K / HellaSwag / ARC / BBH / TruthfulQA / Winogrande.)
 
-**Raw data: broken down per benchmark, not just the mean.** The table below shows `clean` / `template` / `near_duplicate` (ratio10) accuracy on each of the 7 benchmarks individually (from `results/eval/eval_ratio10_{dataset}.json`):
+**Raw data: broken down per benchmark, not just the mean.** The table below shows `clean` / `template` / `near_duplicate` (dolly-ratio10) accuracy on each of the 7 benchmarks individually (from `results/eval/eval_dolly-ratio10_{dataset}.json`):
 
 | Benchmark | n | clean | template | near_duplicate | template - clean |
 |---|---|---|---|---|---|
@@ -304,7 +304,7 @@ Everything above answers "can noise be detected." This section addresses a more 
 
 This table reveals a real effect the "mean of 7" number masks: **on GSM8K, template actually drops 8.95 points relative to clean (0.5497→0.4602)** — the only benchmark where the drop reaches a near-double-digit percentage-point magnitude. But because the other 6 benchmarks show template performing roughly flat or even slightly *better* than clean (MMLU/ARC/Winogrande all tick up modestly), the average nets out to only a 1.3-point drop (0.439→0.426). Looking only at the mean makes it easy to mistake this for "small fluctuations across the board," when the real structure is "one benchmark genuinely damaged, six essentially unaffected or showing a spurious small uptick." GSM8K is a numeric-reasoning task that places the highest demand on precise, coherent generated output, consistent with the hypothesis that template noise teaches the model to produce templated/perfunctory responses. BBH, with only n=540 (the smallest sample of all 7 benchmarks), should have its -4.26-point drop interpreted more cautiously, since that gap could plausibly include a larger share of statistical noise.
 
-| Dataset | ratio10 mean accuracy | ratio5 mean accuracy |
+| Dataset | dolly-ratio10 mean accuracy | dolly-ratio5 mean accuracy |
 |---|---|---|
 | Clean (baseline) | 0.439 | 0.437 |
 | Garbled | 0.439 | 0.439 |
@@ -319,8 +319,8 @@ This table reveals a real effect the "mean of 7" number masks: **on GSM8K, templ
 **Observations**:
 
 - The spread across datasets is very small (all fall in the 0.42-0.44 range), suggesting that at the current noise ratios (5%/10%) and training scale, LoRA fine-tuning has an inherently limited effect on these 7 general-capability benchmarks — these benchmarks mostly probe pretrained knowledge rather than SFT-stage behavior, so the "damage" from noise injection is more likely to show up in instruction-following quality or generation style, dimensions this report does not cover, rather than in multiple-choice/numeric benchmarks like these.
-- Within that limited spread, **template's ratio10 downstream accuracy (0.426) is the lowest of all datasets** — even lower than the clean baseline (0.439) — echoing the Section 6.2/6.6/6.8 conclusion that "template is the easiest to detect and the most deeply memorized": the model's overfit memorization of template noise does leave an observable negative trace downstream, making it the only type in this evaluation where "easy to detect" and "actually harmful" corroborate each other.
-- **ratio5's downstream evaluation is now fully complete (9/9 datasets)**, and the results don't fully match ratio10: the lowest ratio5 score turns out to be **mixed noise (0.430)**, not template (0.433, tied mid-pack with truncation/keyword) — meaning the conclusion "template causes the most downstream harm" is **not stable across noise ratios**: at the 5% noise ratio, the compound effect of mixing all 7 noise types together drags down downstream performance more visibly. This suggests template's downstream harm may involve a threshold effect (only showing up clearly once the noise ratio is high enough), while mixed noise's downstream harm may be the result of several mild effects stacking together — worth verifying separately in future work whether mixed noise exhibits a synergistic amplification effect.
+- Within that limited spread, **template's dolly-ratio10 downstream accuracy (0.426) is the lowest of all datasets** — even lower than the clean baseline (0.439) — echoing the Section 6.2/6.6/6.8 conclusion that "template is the easiest to detect and the most deeply memorized": the model's overfit memorization of template noise does leave an observable negative trace downstream, making it the only type in this evaluation where "easy to detect" and "actually harmful" corroborate each other.
+- **dolly-ratio5's downstream evaluation is now fully complete (9/9 datasets)**, and the results don't fully match dolly-ratio10: the lowest dolly-ratio5 score turns out to be **mixed noise (0.430)**, not template (0.433, tied mid-pack with truncation/keyword) — meaning the conclusion "template causes the most downstream harm" is **not stable across noise ratios**: at the 5% noise ratio, the compound effect of mixing all 7 noise types together drags down downstream performance more visibly. This suggests template's downstream harm may involve a threshold effect (only showing up clearly once the noise ratio is high enough), while mixed noise's downstream harm may be the result of several mild effects stacking together — worth verifying separately in future work whether mixed noise exhibits a synergistic amplification effect.
 
 ---
 
@@ -349,7 +349,7 @@ One framing caveat first: the AUC numbers reported in Sections 6.2-6.9 (`unsuper
 
 #### 6.11.1 How much do these metrics overlap?
 
-Before asking which data is necessary, a more basic question: **how independent are these 19 full-coverage metrics from each other?** Two conclusions in this report lean on them being highly correlated — Section 6.11.4 uses it to explain why RF is indifferent to dropping any single metric, and Section 6.11.5 uses it to explain why removing features *helps* IF (dimensional dilution). Both were assertions until now, never measured. Script: `analyze.py::feature_correlation()`, output `results/ratio10/feature_correlation.csv`.
+Before asking which data is necessary, a more basic question: **how independent are these 19 full-coverage metrics from each other?** Two conclusions in this report lean on them being highly correlated — Section 6.11.4 uses it to explain why RF is indifferent to dropping any single metric, and Section 6.11.5 uses it to explain why removing features *helps* IF (dimensional dilution). Both were assertions until now, never measured. Script: `analyze.py::feature_correlation()`, output `results/dolly-ratio10/feature_correlation.csv`.
 
 Measured three ways (Spearman rather than Pearson, since several of these are visibly heavy-tailed and Pearson would understate monotone-but-nonlinear relationships):
 
@@ -386,7 +386,7 @@ Measured three ways (Spearman rather than Pearson, since several of these are vi
 
 Two of the "necessity verdicts" in Section 6.10 are currently backed only by attribution-importance rankings (Section 6.8), not quantitative evidence: is the duplicate/unrelated detection signal really being "diluted" by irrelevant features? And how much would adding (production-unavailable) token-level diagnostics actually improve near_duplicate/keyword, and is it worth reworking the collection pipeline to get full coverage for them?
 
-Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `analyze.py::feature_group_ablation()`, output at `results/ratio10/feature_ablation.csv`.
+Both questions can be answered **without retraining anything**: the diagnostic subsample table (`results/dolly-ratio10/per_sample_metrics.csv`) already contains all three raw data categories — full-coverage trajectory features, `text_nn_sim`, and token-level diagnostics — for the same underlying 900-1,200-row subsample population per dataset (coverage differs by category, but the row population overlaps). All that's needed is rerunning `analyze.py::unsupervised_metrics()` with different `features=` subsets, which finishes in seconds on CPU across all datasets. See `analyze.py::feature_group_ablation()`, output at `results/dolly-ratio10/feature_ablation.csv`.
 
 Five ablation conditions:
 
@@ -419,7 +419,7 @@ This has to be asked separately on the two detection routes, because their sensi
 - **The RF route** (supervised, Section 6.2's protocol): out-of-fold AUC from `StratifiedKFold(5)` + `RandomForestClassifier(200)` — the same construction that populates the diagonal of `cross_type.csv`.
 - **The IF route** (label-free, Section 6.6's protocol): per-dataset `IsolationForest(300)` AUC on standardized features — the `iforest` row of `unsupervised.csv`.
 
-Both routes run over the **same features and the same samples** (the diagnostic-subsample population), so an RF Δ and an IF Δ for the same metric are directly comparable. Script: `analyze.py::single_feature_ablation()`, output `results/ratio10/single_feature_ablation.csv` (336 rows = 8 datasets × 21 conditions × 2 routes). Convention: **Δ = ablated AUC − full AUC**; negative means dropping it hurt (the feature was carrying signal), positive means dropping it helped (the feature was diluting the score).
+Both routes run over the **same features and the same samples** (the diagnostic-subsample population), so an RF Δ and an IF Δ for the same metric are directly comparable. Script: `analyze.py::single_feature_ablation()`, output `results/dolly-ratio10/single_feature_ablation.csv` (336 rows = 8 datasets × 21 conditions × 2 routes). Convention: **Δ = ablated AUC − full AUC**; negative means dropping it hurt (the feature was carrying signal), positive means dropping it helped (the feature was diluting the score).
 
 ![Single-feature leave-one-out: RF and IF differ completely in their sensitivity to one fewer dimension](../../results/charts/en/single_feature_ablation.png)
 
@@ -463,7 +463,7 @@ This finding independently justifies Section 6.12.5's choice of max over mean fo
 
 #### 6.11.5 Minimal feature set: on the label-free route, 3 metrics beat all 19
 
-Section 6.11.3's leave-one-out answers "what happens if I drop one," which is the wrong question for deciding **what to collect** — correlated features can each be individually removable while the group as a whole is essential, so nineteen "individually useless" features may still be jointly necessary. Answering "what is the minimum" requires going the other way: start from nothing and greedily add whichever feature most improves AUC, recording the whole path. The k-th point is then the best achievable score using k metrics. Script: `analyze.py::minimal_feature_set()`, output `results/ratio10/minimal_feature_set.csv`.
+Section 6.11.3's leave-one-out answers "what happens if I drop one," which is the wrong question for deciding **what to collect** — correlated features can each be individually removable while the group as a whole is essential, so nineteen "individually useless" features may still be jointly necessary. Answering "what is the minimum" requires going the other way: start from nothing and greedily add whichever feature most improves AUC, recording the whole path. The k-th point is then the best achievable score using k metrics. Script: `analyze.py::minimal_feature_set()`, output `results/dolly-ratio10/minimal_feature_set.csv`.
 
 **Framing first**: the greedy selection uses the same labels it is scored on, so the AUC at a given k is **optimistic**. This measures how much signal a small set *can* carry, not a label-free recipe for choosing one — Section 3.1 forbids using labels to pick features. The honest reading is "if you already knew the noise type, this is the floor on collection cost." The IF column reports `auc_dir = max(auc, 1-auc)`, because a label-free outlier score at 0.02 is not useless but inverted (Section 6.6).
 
@@ -529,7 +529,7 @@ Sections 1-6.11 all rest on one premise: the noise types are known, and each has
 
 The 7×7 cross-type transfer matrix in Section 6.3 explicitly skips the `mixed` dataset in code (`if ds in ('clean', 'mixed'): continue` in `analyze.py`). It answers "does a detector trained on type A find type B?", where every test still faces a **single** noise type against a background that is 90% clean. Production is "one stream carrying 7 noise types at once, 6 of them unseen" — the population itself changed.
 
-A supplementary experiment (`analyze.py::transfer_to_mixed()`, output `results/ratio10/transfer_to_mixed.csv`) evaluates all 7 single-type detectors against `mixed`. The protocol matches Section 6.3 exactly (one LR and one RF, `StandardScaler` fit on the source only, higher AUC of the two). `mixed` has 14819 rows — 13419 clean, 1400 noisy — and every row carries a `noise_type` label (near_duplicate 211, template 206, truncation 204, keyword 197, unrelated 197, garbled 194, duplicate 191), which makes per-type slicing inside the mixture possible.
+A supplementary experiment (`analyze.py::transfer_to_mixed()`, output `results/dolly-ratio10/transfer_to_mixed.csv`) evaluates all 7 single-type detectors against `mixed`. The protocol matches Section 6.3 exactly (one LR and one RF, `StandardScaler` fit on the source only, higher AUC of the two). `mixed` has 14819 rows — 13419 clean, 1400 noisy — and every row carries a `noise_type` label (near_duplicate 211, template 206, truncation 204, keyword 197, unrelated 197, garbled 194, duplicate 191), which makes per-type slicing inside the mixture possible.
 
 Two views are reported: `full_coverage` (19 full-coverage features, all 14819 rows, i.e. what `cleaning_loop.py` can actually compute in production) and `full_diag` (37 features, ~919 diagnostic-subsample rows, matching the view used elsewhere in this report). The prose below uses `full_coverage`.
 
@@ -612,7 +612,7 @@ Max rather than mean, because each leg is silent (score near 0) on the types it 
 
 **Note the difference in view**: the leave-one-out results in 12.3 use **supervised** detectors (LR/RF trained on other types' noise labels) and measure "what happens when an existing detector meets a new type"; all three legs here are **label-free** and measure "what is achievable with nothing but a pile of unlabeled dirty data". The numbers are not directly comparable, though the conclusions point the same way.
 
-Measured on `mixed` under a 10% budget (`analyze.py::pooled_scorer_compare()`, output `results/ratio10/pooled_scorer_compare.csv`):
+Measured on `mixed` under a 10% budget (`analyze.py::pooled_scorer_compare()`, output `results/dolly-ratio10/pooled_scorer_compare.csv`):
 
 | Scorer | Overall AUC | Removal precision P@10% | Lift over random | Per-type cells below random |
 |---|---|---|---|---|
@@ -657,7 +657,7 @@ Taken together, the production recommendation is tiered: **use a single method w
 
 This subsection's experiment uses `cleaning_loop.py`'s `iforest` scorer. It is now one of three options (the others being `memo_signed` and the `pooled` scorer added in Section 6.12.5); it was chosen here because garbled is textbook outlier-type noise, so `iforest`'s "noise = outlier" assumption actually holds. Sections 6.6 and 6.12.5 show how that assumption fails on memorized noise and on a mixed stream respectively.
 
-Using `garbled@ratio10` (14,611 training samples total, true noise fraction 9.999%) as the test case, a purely unsupervised IsolationForest (no noise labels used, 19-dimensional base trajectory features plus `text_nn_sim`, fit independently on the full dataset) scores and removes a 10% budget of samples:
+Using `garbled@dolly-ratio10` (14,611 training samples total, true noise fraction 9.999%) as the test case, a purely unsupervised IsolationForest (no noise labels used, 19-dimensional base trajectory features plus `text_nn_sim`, fit independently on the full dataset) scores and removes a 10% budget of samples:
 
 **Method and feature list** (`cleaning_loop.py::build`): unlike Section 6.2.1's "within-domain detection AUC," which uses 37 features and only the ~900-1000-row diagnostic subsample, this step scores and removes across the **entire training set** (otherwise most true noise samples wouldn't even be candidates for removal, defeating the purpose). It therefore switches to "features that are fully non-null on this dataset" — excluding all token-level diagnostic features (subsampled, heavily missing) and `cos_global_*` (compared within the same optimizer-step window against other samples, not structurally convenient to reuse for single-sample scoring) — keeping only 19 features with 100% coverage:
 
@@ -669,7 +669,7 @@ The pipeline: `StandardScaler` normalizes these 19 features, an `IsolationForest
 - **Random-removal precision: 9.2%** (closely matches the true noise fraction of 10.0%, as expected)
 - **Lift: ~5.7x**
 
-**Downstream benchmark comparison (retrain + evaluate now fully complete)**: `train_targeted` (after targeted removal) and `train_random` (random-removal control) were each retrained from scratch, giving a four-way comparison against the uncleaned baseline (`eval_ratio10_garbled.json`) and the clean baseline (`eval_ratio10_clean.json`):
+**Downstream benchmark comparison (retrain + evaluate now fully complete)**: `train_targeted` (after targeted removal) and `train_random` (random-removal control) were each retrained from scratch, giving a four-way comparison against the uncleaned baseline (`eval_dolly-ratio10_garbled.json`) and the clean baseline (`eval_dolly-ratio10_clean.json`):
 
 ![Downstream impact of closed-loop cleaning](../../results/charts/en/cleaning_downstream.png)
 
@@ -748,7 +748,7 @@ Three explanations, which are where this negative result earns its place:
 
 **First, `mixed`'s uncleaned baseline is already no worse than the clean baseline** (0.4390 vs. 0.4389). Each of the 7 subtypes contributes about 1.4%, and the only one that genuinely harms downstream performance is the 206 template rows (1.4% of the total). By Section 6.13.1's lesson — harmless noise yields no cleaning benefit — `mixed` as a whole is in exactly that regime, so a 10% data loss buys nothing back.
 
-**Second, the removal budget is consumed by the most conspicuous types, which happen to be the harmless ones.** Converting `pooled`'s per-type P@10% (`results/ratio10/pooled_scorer_compare.csv`) into where the 1482 removal slots actually go:
+**Second, the removal budget is consumed by the most conspicuous types, which happen to be the harmless ones.** Converting `pooled`'s per-type P@10% (`results/dolly-ratio10/pooled_scorer_compare.csv`) into where the 1482 removal slots actually go:
 
 | Type | Per-type P@10% | Approx. slots | Downstream harm |
 |---|---|---|---|
@@ -775,7 +775,7 @@ Earlier sections compare this project's own detectors (`iforest`/`zscore`/`memo_
 - **`tracin_proxy`**: reuses the already-computed `cos_ref_mean` (a sample's own gradient direction vs. the held-out reference direction, cosine similarity averaged over the full trajectory) — this is itself a TracIn-style (Pruthi et al. 2020) self/cross-influence score, just not previously labeled as such.
 - **`loss_rank`**: an existing feature, included for reference.
 
-**`ratio10` (8 injected-noise datasets):**
+**`dolly-ratio10` (8 injected-noise datasets):**
 
 | dataset | `el2n_proxy` | `grand_proxy` | `tracin_proxy` | `loss_rank` | this project's best existing (`iforest`/`zscore`/`memo_signed`) |
 |---|---|---|---|---|---|
@@ -788,9 +788,9 @@ Earlier sections compare this project's own detectors (`iforest`/`zscore`/`memo_
 | truncation | 0.684 | **0.716** | 0.580 | 0.518 | 0.657 (zscore_max) |
 | unrelated | **0.771** | 0.635 | 0.558 | 0.632 | 0.703 (iforest) |
 
-(This project's "best existing" is the per-dataset max from `results/ratio10/unsupervised.csv` and `memorization.csv`; full numbers in `results/ratio10/external_baselines.csv`.)
+(This project's "best existing" is the per-dataset max from `results/dolly-ratio10/unsupervised.csv` and `memorization.csv`; full numbers in `results/dolly-ratio10/external_baselines.csv`.)
 
-**`wild_all` (natural noise, full 68,762 rows):**
+**`oasst-wild` (natural noise, full 68,762 rows):**
 
 | baseline | AUC |
 |---|---|
@@ -799,9 +799,9 @@ Earlier sections compare this project's own detectors (`iforest`/`zscore`/`memo_
 | `tracin_proxy` | 0.604 |
 | `loss_rank` | 0.545 |
 
-**Key finding: using only the first epoch's loss/gradient norm (`el2n_proxy`/`grand_proxy`) matches or beats this project's current 5-epoch multi-feature detector on several types** — garbled (0.983 vs. 0.936), keyword (0.682 vs. 0.552), near_duplicate (0.657 vs. 0.599), and unrelated (0.771 vs. 0.703) all favor `el2n_proxy`, using only 1/5 of the training epochs. This lines up exactly with Section 6.7's early-detection finding: most of the noise signal is already visible early in training, so the current label-free production pipeline may not need the full 5 epochs to get a usable signal. `wild_all` shows the same pattern — `grand_proxy`/`el2n_proxy` ahead, `tracin_proxy`/`loss_rank` behind.
+**Key finding: using only the first epoch's loss/gradient norm (`el2n_proxy`/`grand_proxy`) matches or beats this project's current 5-epoch multi-feature detector on several types** — garbled (0.983 vs. 0.936), keyword (0.682 vs. 0.552), near_duplicate (0.657 vs. 0.599), and unrelated (0.771 vs. 0.703) all favor `el2n_proxy`, using only 1/5 of the training epochs. This lines up exactly with Section 6.7's early-detection finding: most of the noise signal is already visible early in training, so the current label-free production pipeline may not need the full 5 epochs to get a usable signal. `oasst-wild` shows the same pattern — `grand_proxy`/`el2n_proxy` ahead, `tracin_proxy`/`loss_rank` behind.
 
-**`tracin_proxy` (i.e., `cos_ref_mean`) alone is the weakest of the four baselines** (0.51-0.61 on ratio10, 0.604 on wild_all), suggesting that this quantity, often cited in the literature as an influence-function "gold standard," has limited value as a standalone detection signal — it is better used as one leg of a combined score (like `pooled`) than as an independent metric.
+**`tracin_proxy` (i.e., `cos_ref_mean`) alone is the weakest of the four baselines** (0.51-0.61 on dolly-ratio10, 0.604 on oasst-wild), suggesting that this quantity, often cited in the literature as an influence-function "gold standard," has limited value as a standalone detection signal — it is better used as one leg of a combined score (like `pooled`) than as an independent metric.
 
 **A caveat that must be reported alongside this section, as with the rest of the report:** AUC here is `analyze.py::auc()`'s `max(value, 1-value)`, i.e. direction-agnostic — a high AUC does not by itself license deployment. `el2n_proxy` reaches 0.931 on template, but Section 6.6's direction-reversal trap could equally apply to it (`iforest` on the same dataset has the direction backwards, measuring only 0.522, which is why Section 6.13.2's targeted cleaning there is worse than random removal); whether `el2n_proxy`'s high number actually points the correct way ("noise = higher loss") and can be used directly for real cleaning is not verified in this report — like `memo_signed`, its sign would need confirming before use, and this table's numbers alone do not settle that.
 
@@ -821,7 +821,7 @@ Section 7.3 already noted that OASST2's human `quality` label correlates with re
 | `cos_ref_mean` | 0.604 | 0.799 | 0.581 | 0.567 | 64.4% |
 | `update_contrib_mean` | 0.787 | 0.799 | 0.720 | 0.579 | 27.5% |
 
-*Residual signal retained = (stratified_auc − 0.5) / (raw_auc − 0.5), the fraction of the raw "above chance" margin that survives length-decile stratification; the full 20 rows (all 19 features + `pooled_detector`) are in `results/wild_all/length_confound.csv`.
+*Residual signal retained = (stratified_auc − 0.5) / (raw_auc − 0.5), the fraction of the raw "above chance" margin that survives length-decile stratification; the full 20 rows (all 19 features + `pooled_detector`) are in `results/oasst-wild/length_confound.csv`.
 
 **Key finding 1: the length confound's ceiling (0.799) is already close to `pooled_detector`'s raw AUC (0.700).** After stratification `pooled_detector` drops to 0.589, retaining only 44.5% of the raw above-chance margin — most of the signal genuinely comes from length, but the corrected value is still meaningfully above 0.5, so there is real training-dynamics signal beyond length, just at roughly a quarter to half the apparent magnitude.
 
@@ -829,6 +829,6 @@ Section 7.3 already noted that OASST2's human `quality` label correlates with re
 
 **Key finding 3: `text_nn_sim` contributes almost nothing independently to natural-noise detection** (raw_auc only 0.507, near chance; 0.554 after stratification) — a sharp contrast with AGENTS.md's record that `text_nn_sim` dominates detection on the injected duplicate/unrelated types. The same feature is the strongest signal for textually-obvious injected noise (copy-paste, off-topic) but nearly useless for human-judged natural noise, so its explanatory power is highly type-specific and should not be generalized to "equally effective on natural noise."
 
-**Conclusion:** a more careful estimate of `wild_all`'s label-free detection capability should use stratified_auc (`pooled_detector` ≈ 0.589) rather than raw_auc (0.700) — a substantial part of the latter is rediscovering the known rule "shorter responses score lower," not discriminative power from training dynamics itself.
+**Conclusion:** a more careful estimate of `oasst-wild`'s label-free detection capability should use stratified_auc (`pooled_detector` ≈ 0.589) rather than raw_auc (0.700) — a substantial part of the latter is rediscovering the known rule "shorter responses score lower," not discriminative power from training dynamics itself.
 
 ---

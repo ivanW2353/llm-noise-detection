@@ -2,8 +2,8 @@
 
 LLM-noise-detection experiment: 7 noise types injected into dolly-15k (`datasets/{tag}/{dataset}/train.jsonl`),
 Qwen2.5-3B-Instruct LoRA SFT with per-sample metric tracking, label-free noise-detection analysis.
-Three tags trained so far: `ratio10` (10% noise, all 9 datasets incl. clean/mixed), `ratio5` (5% noise,
-cross-validation of the ratio10 findings), and `wild_all` (natural noise from OASST2 via `wild_data.py`,
+Three tags trained so far: `dolly-ratio10` (10% noise, all 9 datasets incl. clean/mixed), `dolly-ratio5` (5% noise,
+cross-validation of the dolly-ratio10 findings), and `oasst-wild` (natural noise from OASST2 via `wild_data.py`,
 8.83% noise rate from human `quality` ratings rather than an injected perturbation — see `wild_data.py`'s
 module docstring for the framing caveats this implies). All experiments/analysis run through a single root-level
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
@@ -53,37 +53,37 @@ for this regressing a third time.
   - `runs/{tag}/{dataset}/{metrics,tb,lora}` — `metrics/per_sample.jsonl` (per-epoch loss/grad_norm/cos_sim), `metrics/diag_epoch*.jsonl` + `metrics/token_diag_epoch*.jsonl` (diagnostic-layer, ~900-row/dataset subsample only).
   - `results/{tag}/per_sample_metrics.csv` (built by `cli.py analyze --kind features`) + per-analysis CSVs (`unsupervised.csv`, `cross_type.csv`, `precision_lift.csv`, `memorization.csv`, `early_unsupervised.csv`, `early_memorization.csv`, `feature_attribution.csv`); `results/transfer_cross_ratio.csv` (cross-tag, at `results/` root); `results/eval/eval_{tag}_{dataset}.json`.
   - `datasets/{tag}/cleaning_loop/{dataset}/{train_targeted,train_random}.jsonl` + `metadata.json` — closed-loop cleaning outputs.
-- `experiment_tag` defaults to `ratio10` in `config.yaml`; every `cli.py` subcommand takes `--tag`.
+- `experiment_tag` defaults to `dolly-ratio10` in `config.yaml`; every `cli.py` subcommand takes `--tag`.
 - GPU: **NVIDIA GeForce RTX 4090, ~49GB**. torch 2.8.0+cu128, transformers 5.13.1, peft 0.19.1. **Single GPU** — only one training/eval job can run at a time; queue others (see tmux convention below).
 
 ## Commands
 
 ```bash
-python cli.py data --source /path/to/train.jsonl --tag ratio10
-python cli.py train --tag ratio10 --dataset clean --model hf-lora     # ~3.5h, 5 epochs; --model mock for interface checks
-python cli.py evaluate --tag ratio10 --dataset clean --model hf-lora [--force]   # resumable, skips done tasks
-python cli.py clean --tag ratio10 --dataset garbled --budget 0.10     # label-free closed-loop cleaning (targeted + random control)
+python cli.py data --source /path/to/train.jsonl --tag dolly-ratio10
+python cli.py train --tag dolly-ratio10 --dataset clean --model hf-lora     # ~3.5h, 5 epochs; --model mock for interface checks
+python cli.py evaluate --tag dolly-ratio10 --dataset clean --model hf-lora [--force]   # resumable, skips done tasks
+python cli.py clean --tag dolly-ratio10 --dataset garbled --budget 0.10     # label-free closed-loop cleaning (targeted + random control)
                      --method iforest|memo_signed|pooled              # default iforest; pooled is for unknown/mixed composition
 
 # analyze --kind:
-python cli.py analyze --kind features --tag ratio10                  # builds per_sample_metrics.csv
-python cli.py analyze --kind training --tag ratio10                  # loss/grad_norm/cos_sim by epoch
-python cli.py analyze --kind token --tag ratio10 [--dataset garbled]  # hard-token stats
-python cli.py analyze --kind unsupervised --tag ratio10               # per-dataset IsolationForest/z-score, label-free
-python cli.py analyze --kind memorization --tag ratio10                # signed hyper-typicality rule (duplicate/template)
-python cli.py analyze --kind cross_type --tag ratio10                  # cross-noise-type detector transfer matrix
-python cli.py analyze --kind cross_ratio --tags ratio10,ratio5         # cross-noise-ratio detector transfer matrix
-python cli.py analyze --kind precision_lift --tag ratio10               # P@10% lift vs random, from unsupervised.csv
-python cli.py analyze --kind early_unsupervised --tag ratio10           # detection AUC by training-epoch cutoff
-python cli.py analyze --kind early_memorization --tag ratio10           # same, for memo_signed rule
-python cli.py analyze --kind feature_attribution --tag ratio10          # permutation importance per noise type
-python cli.py analyze --kind feature_correlation --tag ratio10          # Spearman/PCA/VIF redundancy (+ _pairs.csv)
-python cli.py analyze --kind minimal_feature_set --tag ratio10          # greedy forward feature selection (rf + iforest routes)
-python cli.py analyze --kind single_feature_ablation --tag ratio10      # leave-one-feature-out, both routes
-python cli.py analyze --kind transfer_to_mixed --tag ratio10            # single-type detectors evaluated against mixed
-python cli.py analyze --kind feature_group_ablation --tag ratio10       # text/token/trajectory feature-group ablation
-python cli.py analyze --kind pooled_scorer_compare --tag ratio10 [--dataset mixed]  # compares cleaning_loop.py's 3 scorers
-python cli.py analyze --kind transfer --tags ratio10,ratio5             # re-read a saved transfer CSV
+python cli.py analyze --kind features --tag dolly-ratio10                  # builds per_sample_metrics.csv
+python cli.py analyze --kind training --tag dolly-ratio10                  # loss/grad_norm/cos_sim by epoch
+python cli.py analyze --kind token --tag dolly-ratio10 [--dataset garbled]  # hard-token stats
+python cli.py analyze --kind unsupervised --tag dolly-ratio10               # per-dataset IsolationForest/z-score, label-free
+python cli.py analyze --kind memorization --tag dolly-ratio10                # signed hyper-typicality rule (duplicate/template)
+python cli.py analyze --kind cross_type --tag dolly-ratio10                  # cross-noise-type detector transfer matrix
+python cli.py analyze --kind cross_ratio --tags dolly-ratio10,dolly-ratio5         # cross-noise-ratio detector transfer matrix
+python cli.py analyze --kind precision_lift --tag dolly-ratio10               # P@10% lift vs random, from unsupervised.csv
+python cli.py analyze --kind early_unsupervised --tag dolly-ratio10           # detection AUC by training-epoch cutoff
+python cli.py analyze --kind early_memorization --tag dolly-ratio10           # same, for memo_signed rule
+python cli.py analyze --kind feature_attribution --tag dolly-ratio10          # permutation importance per noise type
+python cli.py analyze --kind feature_correlation --tag dolly-ratio10          # Spearman/PCA/VIF redundancy (+ _pairs.csv)
+python cli.py analyze --kind minimal_feature_set --tag dolly-ratio10          # greedy forward feature selection (rf + iforest routes)
+python cli.py analyze --kind single_feature_ablation --tag dolly-ratio10      # leave-one-feature-out, both routes
+python cli.py analyze --kind transfer_to_mixed --tag dolly-ratio10            # single-type detectors evaluated against mixed
+python cli.py analyze --kind feature_group_ablation --tag dolly-ratio10       # text/token/trajectory feature-group ablation
+python cli.py analyze --kind pooled_scorer_compare --tag dolly-ratio10 [--dataset mixed]  # compares cleaning_loop.py's 3 scorers
+python cli.py analyze --kind transfer --tags dolly-ratio10,dolly-ratio5             # re-read a saved transfer CSV
 ```
 
 - Long jobs (train/evaluate, or an orchestration shell script) run in their **own detached tmux session**

@@ -53,60 +53,60 @@
 
 一次性分析脚本（产出纳入 git 跟踪的 CSV/PNG，脚本本身不跟踪）：
 
-- `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/ratio10/transfer_to_mixed.csv`，见报告 6.12 节。
-- `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/ratio10/pooled_scorer_compare.csv`，见报告 6.12.5 节。
-- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/ratio10/feature_ablation.csv`，见报告 6.11.2-6.11.3 节。
-- `single_feature_ablation.py`：单指标留一消融，对 19 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/ratio10/single_feature_ablation.csv`，见报告 6.11.4 节。
-- `minimal_feature_set.py`：最小指标集合，贪心前向选择（从零开始逐个加入最有增益的特征）回答"最少需要哪几个指标"，留一消融回答不了这个问题 → `results/ratio10/minimal_feature_set.csv`，见报告 6.11.5 节。**主要发现：免标签路线上 3 个指标胜过全部 19 个，8/8 数据集无例外。**
+- `transfer_to_mixed.py`：把 7 个单类型检测器全部拉到 `mixed` 上评估，并做检测器并联与留一法（`cross_type` 在代码层面跳过 `mixed`，回答不了混合流的问题）→ `results/dolly-ratio10/transfer_to_mixed.csv`，见报告 6.12 节。
+- `pooled_scorer_compare.py`：对比 `cleaning_loop.py` 三个打分器在 `mixed` 上的整体与逐类型表现 → `results/dolly-ratio10/pooled_scorer_compare.csv`，见报告 6.12.5 节。
+- `feature_ablation.py`：类别级特征消融（`text_nn_sim` 是否被稀释、token 级诊断值多少）→ `results/dolly-ratio10/feature_ablation.csv`，见报告 6.11.2-6.11.3 节。
+- `single_feature_ablation.py`：单指标留一消融，对 19 个全覆盖特征逐个删除，同时测 RF（有监督，6.2 节口径）和 IsolationForest（免标签，6.6 节口径）两条路线 → `results/dolly-ratio10/single_feature_ablation.csv`，见报告 6.11.4 节。
+- `minimal_feature_set.py`：最小指标集合，贪心前向选择（从零开始逐个加入最有增益的特征）回答"最少需要哪几个指标"，留一消融回答不了这个问题 → `results/dolly-ratio10/minimal_feature_set.csv`，见报告 6.11.5 节。**主要发现：免标签路线上 3 个指标胜过全部 19 个，8/8 数据集无例外。**
 - `make_report_charts.py`：生成报告全部图表 → `results/charts/`（中文）与 `results/charts/en/`（英文）。
 
 编排脚本：
 
 - `run_full.sh <tag> [ratio]`：当前通用入口——数据生成、9 类数据集 LoRA 训练、全量分析表（features/training/unsupervised/cross_type/precision_lift/memorization）一次跑完。
-- `run_full_ratio10.sh`：ratio10 实验的历史执行记录（已完成，保留用于复现；未包含后续新增的三项分析，新实验请用 `run_full.sh`）。
-- `run_eval_ratio5.sh` / `run_analysis_ratio5.sh`：ratio5 训练完成后待执行的下游 benchmark 评测与后处理分析脚本。
+- `run_full_dolly-ratio10.sh`：dolly-ratio10 实验的历史执行记录（已完成，保留用于复现；未包含后续新增的三项分析，新实验请用 `run_full.sh`）。
+- `run_eval_dolly-ratio5.sh` / `run_analysis_dolly-ratio5.sh`：dolly-ratio5 训练完成后待执行的下游 benchmark 评测与后处理分析脚本。
 
 ## 快速开始
 
 ```bash
 python cli.py --help
-python cli.py data --source /path/to/train.jsonl --tag ratio10
-python cli.py train --tag ratio10 --dataset clean --model mock
-python cli.py evaluate --tag ratio10 --dataset clean
-python cli.py analyze --tag ratio10 --input results/ratio10/per_sample_metrics.csv
+python cli.py data --source /path/to/train.jsonl --tag dolly-ratio10
+python cli.py train --tag dolly-ratio10 --dataset clean --model mock
+python cli.py evaluate --tag dolly-ratio10 --dataset clean
+python cli.py analyze --tag dolly-ratio10 --input results/dolly-ratio10/per_sample_metrics.csv
 
 # 训练过程指标（loss、梯度范数、cosine、update contribution）
-python cli.py analyze --kind training --tag ratio10
+python cli.py analyze --kind training --tag dolly-ratio10
 # token 级 hard-token 统计
-python cli.py analyze --kind token --tag ratio10              # 自动汇总该 tag 全部 token 文件
-python cli.py analyze --kind token --tag ratio10 --dataset garbled  # 单一数据集
+python cli.py analyze --kind token --tag dolly-ratio10              # 自动汇总该 tag 全部 token 文件
+python cli.py analyze --kind token --tag dolly-ratio10 --dataset garbled  # 单一数据集
 # 无标签 IsolationForest / robust-z 检测
-python cli.py analyze --kind unsupervised --tag ratio10
+python cli.py analyze --kind unsupervised --tag dolly-ratio10
 # 带符号记忆性规则（duplicate/template 等"超典型"噪音）
-python cli.py analyze --kind memorization --tag ratio10
+python cli.py analyze --kind memorization --tag dolly-ratio10
 # 跨噪音类型 / 跨噪音比例 检测器迁移矩阵
-python cli.py analyze --kind cross_type --tag ratio10
-python cli.py analyze --kind cross_ratio --tags ratio10,ratio5
+python cli.py analyze --kind cross_type --tag dolly-ratio10
+python cli.py analyze --kind cross_ratio --tags dolly-ratio10,dolly-ratio5
 # P@10% 清洗精度 lift（比 AUC 更贴近实际清洗预算下的可用性）
-python cli.py analyze --kind precision_lift --tag ratio10
+python cli.py analyze --kind precision_lift --tag dolly-ratio10
 # 早期检测：按训练 epoch 截断重算检测 AUC，看多早能拿到可用信号
-python cli.py analyze --kind early_unsupervised --tag ratio10
-python cli.py analyze --kind early_memorization --tag ratio10
+python cli.py analyze --kind early_unsupervised --tag dolly-ratio10
+python cli.py analyze --kind early_memorization --tag dolly-ratio10
 # 特征归因：每个噪音类型的 RF 检测器到底在用哪些特征（permutation importance）
-python cli.py analyze --kind feature_attribution --tag ratio10
+python cli.py analyze --kind feature_attribution --tag dolly-ratio10
 # 免标签闭环清洗：无监督打分剔除疑似噪音 + 等量随机剔除对照，供重训练对比
-python cli.py clean --tag ratio10 --dataset garbled --budget 0.10                      # iforest（默认）
-python cli.py clean --tag ratio10 --dataset template --budget 0.10 --method memo_signed # 记忆型噪音
-python cli.py clean --tag ratio10 --dataset mixed --budget 0.10 --method pooled         # 成分未知/混合
+python cli.py clean --tag dolly-ratio10 --dataset garbled --budget 0.10                      # iforest（默认）
+python cli.py clean --tag dolly-ratio10 --dataset template --budget 0.10 --method memo_signed # 记忆型噪音
+python cli.py clean --tag dolly-ratio10 --dataset mixed --budget 0.10 --method pooled         # 成分未知/混合
 # 读取已保存的迁移结果
-python cli.py analyze --kind transfer --input results/transfer_cross_ratio.csv --tags ratio5,ratio10
+python cli.py analyze --kind transfer --input results/transfer_cross_ratio.csv --tags dolly-ratio5,dolly-ratio10
 ```
 
 完整流程：
 
 ```bash
-bash scripts/run_full.sh ratio10        # ratio=0.10（默认）
-bash scripts/run_full.sh ratio5 0.05    # 自定义噪音比例
+bash scripts/run_full.sh dolly-ratio10        # ratio=0.10（默认）
+bash scripts/run_full.sh dolly-ratio5 0.05    # 自定义噪音比例
 ```
 
 大规模数据可直接从 Hugging Face 读取（需要 `datasets`）：
@@ -165,7 +165,7 @@ python cli.py data --tag ultra200k --source hf://HuggingFaceH4/ultrachat_200k --
 `{name}` 为数据集名（`iforest` 默认方法）或 `{dataset}_{method}`（其他打分器），已跑完的有
 `garbled`、`template`、`template_memo_signed`、`mixed`、`mixed_memo_signed`、`mixed_pooled`。
 
-清洗增益实验的原始数据仍归档在 `datasets/ratio10/cleaning_gain/unrelated/`（`train_random.jsonl`/`train_targeted.jsonl` 及对应的 `training_commands.sh`）。其训练产物目录 `runs/ratio10/cleaning_gain/` 及汇总表 `results/cleaning_gain_comparison.csv` 已在后续清理中删除；若需要该项对比结论，需重新执行 `datasets/ratio10/cleaning_gain/unrelated/training_commands.sh` 并重新汇总。
+清洗增益实验的原始数据仍归档在 `datasets/dolly-ratio10/cleaning_gain/unrelated/`（`train_random.jsonl`/`train_targeted.jsonl` 及对应的 `training_commands.sh`）。其训练产物目录 `runs/dolly-ratio10/cleaning_gain/` 及汇总表 `results/cleaning_gain_comparison.csv` 已在后续清理中删除；若需要该项对比结论，需重新执行 `datasets/dolly-ratio10/cleaning_gain/unrelated/training_commands.sh` 并重新汇总。
 
 ## 数据契约
 

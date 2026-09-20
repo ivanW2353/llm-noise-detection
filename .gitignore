@@ -47,7 +47,7 @@ runs/**/tb/
 
 # Datasets held on the large volume and reached through a symlink; the pointer
 # is machine-specific, and wild_data.py rebuilds the contents from OASST.
-datasets/wild_all
+datasets/oasst-wild
 
 # Comparison-method / external-baseline code: kept local only, never pushed.
 /baselines.py

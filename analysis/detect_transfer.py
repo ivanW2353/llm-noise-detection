@@ -46,7 +46,7 @@ def cross_type_transfer(frame: pd.DataFrame, features=None, seed=0) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
-def cross_ratio_transfer(frame_a: pd.DataFrame, frame_b: pd.DataFrame, tag_a='ratio10', tag_b='ratio5', features=None, seed=0) -> pd.DataFrame:
+def cross_ratio_transfer(frame_a: pd.DataFrame, frame_b: pd.DataFrame, tag_a='dolly-ratio10', tag_b='dolly-ratio5', features=None, seed=0) -> pd.DataFrame:
     """Does a detector trained at one noise ratio transfer to another, for the
     same noise type? Pairs samples by matching `dataset` (noise type) across
     the two per-sample tables — same method as cross_type_transfer (LR + RF,

@@ -43,7 +43,7 @@ After each epoch's training finishes, the code runs one extra **strided-subsampl
 |---|---|---|
 | `text_nn_sim` | A TF-IDF vector is built over the concatenated `prompt+response` text of every sample in the dataset (`textsim.py:10`: `TfidfVectorizer(ngram_range=(1,2), min_df=min(10,N), sublinear_tf=True, max_features=200_000)` — 1-gram and 2-gram terms, log-scaled term frequency, vocabulary capped at 200k), then `NearestNeighbors(k=2, metric='cosine')` finds each sample's nearest neighbor (`k=2` because the 1st nearest neighbor is always the sample itself — the 2nd is the actual "most similar other sample"); similarity = `1 - that distance` | Whether this sample's wording (vocabulary + local phrasing) has a near-identical "twin" elsewhere in the training set — very sensitive to duplicate/near-duplicate ("copy/lightly rewrite") noise, but almost insensitive to keyword replacement, where the overall structure is unchanged and only 1-2 words differ (the TF-IDF vector barely moves) |
 
-Measured: computing full-dataset `text_nn_sim` for `keyword@ratio10` (14,611 samples) takes about 7.3 seconds (including TF-IDF construction and nearest-neighbor search) — the cheapest of all metrics to compute, and requires no GPU at all.
+Measured: computing full-dataset `text_nn_sim` for `keyword@dolly-ratio10` (14,611 samples) takes about 7.3 seconds (including TF-IDF construction and nearest-neighbor search) — the cheapest of all metrics to compute, and requires no GPU at all.
 
 ### 8.4 Diagnostics produced but never consumed by the detection pipeline
 
@@ -51,9 +51,9 @@ Measured: computing full-dataset `text_nn_sim` for `keyword@ratio10` (14,611 sam
 |---|---|---|
 | `layer_norms.jsonl` / TensorBoard `lora_layer_gradnorm/layer{li}` | Computed once per optimizer step (i.e. once per completed 16-sample gradient-accumulation window): the gradients accumulated in that step are grouped by the transformer layer index they belong to, summed, and L2-normed (`_window_layer_grad_norms`, `model.py:80-86`: group by layer id, `sqrt(sum(grad**2))`). Only three layers are monitored: `target_ids={0, n_layers//2, n_layers-1}` — for the current Qwen2.5-3B-Instruct (36 layers), that's layers 0, 18, and 35 (`model.py:227`). Each full training run (5 epochs × 914 optimizer steps) produces ≈4,570 lines | This is a **step-level, global aggregate**, not a per-sample quantity — the 16 samples in a step have already had their gradient contributions summed together, so there is no way to recover "what was sample X's gradient in layer Y" from this data. Even wanting to merge it into `per_sample_metrics.csv` is not achievable with the current data shape; it would require restructuring this exactly like `cos_global`/`grad_norm` — recomputing per-layer norms per sample inside `flush_window` — which means changing the training code and retraining, not something a post-hoc script can fix. No code anywhere in the project currently reads or merges this data; it exists solely for manually inspecting per-layer gradient magnitude curves in TensorBoard |
 
-### 8.5 Measured collection timing (`keyword@ratio10`, single NVIDIA RTX PRO 6000 Blackwell Server Edition GPU)
+### 8.5 Measured collection timing (`keyword@dolly-ratio10`, single NVIDIA RTX PRO 6000 Blackwell Server Edition GPU)
 
-Timing figures come from the on-disk write timestamps (mtimes) of files like `runs/ratio10/keyword/metrics/diag_epoch*.jsonl`, cross-checked against the start/end timestamps for this dataset recorded in `logs/full_run.log` (2026-09-12 09:26:36 → 12:33:55, a measured total of 187.3 minutes) — the two sources agree.
+Timing figures come from the on-disk write timestamps (mtimes) of files like `runs/dolly-ratio10/keyword/metrics/diag_epoch*.jsonl`, cross-checked against the start/end timestamps for this dataset recorded in `logs/full_run.log` (2026-09-12 09:26:36 → 12:33:55, a measured total of 187.3 minutes) — the two sources agree.
 
 **What happens inside one epoch** (derived from the current `config.yaml`):
 
@@ -76,11 +76,11 @@ Timing figures come from the on-disk write timestamps (mtimes) of files like `ru
 
 **Inference**: 229 diagnostic batches take 34 seconds, i.e. roughly 0.15 seconds per batch. If `diag_subsample` were changed from 8 to 1 (full diagnostics over all 14,611 samples, batch size 8, `⌈14611/8⌉=1,827` batches), the diagnostic phase is projected to grow to roughly **270 seconds (4.5 minutes)**, and total time for one dataset over 5 epochs is projected to grow from 187 minutes to roughly **209 minutes (3.5 hours)** — about a **12% increase** (the diagnostic pass involves no backward pass or optimizer step, so it should scale close to linearly with batch count; this is a linear extrapolation).
 
-**Extrapolated cost across datasets / the full project**: retraining only `near_duplicate` (Section 8.2's conclusion) with full diagnostics, for both the `ratio10` and `ratio5` tags, is projected to add roughly **44 minutes total** (~22 minutes per tag). Switching all 9 noise types × 2 ratios (18 runs) to full diagnostics is projected to add roughly **6.6 hours total** (~22 minutes per run × 18). These figures come from a single measurement on one dataset and one machine; other datasets (different text lengths, sample counts) and GPU contention will shift them somewhat — treat them as order-of-magnitude estimates, not a firm scheduling commitment.
+**Extrapolated cost across datasets / the full project**: retraining only `near_duplicate` (Section 8.2's conclusion) with full diagnostics, for both the `dolly-ratio10` and `dolly-ratio5` tags, is projected to add roughly **44 minutes total** (~22 minutes per tag). Switching all 9 noise types × 2 ratios (18 runs) to full diagnostics is projected to add roughly **6.6 hours total** (~22 minutes per run × 18). These figures come from a single measurement on one dataset and one machine; other datasets (different text lengths, sample counts) and GPU contention will shift them somewhat — treat them as order-of-magnitude estimates, not a firm scheduling commitment.
 
 ### 8.6 Noise Sample Examples (Raw Text Comparison)
 
-Every later section discusses abstract statistical conclusions about "detection difficulty" and "feature attribution" — here is the underlying raw data first, so the reader can see exactly what each of the 7 noise types does to the actual text. Except where noted, all examples below come from the same real record, `sample_id=20`, across `datasets/ratio10/{type}/train.jsonl` (original question: "Why do home power outages occur?"; the clean answer is 1055 characters, opening with "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."). Keyword substitution uses `sample_id=74` instead, because sample 20's own keyword perturbation happened to fall outside the excerpt shown here.
+Every later section discusses abstract statistical conclusions about "detection difficulty" and "feature attribution" — here is the underlying raw data first, so the reader can see exactly what each of the 7 noise types does to the actual text. Except where noted, all examples below come from the same real record, `sample_id=20`, across `datasets/dolly-ratio10/{type}/train.jsonl` (original question: "Why do home power outages occur?"; the clean answer is 1055 characters, opening with "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."). Keyword substitution uses `sample_id=74` instead, because sample 20's own keyword perturbation happened to fall outside the excerpt shown here.
 
 | Noise type | Construction (as observed) | Noisy text (excerpt) |
 |---|---|---|
@@ -99,7 +99,7 @@ This table directly explains the detection-difficulty ranking in Section 6.2: ga
 
 ### 8.7 Raw Feature Values: One Noisy Sample vs. One Clean Sample
 
-Taking `garbled@ratio10` as an example, here is a real noisy sample (`sample_id=10136`, which happens to fall in the diagnostic subsample) compared against a real clean sample (`sample_id=0`) on their actual values in `per_sample_metrics.csv`:
+Taking `garbled@dolly-ratio10` as an example, here is a real noisy sample (`sample_id=10136`, which happens to fall in the diagnostic subsample) compared against a real clean sample (`sample_id=0`) on their actual values in `per_sample_metrics.csv`:
 
 | Feature | Noisy sample (garbled, `sample_id=10136`) | Clean sample (`sample_id=0`) | Note |
 |---|---|---|---|
@@ -114,7 +114,7 @@ These real numbers show that the random forest's 0.998 AUC on garbled is not an 
 
 Using a random-forest classifier (supervised — see the framing note in 3.1) on training-dynamics features with 5-fold cross-validation gives a "within-domain detection AUC" for each noise type:
 
-| Noise type | ratio10 AUC | ratio5 AUC |
+| Noise type | dolly-ratio10 AUC | dolly-ratio5 AUC |
 |---|---|---|
 | Template | 0.999 | 1.000 |
 | Garbled | 0.998 | 0.993 |
@@ -128,7 +128,7 @@ Using a random-forest classifier (supervised — see the framing note in 3.1) on
 
 - Template, garbled, and duplicate are nearly "perfectly detectable" (AUC > 0.98), meaning these noise types leave a very strong signature in training dynamics.
 - Keyword substitution and near-duplicate are the two clear hard cases — AUC is only modestly above the random baseline (0.5), meaning these "light perturbation" noise types leave almost no trace at the training-dynamics level.
-- The ranking is identical across both noise ratios (10% vs 5%), and for the three harder types (unrelated/truncation/near_duplicate/keyword), ratio5's AUC is actually slightly *higher* than ratio10's — early evidence that this ranking is stable rather than a coincidence of one specific noise ratio. Section 6.4's cross-ratio transfer analysis confirms this further.
+- The ranking is identical across both noise ratios (10% vs 5%), and for the three harder types (unrelated/truncation/near_duplicate/keyword), dolly-ratio5's AUC is actually slightly *higher* than dolly-ratio10's — early evidence that this ranking is stable rather than a coincidence of one specific noise ratio. Section 6.4's cross-ratio transfer analysis confirms this further.
 
 ---
 
@@ -136,7 +136,7 @@ Using a random-forest classifier (supervised — see the framing note in 3.1) on
 
 ![Raw loss trajectory](../../results/charts/en/raw_loss_trajectory.png)
 
-The sections above rely heavily on AUC as the primary framing, because comparing across 7 noise types × multiple methods × multiple epochs requires a common scale that raw feature values don't have (garbled's anomaly is "loss too high," template's anomaly is "loss too low" — putting both in one raw-value table doesn't work). But AUC is ultimately a statistic aggregated from raw data, so here we plot the raw signal that drives it directly: for all 8 non-clean `ratio10` datasets, we split each dataset into "this noise type's samples" and "`noise_type=='none'` clean samples" (the within-dataset control), then take the plain arithmetic mean of the raw per-sample loss from `runs/ratio10/{type}/metrics/per_sample.jsonl` at each epoch — no z-scoring, no curvature fitting, no feature engineering of any kind, just the raw numbers.
+The sections above rely heavily on AUC as the primary framing, because comparing across 7 noise types × multiple methods × multiple epochs requires a common scale that raw feature values don't have (garbled's anomaly is "loss too high," template's anomaly is "loss too low" — putting both in one raw-value table doesn't work). But AUC is ultimately a statistic aggregated from raw data, so here we plot the raw signal that drives it directly: for all 8 non-clean `dolly-ratio10` datasets, we split each dataset into "this noise type's samples" and "`noise_type=='none'` clean samples" (the within-dataset control), then take the plain arithmetic mean of the raw per-sample loss from `runs/dolly-ratio10/{type}/metrics/per_sample.jsonl` at each epoch — no z-scoring, no curvature fitting, no feature engineering of any kind, just the raw numbers.
 
 - **Garbled**: the noisy group's loss drops from 4.62 at epoch 1 to 2.56 at epoch 5, but stays **far above** the within-dataset clean control the entire time (1.61→0.61) — the two lines never come close. This is the raw numerical basis for the 0.998 within-domain AUC in Section 6.2 and the 0.936 iforest AUC in Section 6.6: the model genuinely cannot learn this garbled text.
 - **Template**: the most extreme case of "direction reversal" — the noisy group's loss is already only 0.257 at epoch 1 and collapses to 0.021 by epoch 5, ending up **far below** the clean control (1.62→0.61). It's not "looking normal" — it's more "normal" than normal samples: the model has essentially memorized these highly templated samples from the very first epoch. This is what the raw curve behind Section 6.6's memo_signed AUC of 0.925 (versus iforest's mere 0.522, which assumes "outlier = noise" and gets the direction wrong) actually looks like.

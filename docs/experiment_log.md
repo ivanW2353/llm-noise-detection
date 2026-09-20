@@ -1,17 +1,17 @@
 # 实验阶段记录
 
-## 2026-09-13：ratio10 统一重训练（7 类噪音 + clean + mixed 合并为单一实验）
+## 2026-09-13：dolly-ratio10 统一重训练（7 类噪音 + clean + mixed 合并为单一实验）
 
 ### 背景
 
 此前 template / truncation / near_duplicate 三类噪音单独跑在已删除的 `extra10` 标签下，
-与 `ratio10`（clean / garbled / duplicate / unrelated / keyword / mixed）是两次独立实验。
-本阶段将全部 7 类噪音 + clean + mixed 合并到同一个 `ratio10` 标签下重新生成数据并重新训练，
+与 `dolly-ratio10`（clean / garbled / duplicate / unrelated / keyword / mixed）是两次独立实验。
+本阶段将全部 7 类噪音 + clean + mixed 合并到同一个 `dolly-ratio10` 标签下重新生成数据并重新训练，
 不再有 extra10/ratio05 等历史标签。
 
-- 数据：`data/ratio10/`，9 个数据集（clean/garbled/duplicate/unrelated/keyword/template/truncation/near_duplicate/mixed），噪音比例 10%。
-- 训练：Qwen2.5-3B-Instruct LoRA（r=32），5 epochs，逐样本梯度追踪，脚本 `run_full_ratio10.sh`。
-- 分析：`analyze.py` 三阶段（features / training / unsupervised），产出 `results/ratio10/{features,training,unsupervised,per_sample_metrics}.csv`。
+- 数据：`data/dolly-ratio10/`，9 个数据集（clean/garbled/duplicate/unrelated/keyword/template/truncation/near_duplicate/mixed），噪音比例 10%。
+- 训练：Qwen2.5-3B-Instruct LoRA（r=32），5 epochs，逐样本梯度追踪，脚本 `run_full_dolly-ratio10.sh`。
+- 分析：`analyze.py` 三阶段（features / training / unsupervised），产出 `results/dolly-ratio10/{features,training,unsupervised,per_sample_metrics}.csv`。
 - 全流程于 2026-09-13 00:48:01 完成（`ALL DONE`）。
 
 ### 与旧报告（已删除的 docs/analysis_report_zh.md 等）结论对比
@@ -26,7 +26,7 @@
 **表面矛盾，已排查——根因是分析代码的方法论变化，不是训练结果变化：**
 - 旧报告的核心发现之一：IsolationForest 对 template 的检测 **低于随机**（AUC 0.494），
   由此发展出"带符号记忆性规则"这一方法论（§3.2）。
-- 当前 `analyze.py::unsupervised_metrics()` 跑出的 `results/ratio10/unsupervised.csv` 显示
+- 当前 `analyze.py::unsupervised_metrics()` 跑出的 `results/dolly-ratio10/unsupervised.csv` 显示
   template 的 iforest AUC = 0.739，zscore_mean = 0.848，均明显高于随机，看似与旧结论相反。
 - **根因排查**：用旧版脚本（`git show adea193^:scripts/3_analysis/analyze_unsupervised.py`）
   的精确方法重新计算——每个数据集单独 fit IsolationForest（不跨数据集合并）、fit 前先做
@@ -43,23 +43,23 @@
 - **已修复**：`analyze.py::unsupervised_metrics()` 改为按数据集单独 fit（不再跨数据集合并）、
   iforest 前加 `StandardScaler`、`n_estimators` 提至 300（特征集保持全量数值列，未收窄到旧版
   13 维 `TRAJ_METRICS`，因为额外的诊断层特征对多数类型影响有限）。重新生成的
-  `results/ratio10/unsupervised.csv` 显示 template iforest AUC = **0.522**（旧报告 0.494，方向一致），
+  `results/dolly-ratio10/unsupervised.csv` 显示 template iforest AUC = **0.522**（旧报告 0.494，方向一致），
   garbled iforest = **0.936**（旧报告 0.955），duplicate iforest = **0.612**（旧报告区间 0.556-0.699）。
 
 ### 待补充分析（按对旧报告核心结论的支撑优先级排序）
 
 1. ~~排查 template 无监督结果反转的根因~~ ——已完成，见上节「已修复」。
 2. ~~P@10% 清洗精度表~~ ——已完成。新增 `analyze.py::precision_lift_table()`，直接基于
-   `unsupervised.csv` 的 `p_at_10`/`random_p` 列算 lift，产出 `results/ratio10/precision_lift.csv`
-   （`python3 cli.py analyze --tag ratio10 --kind precision_lift`）。
+   `unsupervised.csv` 的 `p_at_10`/`random_p` 列算 lift，产出 `results/dolly-ratio10/precision_lift.csv`
+   （`python3 cli.py analyze --tag dolly-ratio10 --kind precision_lift`）。
    结果支撑"AUC 高估清洗可用精度"：duplicate 三种方法 lift 全部 ≤1（0.45-0.56x，比随机还差），
    AUC 0.54-0.61 看似可用但 top-10% 清洗几乎不比随机筛选强。template 上 AUC 最高的 zscore_max
    （0.878）lift 反而最差（0.23x），AUC 更低的 zscore_mean（0.803）lift 反而最高（1.72x）——
    AUC 排方法和 P@10% 排方法会给出不同的最优选择，用 AUC 选清洗方法是有偏的。garbled 上
    iforest 最稳（lift 5.9x），符合其"结构性易检测"的定位。
 3. ~~跨类型迁移矩阵~~ ——已完成。新增 `analyze.py::cross_type_transfer()`（LR+RF 取更优，源域标准化，
-   目标域用源域 scaler，对角线为域内 5-fold CV），产出 `results/ratio10/cross_type.csv`
-   （`python3 cli.py analyze --tag ratio10 --kind cross_type`）。
+   目标域用源域 scaler，对角线为域内 5-fold CV），产出 `results/dolly-ratio10/cross_type.csv`
+   （`python3 cli.py analyze --tag dolly-ratio10 --kind cross_type`）。
    结果支撑旧结论：对角线均值 AUC 0.846 vs 离对角均值 0.675（迁移掉约17-20点）。
    template 是最孤立的类型——train-on-template 迁移到其余6类几乎全部逼近/低于随机（0.40-0.59），
    反向（其余类型训练测 template）同样弱，unrelated→template 仅 0.321（低于随机，方向反转）。
@@ -67,62 +67,62 @@
    （within-type CV 仅 0.577，是唯一 own-AUC<0.6 的类型），与此前"keyword 最难检测"结论一致。
 4. ~~带符号记忆性规则复现~~ ——已完成。新增 `analyze.py::memorization_score()`（`MEMO_FEATS`：
    loss_mean/loss_last/loss_std/loss_curvature/converge_epoch/grad_norm_mean，方向由记忆化假设
-   先验固定、不按数据集拟合），产出 `results/ratio10/memorization.csv`
-   （`python3 cli.py analyze --tag ratio10 --kind memorization`）。这6个特征对每个样本都有值
+   先验固定、不按数据集拟合），产出 `results/dolly-ratio10/memorization.csv`
+   （`python3 cli.py analyze --tag dolly-ratio10 --kind memorization`）。这6个特征对每个样本都有值
    （不依赖诊断层子样本），因此 n 是全量训练集（~14611-16072），比 unsupervised.csv 的诊断子样本
-   （~900-1000）大得多。规则方向在修复后的 ratio10 上依然成立：template AUC=0.925（`memo_signed`）——
+   （~900-1000）大得多。规则方向在修复后的 dolly-ratio10 上依然成立：template AUC=0.925（`memo_signed`）——
    仍是最强的"超典型/被记忆"信号；duplicate AUC=0.654，中等记忆性，与旧报告的 0.699 同量级；
    其余6类（garbled/keyword/mixed/near_duplicate/truncation/unrelated）AUC 全部低于0.5（0.017-0.38），
    证实了预期的不对称性——非记忆型噪音在这个规则下反而"更难"而非"更容易"，方向正确未反转。
-5. ~~下游 benchmark 评测~~ ——已完成。`run_eval_ratio10.sh` 于 2026-09-14 02:20:32 跑完全部 9 个数据集
-   （`results/eval/eval_ratio10_*.json`）。
-6. ~~ratio5（5% 噪音比例）交叉验证~~ ——已完成。`run_full_ratio5.sh` 训练于 2026-09-14 07:46:08 完成
-   （9 个数据集），脚本自带的分析步骤因 `results/ratio5/` 目录不存在而报错中断，补建目录后用
-   `scripts/run_analysis_ratio5.sh` 重新跑完 5 项分析（2026-09-14 09:35:49 完成），产出
-   `results/ratio5/{features,unsupervised,cross_type,precision_lift,memorization}.csv`。
+5. ~~下游 benchmark 评测~~ ——已完成。`run_eval_dolly-ratio10.sh` 于 2026-09-14 02:20:32 跑完全部 9 个数据集
+   （`results/eval/eval_dolly-ratio10_*.json`）。
+6. ~~dolly-ratio5（5% 噪音比例）交叉验证~~ ——已完成。`run_full_dolly-ratio5.sh` 训练于 2026-09-14 07:46:08 完成
+   （9 个数据集），脚本自带的分析步骤因 `results/dolly-ratio5/` 目录不存在而报错中断，补建目录后用
+   `scripts/run_analysis_dolly-ratio5.sh` 重新跑完 5 项分析（2026-09-14 09:35:49 完成），产出
+   `results/dolly-ratio5/{features,unsupervised,cross_type,precision_lift,memorization}.csv`。
    **核心结论在 5% 噪音比例下依然成立：**
-   - 带符号记忆性规则：template AUC=0.911（ratio10: 0.925），duplicate AUC=0.668（ratio10: 0.654），
+   - 带符号记忆性规则：template AUC=0.911（dolly-ratio10: 0.925），duplicate AUC=0.668（dolly-ratio10: 0.654），
      其余 6 类（garbled/keyword/mixed/near_duplicate/truncation/unrelated）AUC 全部 <0.5（0.018-0.38）——
      不对称方向未变。
-   - per-dataset 独立拟合的无监督检测：garbled 上 iforest 仍最强（ratio5 0.941 vs ratio10 0.936），
-     template 上 iforest 仍明显低于其他方法且接近随机（ratio5 0.543 vs ratio10 0.522）——证明该方法论
-     在噪音样本更少（40-45 个/数据集，约为 ratio10 的一半）时依然稳定，未因样本量下降而失效。
-   - P@10% lift：duplicate 在两个比例下都是"AUC 看似可用但 lift 接近或低于 1"（ratio5 zscore_mean/
-     iforest lift 仅 0.667x）；garbled 上 iforest 仍是最稳清洗方法（ratio5 lift 7.4x，ratio10 5.9x，
+   - per-dataset 独立拟合的无监督检测：garbled 上 iforest 仍最强（dolly-ratio5 0.941 vs dolly-ratio10 0.936），
+     template 上 iforest 仍明显低于其他方法且接近随机（dolly-ratio5 0.543 vs dolly-ratio10 0.522）——证明该方法论
+     在噪音样本更少（40-45 个/数据集，约为 dolly-ratio10 的一半）时依然稳定，未因样本量下降而失效。
+   - P@10% lift：duplicate 在两个比例下都是"AUC 看似可用但 lift 接近或低于 1"（dolly-ratio5 zscore_mean/
+     iforest lift 仅 0.667x）；garbled 上 iforest 仍是最稳清洗方法（dolly-ratio5 lift 7.4x，dolly-ratio10 5.9x，
      噪音比例更低时 lift 反而更高）。
-   - ratio5 的 ratio5_eval 下游 benchmark 评测仍在进行中（tmux session `ratio5_eval`），尚无法判断
+   - dolly-ratio5 的 dolly-ratio5_eval 下游 benchmark 评测仍在进行中（tmux session `dolly-ratio5_eval`），尚无法判断
      5% 噪音比例下 template 是否仍是下游危害最大的类型。
 7. ~~跨比例迁移矩阵~~ ——已完成。新增 `analyze.py::cross_ratio_transfer()`（方法与
    `cross_type_transfer()` 相同：LR+RF 取更优，源域标准化；区别在于按噪音**类型**固定、
-   在 ratio10/ratio5 两个**比例**间双向迁移，对角线为各自比例下的域内 5-fold CV），产出
+   在 dolly-ratio10/dolly-ratio5 两个**比例**间双向迁移，对角线为各自比例下的域内 5-fold CV），产出
    `results/transfer_cross_ratio.csv`（`python3 cli.py analyze --kind cross_ratio
-   --tags ratio10,ratio5 --output results/transfer_cross_ratio.csv`）。
+   --tags dolly-ratio10,dolly-ratio5 --output results/transfer_cross_ratio.csv`）。
    **核心发现：跨比例迁移几乎无损，retention 全部落在 0.999-1.40（多数 ≥1.0），
    与跨类型迁移矩阵（对角线 0.846 vs 离对角 0.675，掉约17-20点）形成强烈对比。**
-   7 类噪音双向迁移（ratio10→ratio5、ratio5→ratio10）AUC 全部 ≥0.75，多数 ≥0.88；
+   7 类噪音双向迁移（dolly-ratio10→dolly-ratio5、dolly-ratio5→dolly-ratio10）AUC 全部 ≥0.75，多数 ≥0.88；
    within-ratio AUC 本就偏弱的两类（keyword：0.578/0.641，near_duplicate：0.680/0.743）
-   迁移后 AUC 反而**上升**（keyword ratio10→ratio5 达 0.898，near_duplicate ratio10→ratio5
+   迁移后 AUC 反而**上升**（keyword dolly-ratio10→dolly-ratio5 达 0.898，near_duplicate dolly-ratio10→dolly-ratio5
    达 0.895），说明合并两个比例的训练动态特征反而学到更鲁棒的判别边界，而非过拟合某个
    特定噪音密度。**结论：训练动态特征对"噪音类型"的判别信号是跨噪音比例稳定的（甚至有
    正迁移），检测器不需要针对每个噪音比例单独训练；真正的迁移瓶颈在跨噪音类型，而不是
    跨噪音比例。**
-8. **闭环清洗实验（garbled@ratio10）——进行中。** 与此前所有分析不同，之前只验证"能不能分辨
+8. **闭环清洗实验（garbled@dolly-ratio10）——进行中。** 与此前所有分析不同，之前只验证"能不能分辨
    噪音样本"（AUC/lift 数字），从未验证"清洗后重训练是否真的变好"。新增 `cleaning_loop.py::build()`
-   （`python3 cli.py clean --tag ratio10 --dataset garbled --budget 0.10`）：用纯无监督
+   （`python3 cli.py clean --tag dolly-ratio10 --dataset garbled --budget 0.10`）：用纯无监督
    IsolationForest（不看噪音标签，特征限定为在全量 14611 条样本上都有值的基础轨迹特征子集，
    而非 `unsupervised_metrics()` 依赖的诊断层全特征+约900条子样本）在全量训练集上打分，
    按 10% 预算剔除疑似噪音，另建等量随机剔除对照组。结果：targeted 剔除精度 52.1%
    （761/1461 条真实 garbled 噪音被命中）vs 随机剔除精度 9.2%——证明纯盲检测在全量数据上依然
-   有效，不需要标签。已生成 `data/ratio10/cleaning_loop/garbled/{train_targeted,train_random}.jsonl`；
+   有效，不需要标签。已生成 `data/dolly-ratio10/cleaning_loop/garbled/{train_targeted,train_random}.jsonl`；
    `scripts/run_cleaning_loop_garbled.sh`（tmux session `cleaning_loop_garbled`）已排队，等
-   ratio5_eval 释放 GPU 后自动训练两个版本并评测，与 `eval_ratio10_garbled.json`（未清洗基线）、
-   `eval_ratio10_clean.json`（上限参照）三方对比下游 benchmark 分数。
+   dolly-ratio5_eval 释放 GPU 后自动训练两个版本并评测，与 `eval_dolly-ratio10_garbled.json`（未清洗基线）、
+   `eval_dolly-ratio10_clean.json`（上限参照）三方对比下游 benchmark 分数。
 9. **早期检测——已完成。** 现有全部检测特征（converge_epoch、loss_slope 等）都要等 5 epoch
    训练完才能算，只有事后诊断价值。新增 `analyze.py::early_detection_sweep()`
    （`build_table(..., max_epoch=k)` 把轨迹截断到前 k+1 个 epoch，对每个截断点重算
-   `unsupervised_metrics`/`memorization_score`，`python3 cli.py analyze --tag ratio10
+   `unsupervised_metrics`/`memorization_score`，`python3 cli.py analyze --tag dolly-ratio10
    --kind early_unsupervised|early_memorization`），产出
-   `results/ratio10/early_{unsupervised,memorization}.csv`。
+   `results/dolly-ratio10/early_{unsupervised,memorization}.csv`。
    **核心发现：garbled 和 template 在只看完第 1 个 epoch 时检测 AUC 就已接近满血——
    完全不需要等训练跑完就能拿到几乎和事后一样好的检测信号。**
    - garbled（无监督 iforest，核心特征子集）：epoch1 AUC=0.901，epoch5 AUC=0.929——从第一个
@@ -148,7 +148,7 @@
     `sklearn.inspection.permutation_importance`（打乱单个特征后 AUC 的下降量，`scoring='roc_auc'`，
     `n_repeats=20`）逐 fold 计算再取均值——不用 RF 内置的 impurity-based `feature_importances_`，
     因为它对高基数/连续特征有系统性偏置，不代表真实预测贡献。产出
-    `results/ratio10/feature_attribution.csv`（`python3 cli.py analyze --tag ratio10
+    `results/dolly-ratio10/feature_attribution.csv`（`python3 cli.py analyze --tag dolly-ratio10
     --kind feature_attribution`）。
     **核心发现：duplicate 和 unrelated 这两类的检测信号几乎完全来自 `text_nn_sim`
     （文本嵌入最近邻相似度，来自原始数据本身，不是训练动态特征），且断层式领先第二名一个数量级：**
@@ -177,12 +177,12 @@
 
 本阶段同时清理了历史遗留文件：
 - `results/*` 中不可由当前 `analyze.py` 重新生成的孤儿分析表（30+ 个文件）。
-- `runs/ratio10/cleaning_gain/` 侧支实验目录。
+- `runs/dolly-ratio10/cleaning_gain/` 侧支实验目录。
 - 整个 `extra10`、`ratio05` 标签树（`data/` `runs/` `results/` 下）。
 - `results/eval`、`results/charts` 中引用 extra10/ratio05 的评测与图表文件。
 - 顶层跨实验汇总表：`cleaning_gain_comparison.csv`、`transfer_cross_ratio.csv`、`transfer_cross_type.csv`、
   `transfer_ratio_summary.csv`、`transfer_type_summary.csv`、`natural_validation.csv`、`data_inventory.json`。
-- `results/ratio10/auc_univariate.csv`（当前代码无对应生成逻辑的孤儿文件）。
+- `results/dolly-ratio10/auc_univariate.csv`（当前代码无对应生成逻辑的孤儿文件）。
 - `docs/report_tables.md`、`docs/analysis_report_zh.md`、`docs/analysis_report_en.md`、
   `docs/comparisons/cross_experiment_synthesis_{zh,en}.md`（正文引用已删除的 extra10/ratio05 实验，
   在补充分析完成、结论更新前不再保留旧结论文档，本记录取代其阶段性作用）。
@@ -192,17 +192,17 @@
 
 ### 当前进行中
 
-ratio5 训练已于 2026-09-14 07:46:08 完成（9/9 数据集），分析表已生成（见上方第 6 项）。
-下游 benchmark 评测正在进行（`scripts/run_eval_ratio5.sh`，tmux session `ratio5_eval`），
-预计耗时与 ratio10 评测相近（约 12 小时/9 数据集）。评测完成后会自动触发排队中的
+dolly-ratio5 训练已于 2026-09-14 07:46:08 完成（9/9 数据集），分析表已生成（见上方第 6 项）。
+下游 benchmark 评测正在进行（`scripts/run_eval_dolly-ratio5.sh`，tmux session `dolly-ratio5_eval`），
+预计耗时与 dolly-ratio10 评测相近（约 12 小时/9 数据集）。评测完成后会自动触发排队中的
 garbled 闭环清洗实验（tmux session `cleaning_loop_garbled`，见上方第 8 项）。
 
 ### 脚本整理（2026-09-13）
 
 编排脚本迁移到 `scripts/` 目录并不再纳入 git 跟踪（`.gitignore` 新增 `/*.sh` `/scripts/`）。
 过时的 `run_experiment.sh`（`--model mock` 示例）重写为 `scripts/run_full.sh <tag> [ratio]`，
-作为今后统一入口（数据生成 + 9 类训练 + 全部 6 项分析）。`run_full_ratio10.sh` 保留作为
-ratio10 实验的历史执行记录。
+作为今后统一入口（数据生成 + 9 类训练 + 全部 6 项分析）。`run_full_dolly-ratio10.sh` 保留作为
+dolly-ratio10 实验的历史执行记录。
 
 `scripts/` 只放**编排**脚本（跑什么、按什么顺序跑）；实验方法本身（检测器怎么打分、特征
 怎么选）属于代码库交付物，放在根目录并纳入 git 跟踪——第 8/9 项最初把方法逻辑写在
@@ -215,7 +215,7 @@ ratio10 实验的历史执行记录。
 
 ### 背景
 
-`wild_all` 标签下的 `cleaning_loop_targeted_wild` 训练在第 5 个 epoch 刚开始时中断——`model.py::LoRA.fit()`
+`oasst-wild` 标签下的 `cleaning_loop_targeted_wild` 训练在第 5 个 epoch 刚开始时中断——`model.py::LoRA.fit()`
 此前只在全部 epoch 跑完后才保存一次权重，已完成的 4 个 epoch（约 12 小时 GPU 时间）训练状态完全没有
 落盘，中断后只能从 epoch 0 重新开始。同时，Plan 2 计划验证检测方法在 QA/推理这类不同任务类型上是否
 同样有效，需要新的任务型数据源和按比例的 train/val/test 拆分。本阶段完成这两项改动。
@@ -239,7 +239,7 @@ ratio10 实验的历史执行记录。
   是否续训。训练正常跑完后删除 `checkpoint/`。
 - `.gitignore` 新增 `runs/**/checkpoint/`、`runs/**/checkpoint.tmp/`。`AGENTS.md` 补充说明该机制，并
   顺带更正过时的 GPU 型号描述（RTX PRO 6000 Blackwell → 实测已换成 RTX GeForce RTX 4090）。
-- 已在真实的 `wild_all`/`cleaning_loop_targeted_wild` 重跑中验证生效（`run_wild_all.log` 可见训练
+- 已在真实的 `oasst-wild`/`cleaning_loop_targeted_wild` 重跑中验证生效（`run_oasst-wild.log` 可见训练
   正常进行）。
 
 ### 2. 多任务（QA/推理）数据集管线（`data.py`/`cli.py`/`config.yaml`）
@@ -265,4 +265,4 @@ ratio10 实验的历史执行记录。
 ### 当前进行中
 
 Plan 2 Part B 提出的实验矩阵（2 任务类型 × 3 数据集 × 2 噪音比例 = 12 次训练，约 42 小时）尚未启动，
-需等 GPU 上正在跑的 `wild_all_loop` 完成，且需用户确认后才会开始真实训练。
+需等 GPU 上正在跑的 `oasst-wild_loop` 完成，且需用户确认后才会开始真实训练。

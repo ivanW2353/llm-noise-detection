@@ -18,8 +18,8 @@ Starting from dolly-15k as the base dataset, 7 noise types are injected, plus `c
 
 Two experiment tags correspond to two noise ratios:
 
-- **`ratio10`**: 10% noise ratio. All 9 datasets fully trained, analyzed, and evaluated (training completed 2026-09-13 00:48, downstream evaluation completed 2026-09-14 02:20).
-- **`ratio5`**: 5% noise ratio, used for cross-validation. Training on all 9 datasets completed 2026-09-14 07:46, the 5 analysis tables completed at 09:35. Downstream benchmark evaluation (tmux session `ratio5_eval`) finished the same day, fully complete (9/9 datasets).
+- **`dolly-ratio10`**: 10% noise ratio. All 9 datasets fully trained, analyzed, and evaluated (training completed 2026-09-13 00:48, downstream evaluation completed 2026-09-14 02:20).
+- **`dolly-ratio5`**: 5% noise ratio, used for cross-validation. Training on all 9 datasets completed 2026-09-14 07:46, the 5 analysis tables completed at 09:35. Downstream benchmark evaluation (tmux session `dolly-ratio5_eval`) finished the same day, fully complete (9/9 datasets).
 
 ### 1.2 Training Configuration
 

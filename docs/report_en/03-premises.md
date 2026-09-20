@@ -55,6 +55,6 @@ The gap comes from `diag_subsample=8`: token-level diagnostics and `cos_global_*
 
 The conclusions are not uniformly mature; the split is:
 
-- **Both noise ratios are complete**: `ratio10` (10%) and `ratio5` (5%), 9 datasets each, with training, analysis, and downstream evaluation all finished.
+- **Both noise ratios are complete**: `dolly-ratio10` (10%) and `dolly-ratio5` (5%), 9 datasets each, with training, analysis, and downstream evaluation all finished.
 - **Closed-loop retraining covers two types only**: `garbled` and `template` (Section 6.13). Scoring for the `mixed` `pooled` closed loop is done and its retraining is in progress; Section 7.3 lists it as a next step.
 - **Not done**: closed loops for near_duplicate / keyword (detection is weak for both), multi-seed repeats (so the downstream gains in Section 6.13 carry no variance estimate), and validation against wild noise.

@@ -1,10 +1,10 @@
 {
-  "tag": "ratio10",
-  "dataset": "mixed",
+  "tag": "dolly-ratio10",
+  "dataset": "garbled",
   "budget": 0.1,
-  "n_total": 14819,
-  "n_drop": 1482,
-  "n_keep": 13337,
+  "n_total": 14611,
+  "n_drop": 1461,
+  "n_keep": 13150,
   "seed": 42,
   "detector": "iforest_per_dataset_unsupervised (no labels)",
   "n_features": 20,
@@ -30,7 +30,7 @@
     "cos_ref_trend",
     "update_contrib_mean"
   ],
-  "targeted_precision": 0.26788124156545207,
-  "random_precision": 0.08434547908232119,
-  "true_noise_ratio": 0.0944733112895607
+  "targeted_precision": 0.5208761122518822,
+  "random_precision": 0.09240246406570841,
+  "true_noise_ratio": 0.0999931558414893
 }

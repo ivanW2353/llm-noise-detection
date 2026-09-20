@@ -7,7 +7,7 @@
 | 仓库路径 | 实际位置 | 大小 | 为什么可以搬 |
 |---|---|---|---|
 | `runs/{tag}/{dataset}/lora` | `/root/autodl-tmp/noisedetect_runs/runs/{tag}/{dataset}/lora` | 6.3 GB（25 个适配器 × 251 MB） | 已被 `.gitignore` 排除，从不入库；`evaluate.py:34` 按 `runs_dir()/dataset/lora` 读取，软链接照常解析 |
-| `datasets/wild_all` | `/root/autodl-tmp/noisedetect_data/wild_all` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建 |
+| `datasets/oasst-wild` | `/root/autodl-tmp/noisedetect_data/oasst-wild` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建 |
 | HuggingFace 缓存（OASST） | `/root/autodl-tmp/hf` | 365 MB | 通过 `HF_HOME=/root/autodl-tmp/hf` 指定 |
 
 搬移用"先复制 → 校验 md5 → 再删除原件 → 建软链接"的顺序，不先删后拷。
