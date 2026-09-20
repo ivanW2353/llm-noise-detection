@@ -7,7 +7,7 @@
 | 仓库路径 | 实际位置 | 大小 | 为什么可以搬 |
 |---|---|---|---|
 | `runs/{tag}/{dataset}/lora` | `/root/autodl-tmp/noisedetect_runs/runs/{tag}/{dataset}/lora` | 6.3 GB（25 个适配器 × 251 MB） | 已被 `.gitignore` 排除，从不入库；`evaluate.py:34` 按 `runs_dir()/dataset/lora` 读取，软链接照常解析 |
-| `datasets/oasst-wild` | `/root/autodl-tmp/noisedetect_data/oasst-wild` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建 |
+| `datasets/oasst-wild` | `/root/autodl-tmp/noisedetect_data/wild_all` | 85 MB | 天然噪音数据集（OASST2，68,762 样本 + 400 留出），可由 `wild_data.py` 重建；大盘目录名沿用改名前的 `wild_all`，尚未同步改名（仓库内 symlink 名已是 `oasst-wild`） |
 | HuggingFace 缓存（OASST） | `/root/autodl-tmp/hf` | 365 MB | 通过 `HF_HOME=/root/autodl-tmp/hf` 指定 |
 
 搬移用"先复制 → 校验 md5 → 再删除原件 → 建软链接"的顺序，不先删后拷。
@@ -49,6 +49,6 @@
 
 **`runs/**/lora` 在 `.gitignore` 里有两条规则。** 带斜杠的 `runs/**/lora/` 只匹配目录，软链接不是目录，所以额外加了不带斜杠的一条。少了它，25 个软链接会以未跟踪文件的形式出现，可能被误提交成指向本机绝对路径的死链。
 
-**换机器要重建软链接。** 链接内容是本机绝对路径。适配器可以由对应数据集重新训练得到，或从备份复制；`datasets/wild_oasst` 用 `wild_data.py` 重建。
+**换机器要重建软链接。** 链接内容是本机绝对路径。适配器可以由对应数据集重新训练得到，或从备份复制；`datasets/oasst-wild` 用 `wild_data.py` 重建。
 
 **`layer_norms.jsonl`（198 MB）** 已被 gitignore 且全项目无任何代码读取（见附录 8.4），可以直接删除以再腾空间，此处保留仅为人工在 TensorBoard 里查看。

@@ -2,10 +2,11 @@
 
 LLM-noise-detection experiment: 7 noise types injected into dolly-15k (`datasets/{tag}/{dataset}/train.jsonl`),
 Qwen2.5-3B-Instruct LoRA SFT with per-sample metric tracking, label-free noise-detection analysis.
-Three tags trained so far: `dolly-ratio10` (10% noise, all 9 datasets incl. clean/mixed), `dolly-ratio5` (5% noise,
+Four tags trained so far: `dolly-ratio10` (10% noise, all 9 datasets incl. clean/mixed), `dolly-ratio5` (5% noise,
 cross-validation of the dolly-ratio10 findings), and `oasst-wild` (natural noise from OASST2 via `wild_data.py`,
 8.83% noise rate from human `quality` ratings rather than an injected perturbation — see `wild_data.py`'s
-module docstring for the framing caveats this implies). All experiments/analysis run through a single root-level
+module docstring for the framing caveats this implies) are all complete (training + analysis + downstream eval).
+`triviaqa-ratio10` (QA task, `clean`/`wrong_answer` datasets) is currently training. All experiments/analysis run through a single root-level
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
 was replaced 2026-09-11/13, see `docs/experiment_log.md`).
 

@@ -264,5 +264,9 @@ dolly-ratio10 实验的历史执行记录。
 
 ### 当前进行中
 
-Plan 2 Part B 提出的实验矩阵（2 任务类型 × 3 数据集 × 2 噪音比例 = 12 次训练，约 42 小时）尚未启动，
-需等 GPU 上正在跑的 `oasst-wild_loop` 完成，且需用户确认后才会开始真实训练。
+GPU 上此前跑的 `oasst-wild_loop`（`cleaning_loop_targeted_wild`/`cleaning_loop_random_wild` 训练+7 项下游评测）已
+全部完成，结果见 `docs/report_zh/06-results.md` 第 6.16 节。
+
+经用户确认后，已在 tmux session `triviaqa_train` 中启动 `triviaqa-ratio10` 的正式全量训练（`clean` 与
+`wrong_answer` 两个数据集，`--model hf-lora` 真实 LoRA 训练），当前仍在运行中。Plan 2 Part B 提出的完整实验
+矩阵（2 任务类型 × 3 数据集 × 2 噪音比例 = 12 次训练，约 42 小时）尚未全部启动，本次只是其中一步。
