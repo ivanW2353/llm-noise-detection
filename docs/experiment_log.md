@@ -265,7 +265,7 @@ dolly-ratio10 实验的历史执行记录。
 ### 当前进行中
 
 GPU 上此前跑的 `oasst-wild_loop`（`cleaning_loop_targeted_wild`/`cleaning_loop_random_wild` 训练+7 项下游评测）已
-全部完成，结果见 `docs/report_zh/06-results.md` 第 6.16 节。
+全部完成，结果见 `docs/report_zh/06c-detectability.md` 第 6.16 节（危害角度摘要另见 `docs/report_zh/06a-harm-ranking.md`）。
 
 经用户确认后，已在 tmux session `triviaqa_train` 中启动 `triviaqa-ratio10` 的正式全量训练（`clean` 与
 `wrong_answer` 两个数据集，`--model hf-lora` 真实 LoRA 训练），当前仍在运行中。Plan 2 Part B 提出的完整实验
