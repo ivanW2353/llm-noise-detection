@@ -55,3 +55,7 @@ datasets/oasst-wild
 # Personal Claude Code config, not a project deliverable.
 /CLAUDE.md
 /.claude/
+
+# Agent session-state tracking (ephemeral working memory across chat sessions,
+# not a project deliverable — AGENTS.md stays the tracked source of stable rules).
+/PROGRESS.md
