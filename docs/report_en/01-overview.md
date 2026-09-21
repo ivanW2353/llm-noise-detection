@@ -1,6 +1,12 @@
 ## 1. Experiment Overview
 
-This project investigates a core question: **without ever using noise labels, can training dynamics captured during LoRA fine-tuning (loss trajectories, gradient norms, cosine similarity, etc.) reveal which training samples were injected as low-quality/anomalous?**
+This project is organized around three parallel research threads. They build on one another yet remain independent — missing any one of them leaves the bigger question ("is noise detection worth doing in practice?") unanswered:
+
+1. **Thread 1 (harm ranking)**: which noise types actually hurt training the most? Even a perfectly detectable noise type is not worth cleaning if it is nearly harmless downstream.
+2. **Thread 2 (feature signatures)**: what do the metric signatures of each noise type look like — how do training dynamics and text features vary by type?
+3. **Thread 3 (detectability)**: given these signatures, can noisy samples be separated out **without ever using noise labels**, how accurate is that separation, and does cleaning actually improve training?
+
+The three threads are not simply sequential. Thread 2 is the methodological foundation for Thread 3 — without first knowing what the signatures look like, there is no basis for designing a label-free scorer. But Thread 2's central mechanistic finding (the "direction-reversal trap" in Sections 5.2/6.6) shows precisely why Thread 2 and Thread 3 must be discussed separately: high *supervised* detection accuracy (e.g. `template`'s in-domain AUC of 0.999) does not imply an equally accurate *label-free* scheme exists (the same type scores only 0.522 under `iforest`). Thread 1 is independent of both — no matter how detectable or how mature the label-free scheme, cleaning a noise type that is essentially harmless downstream (e.g. `garbled`'s zero downstream gain after closed-loop cleaning, Section 6.13.1) delivers limited real value.
 
 ### 1.1 Data and Noise Types
 
@@ -29,19 +35,22 @@ Two experiment tags correspond to two noise ratios:
 
 ### 1.3 Report Structure
 
-The report follows a standard paper structure, in eight chapters, one file each:
+The report is split into eight chapters (Chapter 6 is physically split into four files — the index plus 06a/06b/06c — see below). The table below is organized as "chapter × primary thread served": `●` means the chapter is primarily about that thread, `○` means it touches on it but is not the focus, and a blank cell means it is essentially unrelated:
 
-| Ch. | Content | When to read it |
-|---|---|---|
-| 1 | Experiment overview | Now |
-| [2](02-related-work.md) | Related work | To see which existing results this builds on, and the division of labour with them |
-| [3](03-premises.md) | Experimental premises | **Before reading any number** — the label-free constraint, the single model scale, and the two sample populations |
-| [4](04-design.md) | Experimental design | To reproduce the work, or to check how a particular number was computed |
-| [5](05-theory.md) | Theoretical analysis | To see why it is designed this way, and which noise types are predicted detectable |
-| [6](06-results.md) | Experimental process and results | Setup, data, analysis and results for 12 experiment groups (the body) |
-| [7](07-conclusions.md) | Conclusions and future work | To go straight to the findings |
-| [8](08-appendix.md) | Appendix | Metric definitions, collection timing, and all raw-data displays |
+| Ch. | Content | Thread 1<br>harm ranking | Thread 2<br>feature signatures | Thread 3<br>detectability |
+|---|---|:---:|:---:|:---:|
+| 1 | Experiment overview (now) | ● | ● | ● |
+| [2](02-related-work.md) | Related work — what this method builds on, and the division of labour with it | ○ | ● | ● |
+| [3](03-premises.md) | Experimental premises — **read before any number**: the label-free constraint, the single model scale, the two sample populations | ○ | ● | ● |
+| [4](04-design.md) | Experimental design — to reproduce the work or check how a number was computed | ○ | ● | ● |
+| [5](05-theory.md) | Theoretical analysis — why it is designed this way, and which noise types are predicted detectable | ○ | ● | ● |
+| [6](06-results.md) | Experimental process and results: index page (routes to 06a/06b/06c) | ○ | ○ | ○ |
+| [6a](06a-harm-ranking.md) | Downstream harm ranking — which noise type hurts training the most | ● | | ○ |
+| [6b](06b-feature-signatures.md) | Feature signatures of each noise type — what training dynamics / text features look like (the largest part of the report) | | ● | ○ |
+| [6c](06c-detectability.md) | Label-free detectability — detection accuracy, ablations, and real downstream gains from closed-loop cleaning | ○ | | ● |
+| [7](07-conclusions.md) | Conclusions and future work — to go straight to the findings | ● | ● | ● |
+| [8](08-appendix.md) | Appendix — metric definitions, collection timing, all raw-data displays | | ● | ○ |
 
-Chapter 6's 12 groups proceed as "measure capability, then boundaries, then real benefit": 6.2-6.9 examine each facet of detection capability (in-domain difficulty, cross-type and cross-ratio transfer, cleaning-precision lift, the direction-reversal trap, early detection, feature attribution, downstream harm); 6.10-6.12 synthesize and probe boundaries (best-method summary, two layers of feature ablation, and dismantling the "noise type is known" premise); 6.13 is the only experiment that actually removes samples and retrains, producing a real downstream comparison.
+Internally, the three Chapter-6 sub-files still follow "measure capability, then boundaries, then real benefit": 06b examines the detection difficulty, transferability, direction-reversal trap, and feature attribution of each noise type; 06c builds on that with synthesis, boundary conditions (unknown types), and real closed-loop cleaning gains; 06a is independent of the first two and answers "is it worth cleaning at all" directly from downstream benchmarks. Sections 6.13/6.16 in 06c are the only experiments in the whole report that actually remove samples and retrain, producing a real downstream comparison.
 
 **Read Chapter 3 first.** Numbers in this report belong to two different populations (supervised vs. label-free, full coverage vs. diagnostic subsample), and conflating them yields wrong conclusions; Sections 3.1 and 3.5 explain both distinctions.

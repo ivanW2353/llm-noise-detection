@@ -4,6 +4,8 @@ This section collects the premises the whole experiment rests on. Some are const
 
 ### 3.1 Hard constraint: noise labels are never used
 
+**Primary impact: Thread 3 (detectability)** — this constraint directly decides whether the question "can noise be separated label-free" is even meaningful; it also draws the line, for Thread 2, that supervised AUC is a signal ceiling, not something production can reach.
+
 This is the first premise behind every method, and the main dividing line from the noisy-label literature (Section 4.3): **no scorer sees `noise_type` at any point**. Labels appear in exactly two places — injecting noise when building the datasets, and computing AUC / precision when evaluating. The detection side never sees them.
 
 The constraint rules out a family of practices that are common in academic settings and unavailable in production:
@@ -15,6 +17,8 @@ The constraint rules out a family of practices that are common in academic setti
 The sole exception is the **supervised AUC in Sections 6.2 and 6.3**, which deliberately trains a random forest on the labels. Those sections are not a production proposal but a **reference ceiling for the signal**: if even a supervised model cannot separate a noise type, a label-free one certainly cannot. Every supervised number in the report is explicitly marked as such.
 
 ### 3.2 The noise is programmatically injected, not wild
+
+**Primary impact: Thread 2, Thread 3** — this premise bounds how far the detector's generalization can be trusted: every mechanistic finding Thread 2 reports (the direction-reversal trap, feature attribution) and every label-free precision figure Thread 3 reports are validated on this known, injected distribution. It does not directly constrain Thread 1, since measuring downstream harm only depends on the fact that a bad row is present in training — not on whether that row came from injection or the wild.
 
 All 7 noise types are injected by `data.py::apply` under fixed rules, so the perturbation is known and consistent. This buys one key advantage and imposes one key limitation:
 
@@ -40,11 +44,13 @@ The cost is training speed: roughly 1.5 hours per dataset, about 13.5 hours for 
 
 ### 3.5 Two populations that must be read separately: full coverage vs. diagnostic subsample
 
+**Primary impact: Thread 3** (this is the gap between reported AUC and what production can actually reach, and it directly bounds how much precision a real cleaning pipeline can deliver); it also affects how the absolute value of a Thread 2 number should be read (the ranking is stable across both populations, but the raw AUC is not).
+
 This is the easiest trap in the whole report, and Sections 4.3 and 4.5 restate it:
 
 | Population | Features | Sample size | Who uses it |
 |---|---|---|---|
-| **Full coverage** | 20 | All training samples (14,611+) | Closed-loop cleaning (Section 6.13), i.e. what production can actually reach |
+| **Full coverage** | 19 | All training samples (14,611+) | Closed-loop cleaning (Section 6.13), i.e. what production can actually reach |
 | **Diagnostic subsample** | 37 | ~900-1200 rows per dataset | Most AUCs in Sections 6.2-6.12 |
 
 The gap comes from `diag_subsample=8`: token-level diagnostics and `cos_global_*` are collected for only 1 sample in 8, about 12.5% coverage. Most analyses use `dropna` requiring every feature to be non-null, so they effectively run on that ~12.5%.

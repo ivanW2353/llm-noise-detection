@@ -1,82 +1,89 @@
-## 5. Theoretical Analysis
+## 5. Theoretical Analysis of the Experiment
 
-This section writes the expectations down *before* looking at the data: **why training dynamics should bear traces of noise, what shape of trace each of the seven types should leave, and where the method must fail.** Stating expectations up front does two things. It lets later results be judged as matching or violating a prediction rather than narrated after the fact; and the most important finding in this report (direction reversal) came from an initial expectation that was *wrong*, which is only visible if the expectation is written out explicitly.
+This section writes down expectations before looking at the data: **why training dynamics should carry a trace of noise, what shape that trace should take for each of the seven noise types, and where this method necessarily fails.** Writing predictions down first serves two purposes: it lets later results be judged "consistent with" or "in violation of" the prediction rather than rationalized after the fact; and this report's single most important finding (direction reversal) comes precisely from a wrong initial prediction, which can only be seen clearly if it is stated explicitly up front.
 
-### 5.1 Base assumption: noisy samples do not "fit in" during optimization
+### 5.1 Basic assumption: noisy samples "don't fit in" during optimization
 
-The whole method rests on one assumption: fine-tuning aims to fit a data distribution, so if a subset of samples does not belong to that distribution, the model's behaviour while fitting them differs from its behaviour on normal samples. In observable terms:
+The whole method rests on one assumption: fine-tuning fits a data distribution, and if a batch of samples does not belong to that distribution, the model's behaviour while fitting them should differ from its behaviour on normal samples. In observable terms:
 
 | Observable | Expected mechanism |
 |---|---|
-| High loss, slow decline (`loss_mean`↑, flat `loss_slope`) | Noisy samples conflict with the model's existing knowledge and need more steps to fit |
+| Loss high, decreasing slowly (`loss_mean`↑, flat `loss_slope`) | Noisy samples conflict with what the model already knows, and take more steps to fit |
 | Large gradient norm (`grad_norm_mean`↑) | Fitting an anomalous sample requires a larger parameter change |
-| Direction disagrees with the reference gradient (`cos_ref_mean`↓) | Noise pulls parameters somewhere other than the consensus direction of normal data |
-| Anomalous contribution to the update (`update_contrib`) | The same thing, viewed as a share of the parameter update |
+| Direction disagrees with the reference gradient (`cos_ref_mean`↓) | Noise pulls parameters somewhere other than the "consensus direction" of normal data |
+| Anomalous contribution to the parameter update (`update_contrib`) | Same idea, viewed from the share of the update instead |
 
-This is the literature in Sections 4.1 and 4.2 made concrete for this setting. It also explains why the scorer can be **unsupervised outlier detection** (`iforest`): if noise deviates from the bulk along all these dimensions, then in standardized feature space it should land in a low-density region.
+This is the same literature thread from Sections 2.1 and 4.2, made concrete for this setting. It also explains why the scorer can be **unsupervised outlier detection** (`iforest`): if noise deviates from the bulk distribution along these dimensions, then after standardization it should fall in a low-density region of feature space.
 
-### 5.2 The key theoretical correction: two noise classes with opposite mechanisms
+### 5.2 A key theoretical correction: two mechanistically opposite classes of noise
 
-The assumption above hides a premise — **that noise is harder to learn**. That premise holds for some noise types and is exactly backwards for others. This is the most important theoretical distinction in the report.
+The assumption above has a hidden premise — **that noise is harder to learn**. That premise holds for part of the noise but is exactly reversed for the rest, which is this report's most important theoretical distinction:
 
 **Class A: anomalous noise (noise = outlier)**
 
-`garbled`, `unrelated`, and `truncation` belong here. They conflict with the normal statistical structure of language: garbled character combinations barely exist in the pretraining distribution, an unrelated answer does not match its question semantically, and truncation stops mid-sentence. Fitting them costs the model extra, so loss is high, gradients are large, and direction deviates. **The directional assumption behind outlier detection holds here.**
+`garbled`, `unrelated`, and `truncation` belong here. They conflict with the normal statistical structure of language: garbled character combinations barely exist in the pretraining distribution, unrelated responses don't semantically match the question, and truncation stops mid-sentence. Fitting them costs the model extra: loss stays high, gradients stay large, and direction drifts away from consensus. **The outlier-detection direction assumption holds here.**
 
-**Class B: hyper-typical noise (noise = abnormally easy to learn)**
+**Class B: hyper-typical noise (noise = anomalously easy to learn)**
 
-`template` and `duplicate` belong here, and the mechanism is the reverse:
+`template` and `duplicate` belong here, with the opposite mechanism entirely:
 
-- Template replaces the entire response with one fixed sentence (in the worked example, 1055 characters collapse to the 35-character `The answer to this question is 42.`). That sentence is grammatically perfect, extremely short, and appears over a thousand times in the training set. The model needs only a few steps to learn "output this sentence for any question."
-- Duplicate is a character-identical copy. The second time the model sees the sample, it has already fitted it.
+- Templating replaces the entire response with one fixed sentence pattern (in this report's running example, 1055 characters collapse to the 35-character `The answer to this question is 42.`). That sentence is grammatically perfect, extremely short, and appears thousands of times in the training set. The model needs only a few steps to learn "output this sentence for any question."
+- Exact duplication is a character-for-character copy. By the time the model sees the same sample a second time, it has already fit it.
 
-So in training dynamics, Class B noise shows **abnormally low loss, abnormally fast convergence, and abnormally small gradient norms** — it looks *more* like clean data than clean data does. Two predictions follow directly:
+So Class B noise shows up in training dynamics as **abnormally low loss, abnormally fast convergence, abnormally small gradient norm** — in other words, "more clean-looking than clean samples." This yields two theoretical predictions directly:
 
-1. **Generic outlier detection will fail, possibly invert.** `iforest` scores by deviation from the bulk, but Class B noise sits on the "too central" side of the distribution. Worse, outlier detection is **undirected**: it knows a sample is unusual but not whether to look on the "too hard" or "too easy" side. When the high-scoring region is occupied by genuinely difficult clean samples, Class B noise is pushed into the low-scoring region — i.e. preferentially protected.
-2. **A signed prior rule is required.** Detecting Class B noise means specifying the direction explicitly: find the samples with the **lowest** loss and **fastest** convergence. That is where the `memo_signed` scorer comes from — a fixed negative sign on each of 6 features (`MEMO_FEATS` is all -1), looking only at the hyper-typical side.
+1. **Generic outlier detection fails, or reverses.** `iforest` scores "deviation from the bulk," while Class B noise sits on the "too central" side of the distribution. Worse, outlier detection has **no notion of direction**: it only knows "this batch is unusual," not whether to look on the "too hard" or the "too easy" side. When the high-score region is instead occupied by genuinely difficult clean samples, Class B noise gets pushed into the low-score region — i.e. preferentially protected.
+2. **A signed prior rule is required.** Detecting Class B noise requires explicitly specifying the direction — looking for the samples with the **lowest** loss and the **fastest** convergence. This is where the `memo_signed` scorer comes from: it fixes a negative sign on each of 6 features (`MEMO_FEATS` are all -1), searching only the hyper-typical side and ignoring the other.
 
-This distinction also foreshadows how serious the contradiction in Section 4.3 is: the noisy-label literature's small-loss criterion (low loss = trustworthy) **systematically protects** Class B noise. Section 6.6 verifies this on data, and Section 6.13 quantifies what it costs once it drives a real cleaning action.
+This distinction also foreshadows the severity of the tension noted in Section 4.3: the "small-loss criterion" from the noisy-label literature (low loss = trustworthy) **systematically protects** Class B noise. Section 6.6 validates this with data, and Section 6.13 quantifies its cost in a real cleaning action.
 
-**Class C: lightly perturbed noise (expected to be hard to detect)**
+**Class C: mildly perturbed noise (predicted hard to detect)**
 
-`near_duplicate` and `keyword` are neither anomalous nor hyper-typical. Keyword substitution swaps only entity nouns, leaving sentence structure, grammar, and punctuation untouched (in the example in Appendix 8.6, some entities are not even substituted); near-duplicate preserves meaning through synonym substitution and reordering. From the model's point of view these samples remain **fluent, plausible, learnable natural language** — whether a substituted entity is factually correct leaves no trace in training dynamics, because what the model learns is "given this prompt, emit this response," and that response is no harder to fit than the original.
+`near_duplicate` and `keyword` are neither anomalous nor hyper-typical. Keyword substitution only swaps entity nouns in a sentence, leaving structure, grammar, and punctuation untouched (the example in Appendix 8.1 even leaves some entities unswapped); near-duplicate paraphrases preserve meaning through synonym substitution and reordering. From the model's point of view these are still **fluent, plausible, learnable natural language** — whether a swapped entity happens to be factually correct leaves no trace in training dynamics, because the model is learning "produce this response given this prompt," and that response is no harder to fit than the original.
 
-**The theory therefore predicts detection AUC for these two will fall well below Classes A and B**, and that the limitation is not "the wrong scoring method" but the absence of the signal from training dynamics at all. Section 6.11's ablation confirms the prediction: even adding token-level diagnostics that production cannot obtain, near_duplicate reaches only 0.641, and keyword's three conditions all land between 0.50 and 0.59.
+**So the theoretical prediction is that both types' detection AUC will be markedly lower than Class A and B**, and this ceiling is not "the wrong scoring method was chosen" — the signal simply does not exist in training dynamics. Section 6.11's ablation confirms this prediction: even adding token-level diagnostics (unavailable in production), near_duplicate only reaches 0.641, and keyword sits at 0.50-0.59 across all three conditions.
 
-### 5.3 The fundamental difficulty of the label-free setting: direction is unknowable
+### 5.3 The fundamental difficulty under label-free scoring: direction is unknowable
 
-Putting Section 5.2 together with Section 6.2.1's label-free constraint yields a structural difficulty:
+Combining Section 5.2's conclusion with Section 6.2.1's label-free constraint produces a structural difficulty:
 
-- Class A noise needs a scorer that looks for outliers;
-- Class B noise needs a scorer that looks for hyper-typicality;
-- and **choosing between them requires knowing which class the noise belongs to** — precisely what the label-free setting forbids.
+- Class A noise needs a scorer that "looks for outliers";
+- Class B noise needs a scorer that "looks for hyper-typicality";
+- and **choosing between the two requires already knowing which class the noise belongs to** — precisely what the label-free setting forbids knowing.
 
-This is not an engineering problem but a tension inherent to the setting. It has three predictable consequences, each matching a later section:
+This is not an engineering problem but a tension built into the setting itself. It has three predictable consequences, each mapped to a later section:
 
-1. **A calibrated single-type setting can do very well** (type known → correct scorer chosen); this is the "best method per type" summary in Section 6.10.
-2. **An unknown-type setting must pool several directions** and accept a lower precision ceiling. This is the design motivation for the `pooled` scorer in Section 6.12.5: three legs (outlier, hyper-typicality, text similarity) standardized, then combined by **per-sample maximum**. Max rather than mean, because each leg is silent on the types it cannot see, and averaging would let two silent legs bury the one that fired.
-3. **Choosing the wrong direction may cost more than not cleaning.** If the scorer's direction opposes the noise mechanism, removal preferentially discards clean samples and preferentially protects noise — a biased data loss layered on top of noise that is still present. Section 6.13 measures this cost on template.
+1. **A single, already-calibrated type can be handled well** (knowing the type → picking the right scorer). This is what Section 6.10's "best method per type" summarizes.
+2. **An unknown type forces running multiple directions in parallel**, at the cost of a lower precision ceiling. This motivates the `pooled` scorer in Section 6.12.5: three legs (outlier, hyper-typical, text similarity), each standardized, combined by taking the **per-sample maximum**. Max rather than mean is used because each leg stays silent on types it cannot see, and averaging would let two silent legs drown out the one leg that actually responds.
+3. **Picking the wrong direction can cost more than not cleaning at all.** If the scorer's direction is opposite to the noise mechanism, the removal action will preferentially drop clean samples and preferentially protect noise — compounding a biased data loss on top of the noise that was already there. Section 6.13 measures this cost empirically on template.
 
 ### 5.4 An independent signal source: static text similarity
 
-Besides training dynamics, the report collects one training-independent feature, `text_nn_sim` — each sample's text similarity to its nearest neighbor. Theoretically it is **complementary to, not overlapping with**, training dynamics:
+Beyond training dynamics, this report also collects one feature that does not depend on training: `text_nn_sim` — each sample's text similarity to its nearest neighbour. Its theoretical role is **complementary to, not overlapping with**, training dynamics:
 
-- For `duplicate` / `near_duplicate` / `template`, the definition of the noise *is* "too similar to another sample," so it is directly visible at the text level, **without training**.
-- For `garbled`, scrambled character combinations resemble nothing, so text similarity should be abnormally **low** — meaning the suspicious signal for this feature lives in **both tails**, which is why `pooled` uses |z| for this leg while the other two use a one-directional z.
-- For `keyword`, substituting 1-2 entity words barely moves the TF-IDF vector, so it is expected to be useless.
+- For `duplicate` / `near_duplicate` / `template`, the very definition of the noise is "too similar to some other sample," so it is directly visible at the text level, **with no need to train anything**.
+- For `garbled`, garbled character combinations resemble nothing, so text similarity should in theory be anomalously **low** instead — meaning this feature's suspicious signal sits in **both tails**, which is why `pooled` uses |z| for this leg while the other two legs use a signed z.
+- For `keyword`, swapping 1-2 entity words barely changes the TF-IDF vector, so this feature is predicted to be ineffective there.
 
-This feature's existence forces the report to separate two questions: **"can training dynamics detect noise"** and **"can this pipeline as a whole detect noise."** Section 6.8's attribution analysis and Section 6.11's ablation address the first — if over 90% of a type's detection signal comes from `text_nn_sim`, that type cannot serve as evidence that the training-dynamics method works.
+This feature's existence forces the report to separate two questions: **"can training dynamics detect noise"** vs. **"can the pipeline as a whole detect noise."** Section 6.8's attribution analysis and Section 6.11's ablation exist specifically to answer the first question — if a type's detection signal comes 90%+ from `text_nn_sim`, that type cannot serve as evidence that "the training-dynamics method works."
 
-### 5.5 Expectations against measurements
+### 5.5 Expectation-vs-measurement table
 
-The expectations above, in checkable form, with the verifying subsection in the last column:
+The predictions above, put in testable form, with the last column pointing to the section that verifies it. Grouped by thread: the first five rows are Thread 2 (each noise type's feature signature and its validation), the last two are Thread 3 (whether these signatures translate into a deployable separation/cleaning scheme) — the table's content is unchanged from a single combined table, only regrouped, matching the Chapter-6 split into [06b](06b-feature-signatures.md)/[06c](06c-detectability.md).
 
-| Expectation | Mechanism | Verification |
+**Thread 2: feature signatures — mechanism predictions and validation**
+
+| Prediction | Mechanism | Validation |
 |---|---|---|
-| Class A (garbled/unrelated/truncation): outlier detection works | Conflicts with language statistics, hard to fit | Section 6.2: garbled AUC 0.998 (supervised) / 0.936 (label-free iforest) |
-| Class B (template/duplicate): outlier detection fails or inverts | Hyper-typical, abnormally low loss | Section 6.6: template label-free iforest only 0.522 (supervised 0.999); Section 6.13: iforest cleaning precision 4.04%, below random's 9.24% |
-| Class B needs a signed rule to be detectable | Direction specified explicitly | Section 6.6: `memo_signed` lifts template to 0.925 |
-| Class C (near_duplicate/keyword): hard to detect | Signal is not in training dynamics | Section 6.2: supervised AUC only 0.577 / 0.674; Section 6.11: token diagnostics do not fix it |
-| Detectors need per-type calibration but not per-ratio calibration | Noise mechanism is orthogonal to ratio | Section 6.3 (17-20 points lost cross-type) vs. Section 6.4 (nearly lossless cross-ratio) |
-| Unknown type forces pooling, and lowers the precision ceiling | Direction unknowable | Section 6.12: `pooled` P@10% 0.323, above any single method but low in absolute terms |
-| Ranking quality is not downstream benefit | Also depends on whether the noise is genuinely harmful | Section 6.13: garbled precision 5.7x, downstream gain zero |
+| Class A (garbled/unrelated/truncation) outlier detection works | Conflicts with the statistical structure of language, hard to fit | Section 6.2: garbled AUC 0.998 (supervised) / 0.936 (label-free iforest) |
+| Class B (template/duplicate) outlier detection fails or reverses | Hyper-typical, abnormally low loss | Section 6.6: template label-free iforest only 0.522 (supervised 0.999); Section 6.13: iforest cleaning precision 4.04%, below the 9.24% random baseline |
+| Class B needs a signed rule to be detected | Explicitly specifying direction | Section 6.6: `memo_signed` pulls template up to 0.925 |
+| Class C (near_duplicate/keyword) is hard to detect | The signal does not live in training dynamics | Section 6.2: supervised AUC only 0.577 / 0.674; Section 6.11: adding token diagnostics does not fix it |
+| Detectors need per-type calibration, but not per-ratio calibration | The noise mechanism is orthogonal to the ratio | Section 6.3 (cross-type loss of 17-20 points) vs. Section 6.4 (near-zero cross-ratio loss) |
+
+**Thread 3: detectability — deployment-strategy predictions and validation**
+
+| Prediction | Mechanism | Validation |
+|---|---|---|
+| An unknown type forces running in parallel, lowering the precision ceiling | Direction is unknowable | Section 6.12: `pooled` P@10% 0.323, higher than any single method but not high in absolute terms |
+| Ranking quality does not equal downstream benefit (spans Thread 1/Thread 3) | Depends on whether the noise is actually harmful | Section 6.13: garbled reaches 5.7× precision but zero downstream gain |
