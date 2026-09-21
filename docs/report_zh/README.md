@@ -21,6 +21,9 @@
 3. [实验前提](03-premises.md)
 4. [实验方案](04-design.md)
 5. [实验的理论分析](05-theory.md)
-6. [实验过程与结果](06-results.md)
+6. [实验过程与结果](06-results.md)（索引页，拆分为三个主线文件）
+    - [6a. 危害排序](06a-harm-ranking.md)
+    - [6b. 指标特征](06b-feature-signatures.md)
+    - [6c. 可分离性](06c-detectability.md)
 7. [结论与 future work](07-conclusions.md)
 8. [附录：原始数据与指标定义](08-appendix.md)

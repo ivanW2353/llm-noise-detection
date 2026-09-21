@@ -34,6 +34,8 @@ python3 cli.py data --source dolly --tag dolly-ratio10 --ratio 0.10 \
 
 9 个数据集：`clean`（不注入，作为下游对比基线）、7 个单类型、`mixed`。两个噪音比例 `dolly-ratio10`（10%）与 `dolly-ratio5`（5%），后者用于验证结论不是特定比例下的偶然（第 6.4 节）。
 
+本步骤是三条主线共同的数据基础：注入的噪音样本是主线2全部指标特征和主线3全部打分器的观测对象；`clean` 基线则是主线1衡量下游危害时的对比锚点。
+
 ### 4.3 步骤②：LoRA 微调与逐样本指标采集
 
 ```bash
@@ -58,6 +60,8 @@ Qwen2.5-3B-Instruct + LoRA（r=32, alpha=64, dropout=0.05），5 epochs，`micro
 
 这个覆盖率差异贯穿全报告，是读数时最容易踩的坑：**37 个特征里有 13 个只有 12.5% 覆盖率**，而 `dropna` 要求全部非空，所以任何用全部特征的分析实际只跑在约 900-1200 行上。第 6.10 节开头专门解释了这个口径差异，第 6.12 节则同时报 `full_diag`（37 特征、约 919 行）和 `full_coverage`（19 特征、全量 14819 行）两个口径。
 
+本步骤主要为主线2提供数据——逐样本训练动态是后续全部指标特征的直接来源。
+
 ### 4.4 步骤③：汇总逐样本指标表
 
 ```bash
@@ -73,6 +77,8 @@ python3 cli.py analyze --tag dolly-ratio10 --kind features
 
 真实标签 `noise_type` 从 `train.jsonl` 读进来**只用于评估**，任何打分器都不使用它——这是"免标签"的准确含义：标签存在于评估侧，不存在于检测侧。
 
+本步骤主要为主线2提供数据（把逐样本轨迹汇总成可分析的特征表），同时是主线3全部打分器（`iforest`/`memo_signed`/`pooled`）的直接输入。
+
 ### 4.5 步骤④：各项分析的口径
 
 | 分析 | 命令 `--kind` | 做法要点 |
@@ -86,6 +92,8 @@ python3 cli.py analyze --tag dolly-ratio10 --kind features
 | 特征归因（第 6.8 节） | `feature_attribution` | permutation importance，`n_repeats=20` |
 
 **跨类型迁移与 `mixed` 的关系**：`cross_type` 在代码层面显式跳过 `mixed`（`if ds in ('clean','mixed'): continue`），所以它回答不了"混合流"的问题。第 6.12 节用一个独立脚本 `analyze.py::transfer_to_mixed()` 补上这一环。
+
+本步骤的大多数分析（域内检测、跨类型/跨比例迁移、方向反转、早期检测、特征归因）主要为主线2提供数据；`precision_lift`（第 6.5 节）则是直接服务主线3的落地指标。
 
 ### 4.6 步骤⑤-⑥：闭环清洗与重训
 
@@ -105,6 +113,8 @@ python3 cli.py evaluate --tag dolly-ratio10 --dataset cleaning_loop_targeted_tem
 **必须有等量随机剔除对照。** 剔除 10% 样本本身就会减少 10% 训练数据，如果只跟"未清洗基线"比，就无法区分"去噪收益"和"数据量损失"。所以每次 `clean` 同时产出 `train_targeted.jsonl`（按分数剔除）和 `train_random.jsonl`（同一 `n_drop`、同种子随机剔除），重训时两个都跑。第 6.13 节的四方对比（干净基线 / 未清洗 / 定向剔除 / 随机剔除）就是这么来的。
 
 **剔除精度是事后统计，不参与打分。** `targeted_precision` 是剔除集合里真实 `noise_type != 'none'` 的占比，写进 `metadata.json` 供分析，打分过程从未看到它。
+
+步骤⑤主要为主线3提供数据（生成清洗后的候选训练集）；步骤⑥的重训+评测同时服务主线1（下游是否真的变好，即噪音是否确有危害）和主线3（验证清洗方案在真实训练闭环里的实际收益）。
 
 ### 4.7 已知的方案性局限
 

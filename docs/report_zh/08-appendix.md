@@ -6,6 +6,8 @@
 
 ### 8.1 训练轨迹类指标（全量覆盖，来自 `per_sample.jsonl`）
 
+*主线2（指标特征）的定义基础——[06b](06b-feature-signatures.md) 各节引用的全部训练轨迹特征均在此精确定义。*
+
 这一类指标在训练主循环内直接计算，**每个训练样本在每个 epoch 都会产出一条记录，无子采样，覆盖率 100%**（`model.py:246-257` 的 `flush_window`）。由于 `micro_batch=1` 而 `grad_accum=16`（`config.yaml`），代码先对单个样本做前向+反向拿到该样本独有的梯度，再累积 16 个样本后才真正调用 `opt.step()`——这个设计是为了在"梯度累积"这种工程优化手段下，仍能保留"这一步更新里，某个具体样本贡献了多少、往哪个方向"的可归因信息，否则 16 个样本的梯度会被直接加总，无法逐样本区分。
 
 | 指标 | 精确计算方式 | 直觉含义 |
@@ -20,6 +22,8 @@
 | `update_contrib_mean` | 仅取 LoRA 的 `B` 矩阵部分（`b_offsets`），该样本贡献的参数增量 `delta_b` 的范数，除以 Adam 优化器该组参数二阶矩估计 `v_buf`（即 `exp_avg_sq`，从 `opt.state` 里读出）平方根的范数（`model.py:280`：`upd=‖delta_b‖/(‖sqrt(v_buf)‖+1e-8)`），再对 5 个 epoch 取均值 | 比原始梯度范数更接近"Adam 优化器实际会让这个样本挪动多少参数"——因为 Adam 会用二阶矩把不同参数的更新幅度重新缩放，原始梯度大不代表实际更新步长大 |
 
 ### 8.2 Token 级诊断指标（子采样覆盖，来自 `diag_epoch*.jsonl` / `token_diag_epoch*.jsonl`）
+
+*主线2（指标特征）的定义基础。*
 
 每个 epoch 训练结束后，代码额外对训练集做一次**间隔子采样**（`train_data[::diag_step]`，`diag_step=train.diag_subsample`，默认 8，即每 8 个样本取 1 个）的**纯前向推理**（`_diagnostic_pass`，`model.py:120-168`，`@torch.no_grad()`，不参与反向传播、不更新参数），批大小 8。对 14611 条训练样本，子采样后每个 epoch 只对 1827 条（12.5%）计算这批指标，其余 87.5% 的样本这些列为空，`analyze.py` 用全列中位数填充（`_load_run_metrics` 未对这批列做特殊处理，遗留空值由后续 `unsupervised_metrics` 等函数统一 `fillna(median)`）。
 
@@ -38,6 +42,8 @@
 **重要发现（本次探索验证）**：对模板化、近似重复两类，仅用有真实 token 数据的 12.5% 样本算 `hard_loss_max` 的 AUC 分别为 0.920 / 0.632，而全量（87.5% 中位数填充后）AUC 只有 0.564 / 0.515——说明当前 1/8 子采样**显著稀释**了这两类信号；关键词替换则真实数据 AUC 仅 0.555，说明它的瓶颈是信号本身弱，不是采样率问题（详见 8.5 节的重训成本评估）。
 
 ### 8.3 文本层面指标（静态，不依赖训练）
+
+*主线2（指标特征）的定义基础——`text_nn_sim` 是 [06b](06b-feature-signatures.md) 第 6.8 节"两类噪音高 AUC 名不副实"发现的核心特征。*
 
 | 指标 | 精确计算方式 | 直觉含义 |
 |---|---|---|
@@ -80,6 +86,8 @@
 
 ### 8.6 噪音样本示例（原始文本对照）
 
+*主线2（指标特征）的直接证据——用真实文本佐证 [06b](06b-feature-signatures.md) 第 6.2 节的检测难度排序。*
+
 后续所有章节讨论的"检测难度""特征归因"都是抽象的统计结论，这里先给出真实数据，让读者能直接看到 7 种噪音在原始文本层面到底做了什么。以下除关键词替换外均取自 `datasets/dolly-ratio10/{类型}/train.jsonl` 中同一条样本 `sample_id=20`（原问题 "Why do home power outages occur?"，干净回答共 1055 字符，开头为 "Power outages can occur for a number of reasons. First, some perceived \"outages\" may actually be caused by overloading a circuit breaker in a home..."），关键词替换取自 `sample_id=74`（另一个样本，因为 20 号样本的关键词替换恰好落在未展示的片段上，不便说明）：
 
 | 噪音类型 | 制造方式（实测） | 噪音后文本（节选） |
@@ -98,6 +106,8 @@
 ---
 
 ### 8.7 原始特征值示例：一条噪音样本 vs. 一条干净样本
+
+*主线2（指标特征）的直接证据。*
 
 以 `garbled@dolly-ratio10` 为例，取一条被检测为噪音的真实样本（`sample_id=10136`，落在诊断子采样里）与一条干净样本（`sample_id=0`）在 `per_sample_metrics.csv` 里的实际取值对比：
 
@@ -133,6 +143,8 @@
 ---
 
 ### 8.8 原始信号：方向反转在 loss 曲线本身上的直接体现
+
+*主线2（指标特征）的直接证据——[06b](06b-feature-signatures.md) 第 6.6 节方向反转陷阱的原始曲线依据。*
 
 ![原始 loss 轨迹](../../results/charts/raw_loss_trajectory.png)
 
