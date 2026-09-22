@@ -8,7 +8,7 @@ cross-validation of the dolly-ratio10 findings), and `oasst-wild` (natural noise
 module docstring for the framing caveats this implies) are all complete (training + analysis + downstream eval).
 `triviaqa-ratio10` (QA task, `clean`/`wrong_answer` datasets) is currently training. All experiments/analysis run through a single root-level
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
-was replaced 2026-09-11/13, see `docs/experiment_log.md`).
+was replaced 2026-09-11/13).
 
 ## Code structure (root-level entry points + facades, three subpackages)
 
