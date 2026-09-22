@@ -9,10 +9,10 @@ This project studies one central question: **without using any noise labels, can
 
 The four main conclusions:
 
-- **Detection capability depends strongly on the noise mechanism.** Garbled, template, and duplicate reach supervised AUC > 0.98, while keyword and near-duplicate reach only 0.577 and 0.674 — and the limitation for the latter is not a wrong choice of scorer but the absence of the signal from training dynamics (predicted in Section 5.2, confirmed in Section 6.11).
-- **A direction-reversal trap exists.** Memorized noise like template shows abnormally *low* loss and abnormally fast convergence, so generic outlier detection performs near chance on it (0.522); only a signed rule reaches 0.925 (Section 6.6).
-- **On the label-free route, 3 metrics beat all 19** — on all 8 datasets, by 0.133 on average. Feeding IsolationForest all 19 features systematically handicaps it, and part of what looks like "direction reversal" is really dimensional dilution (Section 6.11.4).
-- **Cleaning pays off only when three conditions hold at once**: the noise genuinely harms downstream, the scorer points the right way, and the removal budget lands on the harmful portion. All three hold on template, which recovered 70% of the GSM8K gap; on mixed noise the best-ranking scorer (`pooled`) went *negative* downstream, because a quarter of its budget went to harmless types (Section 6.13).
+- **Detection capability depends strongly on the noise mechanism.** Garbled, template, and duplicate reach supervised AUC > 0.98, while keyword and near-duplicate reach only 0.577 and 0.674 — and the limitation for the latter is not a wrong choice of scorer but the absence of the signal from training dynamics (predicted in Section 5.2, confirmed in [06b](06b-feature-signatures.md) Section 6b.1 and [06c](06c-detectability.md) Section 6c.3).
+- **A direction-reversal trap exists.** Memorized noise like template shows abnormally *low* loss and abnormally fast convergence, so generic outlier detection performs near chance on it (0.522); only a signed rule reaches 0.925 ([06b](06b-feature-signatures.md) Section 6b.4).
+- **On the label-free route, 3 metrics beat all 19** — on all 8 datasets, by 0.133 on average. Feeding IsolationForest all 19 features systematically handicaps it, and part of what looks like "direction reversal" is really dimensional dilution ([06c](06c-detectability.md) Section 6c.3.3).
+- **Cleaning pays off only when three conditions hold at once**: the noise genuinely harms downstream, the scorer points the right way, and the removal budget lands on the harmful portion. All three hold on template, which recovered 70% of the GSM8K gap; on mixed noise the best-ranking scorer (`pooled`) went *negative* downstream, because a quarter of its budget went to harmless types ([06c](06c-detectability.md) Section 6c.5.2, 6c.5.3).
 
 ## Chapters
 
