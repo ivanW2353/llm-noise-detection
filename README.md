@@ -29,25 +29,47 @@
 - **两类噪音的高 AUC 名不副实**：完全重复、话题不相关的检测信号 90% 以上来自静态文本相似度，
   不是训练动态。
 
-## 目录
+## 项目组织
+
+代码分两层：三个子包放具体实现，根目录放**入口 + facade**——`cli.py`/`textsim.py`/`cleaning_loop.py`
+等不方便挪的调用方直接 import 根目录文件，所以 facade 只做转发（`from xxx import *`），这些 import
+路径从未因重构而改变。
 
 ```
 .
-├── settings.py              配置读取和路径
-├── data.py                  JSONL 数据读写与噪声变换
-├── model.py                 mock 与 HuggingFace/LoRA 后端
-├── train.py                 训练编排与逐样本指标
-├── evaluate.py              评测结果持久化
-├── textsim.py               文本层面的最近邻相似度特征（TF-IDF，非训练动态）
-├── analyze.py               训练/token/无监督/迁移/早期检测/特征归因分析
-├── cleaning_loop.py         免标签闭环清洗（三种打分器 + 等量随机剔除对照）
-├── cli.py                   统一命令入口
-├── run.py                   CLI 启动器
+├── settings.py              配置读取和路径（load()、data_dir()/runs_dir()/results_dir()）
+├── data.py                  facade → datalib/
+├── model.py                 facade：Mock 后端 + create() 工厂在此；真正的 hf-lora 后端在 lora/lora_train.py
+├── train.py                 围绕 model.create() 的训练编排（Trainer）
+├── evaluate.py              下游 benchmark 评测（mmlu/gsm8k/hellaswag/arc/bbh/truthfulqa/winogrande），逐任务可续跑
+├── textsim.py               text_nn_sim()：TF-IDF 最近邻相似度，数据层特征而非训练动态特征
+├── analyze.py               facade → analysis/
+├── cleaning_loop.py         build()：免标签闭环清洗（三种打分器 + 等量随机剔除对照，全量训练集）
+├── wild_data.py             从 OASST2 构建天然噪音数据集，未接入 cli.py，需直接运行
+├── cli.py                   data/train/evaluate/analyze/clean 五个子命令的唯一入口
+├── run.py                   CLI 启动器，只调用 cli.main()
+│
+├── datalib/                 sample.py（Sample/Provider）、data_io.py（Jsonl 读写、load_rows() 含 hf://、validate()）、
+│                             data_split.py（split_holdout()/reindex()/split_fractions()）、noise.py（噪声注入 apply()/TRANSFORMS/NOISE_TYPES）
+├── lora/                    lora_train.py（真正的 hf-lora 后端，LoRA 类；fit() 拆成 _setup_run/_run_epoch/_finalize_epoch 等阶段函数，
+│                             按 epoch 边界写 checkpoint/ 并自动续训）、lora_internals.py（逐样本梯度/loss/cos-sim 辅助函数）
+├── analysis/                 metrics_common.py（auc()/precision_at_k() 等底层原语、FULL_COVERAGE_FEATS/MEMO_FEATS）、
+│                             metrics_table.py（build_table() 组装 per_sample_metrics.csv）、
+│                             detect_unsupervised.py（unsupervised_metrics()/memorization_score()/early_detection_sweep()/pooled_scorer_compare()）、
+│                             detect_transfer.py（cross_type_transfer()/cross_ratio_transfer()/transfer_to_mixed()）、
+│                             feature_diagnostics.py（feature_attribution()/minimal_feature_set()/single_feature_ablation()/feature_group_ablation()/length_confound()）
+│
 └── scripts/                 编排脚本（完整流程、评测、分析），不纳入 git 跟踪，见下方说明
 ```
 
-`scripts/` 只放**编排**代码（跑什么、按什么顺序跑，含排队等待 GPU 的轮询逻辑）；检测器/评分规则/特征
-这类实验方法本身一律放根目录并纳入 git 跟踪，通过 `cli.py` 的子命令/`--kind` 暴露。
+**放置原则**：`scripts/`（已 gitignore）只放**编排**代码——跑什么、按什么顺序跑、排队等待 GPU 的轮询逻辑。
+检测器/评分规则/特征这类实验方法本身一律放根目录三个子包并纳入 git 跟踪，通过 `cli.py` 的子命令/`--kind`
+暴露。这条原则已经因为图省事在 `scripts/` 里堆方法代码而破坏过两次（`cleaning_loop.py`/`early_detection_sweep()`，
+之后是 `feature_ablation.py`/`feature_correlation.py`/`minimal_feature_set.py`/`pooled_scorer_compare.py`/
+`single_feature_ablation.py`/`transfer_to_mixed.py`），最终都搬进了 `analyze.py`（对应 `feature_group_ablation()`/
+`feature_correlation()`/`minimal_feature_set()`/`pooled_scorer_compare()`/`single_feature_ablation()`/
+`transfer_to_mixed()`），每次都先跟旧脚本输出逐字节比对再删旧文件。`make_report_charts.py`
+是唯一故意留在 `scripts/` 里不跟踪的脚本（只画图，不是方法，产出的 PNG 本身入库）。
 
 `scripts/` 目录：
 
