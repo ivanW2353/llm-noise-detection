@@ -6,7 +6,11 @@ Four tags trained so far: `dolly-ratio10` (10% noise, all 9 datasets incl. clean
 cross-validation of the dolly-ratio10 findings), and `oasst-wild` (natural noise from OASST2 via `wild_data.py`,
 8.83% noise rate from human `quality` ratings rather than an injected perturbation — see `wild_data.py`'s
 module docstring for the framing caveats this implies) are all complete (training + analysis + downstream eval).
-`triviaqa-ratio10` (QA task, `clean`/`wrong_answer` datasets) is currently training. All experiments/analysis run through a single root-level
+`triviaqa-ratio10` (QA task) has `clean`/`wrong_answer` trained and evaluated; `refusal`/`confusable_wrong`
+(two QA-specific noise types, added because triviaqa answers are 1-3 word entities — any noise type that
+changes response length, e.g. a verbose wrong answer or an echoed question, would be trivially detectable
+via length alone rather than via training dynamics; `verbose_wrong`/`echo_question` were dropped for this
+reason) are built and queued for training once the current eval finishes. All experiments/analysis run through a single root-level
 codebase + `cli.py` entry point — there is no `src/`, `scripts/1_data/` etc. layer anymore (that layout
 was replaced 2026-09-11/13).
 
@@ -17,9 +21,9 @@ consumers (`cli.py`, `textsim.py`, `cleaning_loop.py`, the untracked `baselines.
 directly stay at the root as thin facades re-exporting from the packages, so those imports never
 had to change:
 
-- `datalib/` — `sample.py` (`Sample` dataclass, `Provider` Protocol), `data_io.py` (`Jsonl` read/write, `read()`/`write()`, `load_rows()` incl. `hf://...`, `validate()`), `data_split.py` (`split_holdout()`, `reindex()`, `split_fractions()`), `noise.py` (noise injection: `apply()`, `TRANSFORMS`, `NOISE_TYPES`, corruption helpers).
+- `datalib/` — `sample.py` (`Sample` dataclass, `Provider` Protocol), `data_io.py` (`Jsonl` read/write, `read()`/`write()`, `load_rows()` incl. `hf://...`, `validate()`), `data_split.py` (`split_holdout()`, `reindex()`, `split_fractions()`), `noise.py` (noise injection: `apply()`, `TRANSFORMS`, `NOISE_TYPES`, corruption helpers; includes QA-specific `refusal` — short non-answer phrase — and `confusable_wrong` — TF-IDF nearest-neighbor question similarity swaps in a same-topic wrong answer, special-cased in `apply()` like `duplicate` since it fits a TF-IDF index once over the whole corpus rather than per-sample).
 - `lora/` — `lora_train.py` (`LoRA` class, the real `hf-lora` backend) and `lora_internals.py` (its per-sample gradient/loss/cos-sim helper functions).
-- `analysis/` — `metrics_common.py` (shared low-level primitives — `auc()`, `_cv_auc()`, `_if_auc()`, `_fit_transfer()`, `precision_at_k()`, `FULL_COVERAGE_FEATS`, `FEATURE_FAMILY`, `MEMO_FEATS`, `DIAG_COLS`/`TOKEN_COLS`), `metrics_table.py` (`build_table()` — assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation — plus `training_metrics()`/`token_metrics()`/`token_metrics_for_tag()`), `detect_unsupervised.py` (`unsupervised_metrics()`, `memorization_score()`, `early_detection_sweep()`, `precision_lift_table()`, `pooled_scorer_compare()` — compares `cleaning_loop.py`'s three scorers, reusing its `_score_*` helpers directly), `detect_transfer.py` (`cross_type_transfer()`, `cross_ratio_transfer()`, `transfer_to_mixed()`), `feature_diagnostics.py` (`feature_attribution()`, `feature_correlation()` — Spearman/PCA/VIF redundancy, `minimal_feature_set()` — greedy forward selection, `single_feature_ablation()` — leave-one-out, `feature_group_ablation()` — text/token/trajectory group ablation, `length_confound()` — wild-noise response-length confound control).
+- `analysis/` — `metrics_common.py` (shared low-level primitives — `auc()`, `_cv_auc()`, `_if_auc()`, `_fit_transfer()`, `precision_at_k()`, `FULL_COVERAGE_FEATS`, `FEATURE_FAMILY`, `MEMO_FEATS`, `DIAG_COLS`/`TOKEN_COLS`), `metrics_table.py` (`build_table()` — assembles `per_sample_metrics.csv` from raw run metrics + labels + text_nn_sim, supports `max_epoch` truncation — plus `training_metrics()`/`token_metrics()`/`token_metrics_for_tag()`), `detect_unsupervised.py` (`unsupervised_metrics()`, `memorization_score()`, `early_detection_sweep()`, `precision_lift_table()`, `pooled_scorer_compare()` — compares `cleaning_loop.py`'s three scorers, reusing its `_score_*` helpers directly), `detect_transfer.py` (`cross_type_transfer()`, `cross_ratio_transfer()`, `transfer_to_mixed()`), `feature_diagnostics.py` (`feature_attribution()`, `feature_correlation()` — Spearman/PCA/VIF redundancy, `minimal_feature_set()` — greedy forward selection, `label_free_feature_set()` — same greedy search but selecting on Hartigan's dip statistic instead of the label, excluding `converge_epoch` from the candidate pool since its ~6-value discreteness makes the dip test fire on that discreteness rather than genuine bimodal separation (see its docstring), `single_feature_ablation()` — leave-one-out, `feature_group_ablation()` — text/token/trajectory group ablation, `length_confound()` — wild-noise response-length confound control).
 
 Root-level entry points and facades:
 
@@ -32,7 +36,7 @@ Root-level entry points and facades:
 - `analyze.py` — facade, re-exports from `analysis/`.
 - `cleaning_loop.py` — `build()`: label-free closed-loop cleaning (targeted-drop + random-drop control training sets, full-corpus scale). Three scorers via `method=`: `iforest` (undirected outlier detection), `memo_signed` (fixed-sign hyper-typicality rule for memorized/hyper-typical noise like template/duplicate), `pooled` (max of three standardized legs — iforest z-score, memo_signed z-score, |z| of `text_nn_sim` — for when the noise composition is unknown, e.g. `mixed`).
 - `wild_data.py` — builds a natural-noise dataset from OASST2, using human `quality` annotation ratings (not an injected perturbation) as the noise label; not wired through `cli.py` (run directly). Writes `datasets/{tag}/heldout.jsonl` (clean-only) and `datasets/{tag}/wild/train.jsonl`.
-- `cli.py` — the **only** entry point for the `data`/`train`/`evaluate`/`analyze`/`clean` subcommands; `run.py` just calls `cli.main()`. `analyze --kind` choices: `features`/`training`/`token`/`unsupervised`/`transfer`/`cross_type`/`cross_ratio`/`precision_lift`/`memorization`/`early_unsupervised`/`early_memorization`/`feature_attribution`/`feature_correlation`/`minimal_feature_set`/`single_feature_ablation`/`transfer_to_mixed`/`feature_group_ablation`/`pooled_scorer_compare` (see Commands below).
+- `cli.py` — the **only** entry point for the `data`/`train`/`evaluate`/`analyze`/`clean` subcommands; `run.py` just calls `cli.main()`. `analyze --kind` choices: `features`/`training`/`token`/`unsupervised`/`transfer`/`cross_type`/`cross_ratio`/`precision_lift`/`memorization`/`early_unsupervised`/`early_memorization`/`feature_attribution`/`feature_correlation`/`minimal_feature_set`/`label_free_feature_set`/`single_feature_ablation`/`transfer_to_mixed`/`feature_group_ablation`/`pooled_scorer_compare`/`length_confound`/`external_baselines` (see Commands below).
 
 **Placement principle**: `scripts/` (gitignored, `/*.sh` + `/scripts/` in `.gitignore`) is supposed to hold
 only **orchestration** — what to run, in what order, with what waiting/polling logic. Any code that
@@ -80,6 +84,7 @@ python cli.py analyze --kind early_memorization --tag dolly-ratio10           # 
 python cli.py analyze --kind feature_attribution --tag dolly-ratio10          # permutation importance per noise type
 python cli.py analyze --kind feature_correlation --tag dolly-ratio10          # Spearman/PCA/VIF redundancy (+ _pairs.csv)
 python cli.py analyze --kind minimal_feature_set --tag dolly-ratio10          # greedy forward feature selection (rf + iforest routes)
+python cli.py analyze --kind label_free_feature_set --tag dolly-ratio10       # same greedy search, selects on dip statistic not the label
 python cli.py analyze --kind single_feature_ablation --tag dolly-ratio10      # leave-one-feature-out, both routes
 python cli.py analyze --kind transfer_to_mixed --tag dolly-ratio10            # single-type detectors evaluated against mixed
 python cli.py analyze --kind feature_group_ablation --tag dolly-ratio10       # text/token/trajectory feature-group ablation
