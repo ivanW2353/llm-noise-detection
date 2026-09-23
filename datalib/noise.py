@@ -99,6 +99,44 @@ def _wrong_answer(text,rng):
     if re.search(r'\d',text): return str(int(rng.integers(0,10000)))
     return str(rng.choice(PERSON_NAMES+ORGS+CITIES))
 
+REFUSAL_PHRASES = ['Unknown', "I don't know", 'Not sure', 'No idea', 'Unclear', 'Cannot say', 'N/A']
+
+def _refusal(text, rng):
+    """Short-phrase non-answer, sized to match QA-style single/few-word answers
+    (unlike a full refusal sentence, which would make response length alone a
+    trivial detector — see length_confound's framing for why that matters)."""
+    return str(rng.choice(REFUSAL_PHRASES))
+
+def _confusable_wrong_batch(rows, ids):
+    """Swap in the answer from the most similar *other* question (TF-IDF
+    cosine nearest neighbor over question text), producing a same-topic
+    plausible-but-wrong error rather than `wrong_answer`'s fully random
+    person/org/city swap. Unlike dolly's `_unrelated()`, this can't group by
+    `(s.meta or {}).get('category')` -- triviaqa-ratio10 carries no
+    category/meta field -- so nearest-neighbor question similarity stands in
+    for topic grouping. Special-cased in apply() (like 'duplicate') rather
+    than following the per-sample fn(s,rng,rows) TRANSFORMS shape, since
+    fitting a fresh TF-IDF index per corrupted sample would be O(n^2)."""
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.neighbors import NearestNeighbors
+    questions=[r.messages[0].get('content','') if r.messages else '' for r in rows]
+    vec=TfidfVectorizer(ngram_range=(1,2),min_df=min(5,len(questions)),sublinear_tf=True,max_features=100_000)
+    x=vec.fit_transform(questions)
+    k=min(10,len(rows))
+    nn=NearestNeighbors(n_neighbors=k,metric='cosine').fit(x)
+    order=sorted(ids)
+    _,idx=nn.kneighbors(x[order])
+    out=list(rows)
+    for row_pos,neighbors in zip(order,idx):
+        src=rows[row_pos]
+        src_ans=(src.messages[-1].get('content','') if src.messages else '').strip().lower()
+        other=next((rows[j] for j in neighbors if j!=row_pos and (rows[j].messages[-1].get('content','') if rows[j].messages else '').strip().lower()!=src_ans),None)
+        if other is None: continue
+        m=[dict(d) for d in src.messages]
+        if m and other.messages: m[-1]['content']=other.messages[-1].get('content','')
+        out[row_pos]=Sample(src.id,m,'confusable_wrong',src.meta)
+    return out
+
 _FINAL_NUM_RE = re.compile(r'####\s*(-?[\d,]+(?:\.\d+)?)')
 
 def _wrong_final_answer(text,rng):
@@ -124,8 +162,9 @@ TRANSFORMS = {
     'unrelated': _unrelated,
     'wrong_answer': lambda s,rng,rows: _edit(s,'wrong_answer',lambda t: _wrong_answer(t,rng)),
     'wrong_final_answer': lambda s,rng,rows: _edit(s,'wrong_final_answer',lambda t: _wrong_final_answer(t,rng)),
+    'refusal': lambda s,rng,rows: _edit(s,'refusal',lambda t: _refusal(t,rng)),
 }
-NOISE_TYPES = list(TRANSFORMS)+['duplicate']
+NOISE_TYPES = list(TRANSFORMS)+['duplicate','confusable_wrong']
 
 def apply(rows,kind,ratio,seed,mixed_types=None):
     if not 0<=ratio<=1: raise ValueError(f'ratio must be in [0,1], got {ratio}')
@@ -138,6 +177,8 @@ def apply(rows,kind,ratio,seed,mixed_types=None):
     rng=np.random.default_rng(seed); n=int(len(rows)*ratio); ids={int(i) for i in rng.choice(len(rows),min(n,len(rows)),replace=False)}
     if kind=='duplicate':
         return rows+[_duplicate_copy(rows[i],k) for k,i in enumerate(sorted(ids))]
+    if kind=='confusable_wrong':
+        return _confusable_wrong_batch(rows,ids)
     fn=TRANSFORMS.get(kind)
     if fn is None: raise ValueError(f'Unknown noise kind: {kind}')
     return [fn(r,rng,rows) if i in ids else r for i,r in enumerate(rows)]
