@@ -39,7 +39,9 @@ After each epoch finishes, the code additionally runs a **strided subsample** (`
 | `hard_id_uniq` | Total count of distinct hard-token IDs that appear across all 5 epochs, deduplicated (`model.py:93-94`: union of each epoch's top-32 token IDs) | How "stable" the set of hard tokens is — a small value means the same tokens are consistently hard every time, a large value means the hard spot drifts |
 | `hard_pos_jaccard` | Jaccard similarity (intersection / union) between the hard-token position sets of consecutive epoch pairs, averaged over all adjacent pairs (`model.py:95-98`: `len(pa&pb)/max(1,len(pa\|pb))`) | Whether the "hard spot" persistently sits on the same tokens (high Jaccard, more structural) or wanders randomly (low Jaccard, more noise-like) |
 
-**Key finding (validated in this exploration)**: for templating and near-duplication, using only the 12.5% of samples that have real token data, `hard_loss_max`'s AUC is 0.920 / 0.632 respectively, while the full-coverage version (87.5% median-filled) only reaches 0.564 / 0.515 — showing the current 1/8 subsample **significantly dilutes** these two types' signal. For keyword substitution, real-data AUC is only 0.555, showing its bottleneck is weak signal itself, not the sampling rate (see the retraining cost estimate in Section 8.5).
+![How the 1/8 subsample dilutes token-level signal](../../results/charts/en/subsample_dilution.png)
+
+**Key finding (validated in this exploration)**: for templating and near-duplication, using only the 12.5% of samples that have real token data, `hard_loss_max`'s AUC is 0.920 / 0.632 respectively, while the full-coverage version (87.5% median-filled) only reaches 0.564 / 0.515 — showing the current 1/8 subsample **significantly dilutes** these two types' signal. For keyword substitution, real-data AUC is only 0.555, showing its bottleneck is weak signal itself, not the sampling rate (see the retraining cost estimate in Section 8.5). This finding has been folded into [07-conclusions.md](07-conclusions.md) Section 7.2 Limitations (Thread 2).
 
 ### 8.3 Text-level metrics (static, training-independent)
 

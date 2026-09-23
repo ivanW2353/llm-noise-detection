@@ -27,14 +27,14 @@ All 7 noise types are injected by `data.py::apply` under fixed rules, so the per
 
 Two injection details also affect how numbers read, detailed in Section 4.2: `duplicate` is the only type that changes the dataset's row count (it appends copies rather than replacing in place, so its noise fraction is 9.1% rather than 10%), and `mixed`'s per-subtype counts fluctuate between 191 and 211.
 
-### 3.3 A single base model, a single scale, a single task domain
+### 3.3 A single base model, a single scale; the task domain has grown from one to two
 
-Every experiment uses Qwen2.5-3B-Instruct + LoRA (r=32) for 5 epochs, with dolly-15k as the base dataset. No cross-validation was run over model scale, LoRA rank, epoch count, or base dataset.
+Every experiment uses Qwen2.5-3B-Instruct + LoRA (r=32) for 5 epochs. The base dataset used to be dolly-15k (instruction-following) alone; `triviaqa-ratio10` (a single factual-QA task, see [06a](06a-harm-ranking.md) Section 6a.3) is now a second task domain, still in training (see Section 3.6). No cross-validation has been run over model scale, LoRA rank, or epoch count.
 
 This premise bears on two classes of conclusion very differently:
 
 - **Detection-capability conclusions** (most sections in [06b](06b-feature-signatures.md)/[06c](06c-detectability.md)) are relatively robust. They rest on the mechanism that noisy and clean samples separate in training dynamics, and the ranking is consistent across the 10% and 5% noise ratios ([06b](06b-feature-signatures.md) Section 6b.3) — ratio cross-validation supplies one layer of robustness evidence, though it is no substitute for cross-validating over model scale.
-- **Downstream-harm conclusions** ([06a](06a-harm-ranking.md) Section 6a.1 and [06c](06c-detectability.md) Section 6c.5) are affected far more. The 7-benchmark averages cluster in a narrow 0.42-0.44 band; the downstream harm of noise is small to begin with. Larger models, longer training, or an evaluation set more sensitive to noise could plausibly widen these differences. **The conclusion "this noise type does nearly zero downstream harm" holds only at the current scale.**
+- **Downstream-harm conclusions** ([06a](06a-harm-ranking.md) Section 6a.1 and [06c](06c-detectability.md) Section 6c.5) are affected far more. On the dolly task domain, the 7-benchmark averages cluster in a narrow 0.42-0.44 band; the downstream harm of noise is small to begin with. Larger models, longer training, or an evaluation set more sensitive to noise could plausibly widen these differences. **The conclusion "this noise type does nearly zero downstream harm" holds only at the current scale and the current task domain** — [06a](06a-harm-ranking.md) Section 6a.3's preliminary evidence shows that on triviaqa, a single homogeneous task, the same ratio of `wrong_answer` noise causes an observable drop on several downstream benchmarks simultaneously, and the harm is no longer averaged away. Whether harm gets masked turns out to depend on task-domain diversity too, not on model scale alone.
 
 ### 3.4 `micro_batch=1` is a methodological precondition, not a tuning choice
 

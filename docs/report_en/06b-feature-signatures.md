@@ -41,6 +41,8 @@ That is, each dataset uses only about 900-1000 samples (roughly 6-7% coverage re
 
 ### 6b.2 Cross-Noise-Type Transfer: Can Detectors Generalize
 
+If what a detector has learned is the underlying mechanism of a noise type (e.g. "character combinations violate linguistic statistical regularities") rather than a dataset's incidental quirks, then a detector trained on one noise type should be able, without retraining, to at least partially recognize another noise type with a similar mechanism — this section directly tests whether this expectation holds.
+
 ![Cross-type detector transfer matrix](../../results/charts/cross_type_heatmap.png)
 
 The figure above is the 7×7 transfer matrix under `dolly-ratio10`: each row is the noise type the detector was trained on, each column is the noise type it's tested on, and the diagonal is Section 6b.1's in-domain AUC.
