@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "noisedetect"
 version = "1.0.0"
-dependencies = ["numpy", "pandas", "pyyaml", "scikit-learn"]
+dependencies = ["numpy", "pandas", "pyyaml", "scikit-learn", "diptest"]
 [project.scripts]
 noisedetect = "cli:main"
 [tool.setuptools]

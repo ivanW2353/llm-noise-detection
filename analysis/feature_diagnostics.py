@@ -108,6 +108,94 @@ def feature_correlation(frame: pd.DataFrame, features=None) -> tuple[pd.DataFram
     return pd.DataFrame(rows), pd.DataFrame(pairs)
 
 
+def _if_score(x: np.ndarray, seed: int = 42) -> np.ndarray:
+    """Label-free IsolationForest anomaly score (higher = more anomalous),
+    the same fit `_if_auc` uses internally but returning the score itself
+    instead of collapsing it against labels."""
+    from sklearn.ensemble import IsolationForest
+    from sklearn.preprocessing import StandardScaler
+    xs = StandardScaler().fit_transform(x)
+    return -IsolationForest(n_estimators=300, random_state=seed, n_jobs=-1).fit(xs).score_samples(xs)
+
+
+def _bimodality_dip(score: np.ndarray) -> float:
+    """Label-free bimodality proxy: Hartigan & Hartigan's dip statistic for
+    unimodality (higher = more evidence of a second mode). Unlike a
+    top-fraction-vs-rest gap, the dip test is sensitive to the actual *shape*
+    of the distribution rather than just how extreme its tail is, so it
+    should not fire on every feature set's long right tail the way a raw
+    gap does — a feature set where noise forms a genuinely separate cluster
+    should score higher than one where the IsolationForest score is merely
+    skewed."""
+    import diptest
+    return float(diptest.diptest(np.sort(score), sort_x=False)[0])
+
+
+def label_free_feature_set(frame: pd.DataFrame, features=None, max_k=6, seed=42) -> pd.DataFrame:
+    """Same greedy-forward search as minimal_feature_set(), but the per-step
+    selection criterion never touches noise_type. minimal_feature_set() picks
+    the feature that most improves AUC against the label; this picks the
+    feature that most improves `_bimodality_dip()` — Hartigan's dip
+    statistic on the IsolationForest score distribution. Labels are used
+    only afterward, to report the resulting AUC for each step so it can be
+    compared against minimal_feature_set()'s label-driven result — never for
+    selection itself. This is the label-free-realizable counterpart to
+    minimal_feature_set()'s 'iforest' route; there is no counterpart to its
+    'rf' route, since a label-free recipe has no supervised classifier to
+    run.
+
+    v1 used a top-10%-vs-rest score gap instead of the dip statistic and it
+    failed: the gap barely moved across candidate feature sets (any
+    IsolationForest score has a long right tail regardless of whether that
+    tail is real noise), so the greedy search was effectively picking at
+    random — auc_dir landed near 0.50-0.60 for 5 of 8 dolly-ratio10 datasets
+    vs. 0.65-0.87 for the label-driven baseline. The dip statistic is tried
+    here because it is sensitive to distribution *shape*, not tail extremity.
+
+    `converge_epoch` is excluded from the candidate pool: it is the one
+    FULL_COVERAGE_FEATS column with only ~6 distinct values (all others have
+    tens of thousands), and on IsolationForest scores this coarse a dip test
+    fires on the discreteness itself, not on real bimodal separation — on
+    clean-only dolly-ratio10 data (no injected noise, so no genuine structure
+    to find) it alone scores dip=0.10 vs 0.01-0.03 for every continuous
+    feature. Left in, it wins every greedy first step and actively hurts
+    `template` (auc_dir 0.505, i.e. random) by crowding out the
+    loss_last/loss_min/cos_ref_slope combination that actually detects it
+    (auc_dir 0.775 once converge_epoch is excluded)."""
+    feats = list(features or [c for c in FULL_COVERAGE_FEATS if c in frame.columns])
+    feats = [c for c in feats if c != 'converge_epoch']
+    rows = []
+    for ds in sorted(frame.dataset.unique()):
+        if ds == 'clean':
+            continue
+        sub = frame[frame.dataset == ds].dropna(subset=feats).reset_index(drop=True)
+        y = sub.noise_type.fillna('none').ne('none').astype(int).to_numpy()
+        if y.sum() < 10:
+            continue
+        x = sub[feats].to_numpy(float)
+        full_score = _if_score(x, seed)
+        full_dip = _bimodality_dip(full_score)
+        full_auc = auc(y, full_score)
+        chosen = []
+        for step in range(min(max_k, len(feats))):
+            best = None
+            for j in range(len(feats)):
+                if j in chosen:
+                    continue
+                score = _if_score(x[:, chosen + [j]], seed)
+                dip = _bimodality_dip(score)
+                if best is None or dip > best[0]:
+                    best = (dip, j, score)
+            dip, j, score = best
+            chosen.append(j)
+            rows.append({'dataset': ds, 'n': len(y), 'n_noise': int(y.sum()),
+                        'full_dip': full_dip, 'full_auc_dir': max(full_auc, 1 - full_auc),
+                        'k': step + 1, 'added': feats[j], 'dip': dip,
+                        'auc_dir': max(auc(y, score), 1 - auc(y, score)),
+                        'features': '+'.join(feats[c] for c in chosen)})
+    return pd.DataFrame(rows)
+
+
 def minimal_feature_set(frame: pd.DataFrame, features=None, max_k=6, seed=0, if_seed=42) -> pd.DataFrame:
     """Greedy forward feature selection per dataset/route: starting from
     nothing, repeatedly add whichever remaining feature most improves AUC, up

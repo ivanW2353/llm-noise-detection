@@ -12,4 +12,4 @@ from analysis.metrics_common import auc, summarize, MEMO_FEATS, DIAG_COLS, TOKEN
 from analysis.metrics_table import build_table, training_metrics, token_metrics, token_metrics_for_tag
 from analysis.detect_unsupervised import unsupervised_metrics, early_detection_sweep, memorization_score, precision_lift_table, pooled_scorer_compare
 from analysis.detect_transfer import transfer_metrics, cross_type_transfer, cross_ratio_transfer, transfer_to_mixed
-from analysis.feature_diagnostics import feature_attribution, feature_correlation, minimal_feature_set, single_feature_ablation, feature_group_ablation, length_confound
+from analysis.feature_diagnostics import feature_attribution, feature_correlation, minimal_feature_set, label_free_feature_set, single_feature_ablation, feature_group_ablation, length_confound
