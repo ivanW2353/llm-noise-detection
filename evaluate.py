@@ -155,6 +155,21 @@ def _metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     return max(metric_fn(prediction, gt) for gt in ground_truths)
 
 
+def _is_abstention(prediction):
+    """Whether the model declined to answer rather than asserting a fact. Matches the
+    `refusal` noise type's injected phrases (datalib/noise.py::REFUSAL_PHRASES) plus the
+    empty generation, under the same normalization used for EM so punctuation and casing
+    do not cause misses."""
+    from datalib.noise import REFUSAL_PHRASES
+    # Whitespace is also collapsed, so a generated "I dont know" still matches the injected
+    # "I don't know" (normalization turns the apostrophe into a space, not nothing).
+    squash = lambda s: _normalize_answer(s).replace(' ', '')
+    norm = squash(prediction)
+    if not norm:
+        return True
+    return norm in {squash(p) for p in REFUSAL_PHRASES}
+
+
 def _parse_qa_answer(text):
     text = text.strip()
     return text.splitlines()[0].strip() if text else ''
@@ -343,9 +358,20 @@ def _run_task(model, tokenizer, task, bbh_dir=None, smoke=False):
         preds = [_parse_qa_answer(t) for t in gens]
         em = [_metric_max_over_ground_truths(_exact_match_score, p, a) for p, a in zip(preds, aliases)]
         f1 = [_metric_max_over_ground_truths(_f1_score, p, a) for p, a in zip(preds, aliases)]
-        raw = [{'qid': i, 'em': int(e), 'f1': round(f, 4), 'aliases': a, 'pred': p}
-               for i, (e, f, a, p) in enumerate(zip(em, f1, aliases, preds))]
-        return {'acc': sum(em) / n, 'em': sum(em) / n, 'f1': sum(f1) / n, 'n': n, 'raw': raw}
+        # EM alone cannot separate the two QA noise mechanisms: no TriviaQA gold answer is a
+        # refusal phrase, so a `refusal`-trained model that abstains everywhere scores the same
+        # EM 0 as `wrong_answer`'s confident-but-false entities. Splitting that zero into
+        # "declined to answer" vs "asserted something false" makes them distinguishable.
+        # Correct answers are excluded from abstain first, so the three rates partition n
+        # exactly ("The Unknown" is a real answer that normalizes into the refusal set).
+        abstain = [e == 0 and _is_abstention(p) for e, p in zip(em, preds)]
+        halluc = [e == 0 and not ab for e, ab in zip(em, abstain)]
+        raw = [{'qid': i, 'em': int(e), 'f1': round(f, 4), 'abstain': int(ab), 'hallucinated': int(h),
+                'aliases': a, 'pred': p}
+               for i, (e, f, ab, h, a, p) in enumerate(zip(em, f1, abstain, halluc, aliases, preds))]
+        return {'acc': sum(em) / n, 'em': sum(em) / n, 'f1': sum(f1) / n,
+                'abstain_rate': sum(abstain) / n, 'hallucination_rate': sum(halluc) / n,
+                'n': n, 'raw': raw}
     if task == 'gsm8k':
         samples, answers, _, n = _load_gsm8k()
         if smoke:
