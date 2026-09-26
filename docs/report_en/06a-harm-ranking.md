@@ -90,29 +90,90 @@ The causal relationships in the previous three sections are all built on injecte
 
 ### 6a.3 triviaqa-ratio10 (QA task): under a homogeneous single task, harm is no longer diluted by the "7-benchmark average"
 
-`triviaqa-ratio10` is currently the report's only experiment outside the dolly (instruction-following) task domain: triviaqa is a single, highly homogeneous factual-QA task whose answers are usually 1-3 word entities (see [04-design.md](04-design.md) Section 4.2), in contrast with dolly's diverse instruction types. triviaqa is this report's first non-dolly task domain, and the question this section tests is: is Section 6a.1's "the 7-benchmark average masks real harm" trap specific to the dolly task domain, or does it persist on tasks with a different structure? This section currently covers only the `clean`/`wrong_answer` datasets, so its conclusion scope is limited (see [07](07-conclusions.md) Section 7.2 Limitations for details).
+`triviaqa-ratio10` is currently the report's only experiment outside the dolly (instruction-following) task domain: triviaqa is a single, highly homogeneous factual-QA task whose answers are usually 1-3 word entities (see [04-design.md](04-design.md) Section 4.2), in contrast with dolly's diverse instruction types. This section answers two questions: is Section 6a.1's "the 7-benchmark average masks real harm" trap specific to the dolly task domain? And — holding the task and the noise ratio fixed — **how much does the noise's *content* alone change the harm?** It covers all four datasets under this tag (`clean` plus three QA noise mechanisms), and the second question is precisely what those three mechanisms were designed to answer.
+
+The three mechanisms differ by design (injection in `datalib/noise.py`) in which layer of capability they corrupt, which is the premise for reading the data below:
+
+| Mechanism | Injection | Same question (the true answer is a Scottish island) |
+|---|---|---|
+| `wrong_answer` | Replaced with an unrelated person/org/city entity | `Acme Corporation` — not even the right entity type |
+| `confusable_wrong` | Replaced with the answer of the TF-IDF nearest-neighbour **same-topic question** | `Skye` — genuinely a Scottish island, right type, merely wrong |
+| `refusal` | Replaced with a 1-3 word refusal phrase (`REFUSAL_PHRASES`) | `No idea` |
+
+`refusal` and `confusable_wrong` were designed specifically for the QA setting: triviaqa answers are only 1-3 words, so any noise type that changes response length (a verbose wrong answer, an echoed question) would make length itself a trivial detector. Both therefore preserve the answer's length scale. Measured mean answer lengths for the three noise types are 12.2 (`wrong_answer`), 7.7 (`refusal`), and 10.2 (`confusable_wrong`) characters against 10.3 for clean answers — all the same order of magnitude, and `confusable_wrong` is virtually identical, so length alone carries no usable detection signal.
+
+**How `qa_correctness` is measured**: exact match on the official TriviaQA `rc.nocontext`
+validation split, with normalisation and max-over-aliases identical to the official evaluation
+script (`evaluate.py::_normalize_answer`); training uses the official train split, so the two
+do not overlap. **Two deviations**: (1) a fixed random 2000-question subsample (`seed=42`)
+rather than the full ~17k, for generative-evaluation cost — random error is on the order of
+±1pp, so differences below 1pp should not be taken at face value; (2) a 5-shot prompt rather
+than the official leaderboard setting, so **absolute scores are not comparable with the
+leaderboard** and are only comparable within this tag. `abstain_rate` /
+`hallucination_rate` are metrics added by this project, not part of the official evaluation.
 
 **Raw data** (from `results/eval/eval_triviaqa-ratio10_{dataset}.json`):
 
-| Benchmark | n | clean | wrong_answer | wrong_answer - clean |
-|---|---|---|---|---|
-| qa_correctness | 2000 | 0.3640 | **0.0015** | **-0.3625** |
-| ARC | 1172 | 0.4804 | 0.2568 | **-0.2235** |
-| BBH | 540 | 0.0833 | 0.0037 | -0.0796 |
-| MMLU | 14042 | 0.3316 | 0.2466 | -0.0850 |
-| GSM8K | 1319 | 0.0675 | 0.0152 | -0.0523 |
-| WinoGrande | 1267 | 0.5122 | 0.4901 | -0.0221 |
-| HellaSwag | 10042 | 0.2694 | 0.2537 | -0.0156 |
-| TruthfulQA | 817 | 0.1542 | 0.2558 | +0.1016 |
-| **7-benchmark average** (excluding qa_correctness, matching dolly's convention) | — | **0.2712** | **0.2174** | **-0.0538** |
+| Benchmark | n | clean | wrong_answer | Δ | refusal | Δ | confusable_wrong | Δ |
+|---|---|---|---|---|---|---|---|---|
+| qa_correctness | 2000 | 0.3640 | **0.0015** | **-36.25** | 0.3270 | -3.70 | 0.3675 | +0.35 |
+| ARC | 1172 | 0.4804 | 0.2568 | **-22.35** | 0.6365 | +15.61 | 0.6664 | **+18.60** |
+| MMLU | 14042 | 0.3316 | 0.2466 | -8.50 | 0.4677 | +13.61 | 0.5160 | **+18.44** |
+| BBH | 540 | 0.0833 | 0.0037 | -7.96 | 0.0481 | -3.52 | 0.0722 | -1.11 |
+| GSM8K | 1319 | 0.0675 | 0.0152 | -5.23 | 0.0546 | -1.29 | 0.0705 | +0.30 |
+| WinoGrande | 1267 | 0.5122 | 0.4901 | -2.21 | 0.5004 | -1.18 | 0.5059 | -0.63 |
+| HellaSwag | 10042 | 0.2694 | 0.2537 | -1.56 | 0.2663 | -0.31 | 0.2637 | -0.57 |
+| TruthfulQA | 817 | 0.1542 | 0.2558 | +10.16 | 0.2179 | +6.36 | 0.2166 | +6.24 |
+| **7-benchmark average** (excl. qa_correctness, matching dolly's convention) | — | **0.2712** | **0.2174** | **-5.38** | 0.3131 | +4.18 | 0.3302 | +5.90 |
+
+(Deltas in percentage points. The three-way split of `qa_correctness`: clean EM 0.3640 / abstained 0.0005 / wrong 0.6355; `wrong_answer` 0.0015 / 0 / 0.9985; `refusal` 0.3270 / **0.2375** / 0.4355; `confusable_wrong` 0.3675 / 0 / 0.6325.)
 
 ![Under a homogeneous single task, harm is no longer masked by averaging](../../results/charts/en/triviaqa_harm.png)
 
-**Observations, contrasted with dolly's pattern**:
+![qa_correctness decomposition](../../results/charts/en/triviaqa_qa_decomposition.png)
 
-- **The shape of the harm distribution is entirely different from dolly's.** On dolly, templating's harm concentrates almost exclusively on GSM8K ([6a.1](#61-real-downstream-impact-does-noise-actually-drag-down-model-performance)), leaving the other 6 benchmarks essentially unaffected, so the 7-benchmark average only drops 1.3pp; on triviaqa, `wrong_answer` causes a clear drop on **five** benchmarks — qa_correctness / ARC / BBH / MMLU / GSM8K — with only HellaSwag/WinoGrande (neither directly tests factual correctness) staying roughly flat, and the 7-benchmark average drops 5.38pp, more than 4x the largest single-dataset drop anywhere in dolly (templating, -1.3pp). The likely explanation: triviaqa is a single homogeneous task, so 10% `wrong_answer` noise directly corrupts the single skill of "giving the factually correct answer," which happens to be a shared foundation for qa_correctness/ARC/MMLU/BBH/GSM8K; dolly is a diverse instruction task, so the same noise ratio gets spread across many different skills and rarely accumulates to an observable amount on any single benchmark.
-- **qa_correctness alone (-36.25pp) is a better primary harm metric for this task than the 7-benchmark average (-5.38pp).** This is a repeat of the same trap as [6a.1](#61-real-downstream-impact-does-noise-actually-drag-down-model-performance)'s "the 7-benchmark average masks GSM8K's real damage" — qa_correctness is an evaluation designed specifically for the triviaqa task itself (see [04-design.md](04-design.md)) and isn't diluted by other general benchmarks' "background noise." Future QA-task harm rankings should lead with it, treating the 7-benchmark average only as a reference point comparable with dolly's numbers.
-- **TruthfulQA's +10.16pp rise is a real shift in option scoring, not a scoring-convention artifact — but it does not mean "the noise helped" either.** TruthfulQA uses multiple-choice log-likelihood scoring (see `evaluate.py::_load_truthfulqa`); spot-checking the raw records in `eval_raw_triviaqa-ratio10_{clean,wrong_answer}.jsonl` confirms this is a genuine shift in the margin ranking between options, not a case of vaguer generated text being misjudged. The more likely explanation is that after overfitting on triviaqa's single-task format, the model's option-scoring behavior drifts on a differently-formatted multiple-choice task — a side effect of the noise, not a benefit, and it should not be cited as evidence that `wrong_answer` has a positive effect on any task.
+**Observation 1: the shape of the harm distribution is entirely different from dolly's.** On dolly, templating's harm is almost entirely in GSM8K ([6a.1](#6a1-real-downstream-impact-does-noise-actually-drag-down-model-performance)), leaving the other 6 largely untouched, so the 7-benchmark average falls only 1.3pp. On triviaqa, wrong_answer drops clearly on **five** benchmarks (qa_correctness / ARC / BBH / MMLU / GSM8K) and the average falls 5.38pp — over 4× dolly's largest drop (templating, -1.3pp). The plausible reading: triviaqa is a single homogeneous task, so 10% `wrong_answer` noise pollutes exactly one ability — "give the correct factual answer" — and that ability underpins qa_correctness/ARC/MMLU/BBH/GSM8K alike. On dolly's diverse instruction task the same ratio is spread across many skills and rarely accumulates observably on any one benchmark.
+
+**Observation 2: at the same task and ratio, noise *content* moves harm by two orders of magnitude.** This is a control dolly cannot provide — its 7 noise types vary length, fluency and topical coherence at once, so "how plausible the error is" cannot be isolated. The three QA noise types hold those surface properties fixed (mean answer lengths 12.2 / 7.7 / 10.2 characters against 10.3 for clean; unique-target share 29.4-30.1%), leaving the semantic relationship between wrong and right answer as the only variable:
+
+| Mechanism | Injection | qa_correctness ΔEM |
+|---|---|---|
+| `wrong_answer` | Replaced with an unrelated person/org/city entity | **-36.25pp** |
+| `refusal` | Replaced with a 1-3 word refusal phrase | -3.70pp |
+| `confusable_wrong` | Replaced with the TF-IDF nearest-neighbour same-topic question's answer | **+0.35pp** |
+
+**Both are "10% of answers replaced with a wrong one", yet random-entity substitution nearly destroys factual-QA ability while same-topic substitution is almost harmless.** They corrupt different layers of knowledge: `confusable_wrong`'s answers still fall inside the correct answer-type distribution (ask for an island → get an island), so it corrupts individual fact mappings, independent across 138k facts; `wrong_answer` substitutes an unrelated entity type, corrupting the **structurally shared** prior of "what kind of thing a factual answer even is", and 10% suffices to collapse it.
+
+**Per-sample evidence supports this** (details in [the per-dataset report](../reports_by_dataset_en/triviaqa-ratio10.md), Section 4.6): matching by `sample_id` the same 124186 clean rows across datasets, under `wrong_answer` **100% of the clean rows** have higher loss, median rising **17.9×** (0.215→3.849), whereas `refusal`/`confusable_wrong` raise it only 1.2-1.3×. **The collateral damage is unique to `wrong_answer`**, and its ordering matches the harm ranking exactly.
+
+**Observation 3: a single EM-style metric is insufficient for QA harm.** `refusal` loses only 3.70pp of EM, which looks mild — but its **abstention rate is 0.2375**: on nearly a quarter of questions it no longer attempts an answer (the others: 0.0005/0/0). **EM alone badly understates the behavioural change**, and must be read with the abstain/wrong split — exactly why `abstain_rate`/`hallucination_rate` exist (the three partition every sample; verified 654+475+871=2000).
+
+**Observation 4 (crossing into Thread 3): on this task, detectability and harm run exactly inverse.**
+
+| Dataset | Label-free lift | qa_correctness ΔEM |
+|---|---|---|
+| `wrong_answer` | **1.87×** (hardest to detect) | **-36.25pp** (most harmful) |
+| `refusal` | 4.80× | -3.70pp |
+| `confusable_wrong` | **4.71×** (easiest to detect) | **+0.35pp** (nearly harmless) |
+
+**The most harmful type is precisely the hardest to detect.** Allocating a cleaning budget by scorer ranking quality would spend it first on the nearly harmless `confusable_wrong` while missing the devastating `wrong_answer`. The reason is again the collateral damage — `wrong_answer` raises the clean rows' loss too, compressing the noisy-vs-clean contrast, and outlier detection looks for rows deviating from a bulk that has itself been displaced. **This is Section 6a.2.3's "budget spent on harmless types" seen from another angle**, and it reinforces Section 6a.2's three conditions.
+
+**Observation 5: `refusal`/`confusable_wrong` scoring above baseline reflects relative differences in catastrophic forgetting, not "noise helps".** Their 7-benchmark averages come out 4.18pp and 5.90pp above the clean baseline, entirely from MMLU and ARC. **triviaqa's clean baseline is itself already low**: MMLU 0.3316, ARC 0.4804, against dolly/oasst clean baselines of MMLU 0.60-0.64 and ARC 0.77-0.80. Fine-tuning 5 epochs on 138k "ask a fact → emit a 1-3 word entity" rows itself severely damages knowledge multiple-choice ability, so the four datasets compete on "who is damaged less".
+
+**Ruling out training-step count requires a cross-dataset control** (which is why it belongs here rather than in the per-dataset report):
+
+| tag | Optimizer steps | MMLU | ARC | WinoGrande |
+|---|---|---|---|---|
+| `dolly-ratio10` clean | 4570 | 0.6332 | 0.8046 | 0.5367 |
+| `dolly-ratio5` clean | 4570 | 0.6362 | 0.8012 | 0.5328 |
+| `oasst-wild` | 19340 | 0.6041 | 0.7696 | 0.5328 |
+| **`triviaqa-ratio10` clean** | 43120 | **0.3316** | **0.4804** | 0.5122 |
+
+`oasst-wild` runs 4.2× dolly's steps and loses only 2.9pp of MMLU; triviaqa runs 2.2× more again and loses 30pp. **The effect is highly nonlinear and step count alone cannot explain it** — it looks more related to the shape of the training target. Further corroboration: **WinoGrande barely moves across all four tags** (0.5122-0.5367), so this is not general degradation but **selective damage to knowledge multiple-choice ability** — WinoGrande is also multiple-choice, but its options are complete sentences rather than knowledge phrases. Margin evidence confirms a substantive change rather than an artifact (`wrong_answer`'s MMLU margin collapses to 0.369, against clean 2.170 and refusal 3.351).
+
+A boundary to state honestly: there is no benchmark evaluation of the un-finetuned base model and no step-matched control (e.g. subsampling triviaqa to 15k rows), so the **magnitude** of the forgetting cannot be attributed precisely between task shape and training volume; and the GPU change coincides with the task-domain boundary (Section 3.3), so hardware and task domain cannot be fully separated. What is established is that forgetting occurs, that it is selective, and the relative ordering among the four datasets.
+
+**Observation 6: TruthfulQA's rise is option-scoring drift.** All three noise datasets rise on TruthfulQA (+10.16/+6.36/+6.24). It is scored by multiple-choice log-likelihood (see `evaluate.py::_load_truthfulqa`), and spot-checking the raw records confirms a genuine shift in inter-option margin ranking rather than vaguer generations being misjudged — a side effect of overfitting to a single task, not a benefit.
 
 ---
 

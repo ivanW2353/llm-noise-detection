@@ -42,7 +42,7 @@ python3 cli.py data --source dolly --tag dolly-ratio10 --ratio 0.10 \
 python3 cli.py train --tag dolly-ratio10 --dataset garbled --model hf-lora
 ```
 
-Qwen2.5-3B-Instruct + LoRA（r=32, alpha=64, dropout=0.05），5 epochs，`micro_batch=1` + `grad_accum=16`（等效 batch 16），lr=2e-4，`max_len=1024`。单卡 NVIDIA RTX PRO 6000 Blackwell（~98GB），9 个数据集串行排队，每个约 1.5 小时（第 8.5 节有实测分解）。
+Qwen2.5-3B-Instruct + LoRA（r=32, alpha=64, dropout=0.05），5 epochs，`micro_batch=1` + `grad_accum=16`（等效 batch 16），lr=2e-4，`max_len=1024`。单卡串行排队；dolly 的 9 个数据集在 NVIDIA RTX PRO 6000 Blackwell（~98GB）上每个约 3.1 小时（第 8.5 节有实测分解），triviaqa 的四个数据集在 RTX 4090（~49GB）上每 epoch 约 6.4 小时——主因是数据量为 dolly 的 9.4 倍，换卡说明见第 3.3 节。
 
 `micro_batch=1` 不是性能选择，而是**逐样本梯度追踪的前提**——只有一个样本单独构成一个前向-反向时，才能把梯度范数、与参考方向的余弦相似度归属到这个样本。这是整套方法的数据基础，也是它比常规微调慢的原因。
 

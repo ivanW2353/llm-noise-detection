@@ -11,6 +11,11 @@
 [`docs/report_en/`](docs/report_en/README.md)，两版结构与内容同步）。报告结构为
 相关工作 → 实验前提 → 实验方案 → 理论分析 → 实验过程与结果 → 结论与 future work → 附录。
 
+另有一套**按数据集分述的独立报告**：[`docs/reports_by_dataset/`](docs/reports_by_dataset/README.md)
+（英文版 [`docs/reports_by_dataset_en/`](docs/reports_by_dataset_en/README.md)）。四个 tag
+各一份，每份都可以单独读完，说明该组实验的设计、观测，以及它单独能支撑与不能支撑的结论。
+与上面的报告同源、只是切面不同：上面按研究问题横向比较，这里按实验纵向分述。
+
 想快速了解做了什么、怎么做的，看第 4 章（实验方案）；想知道为什么这么设计，看第 5 章（理论分析）；
 想直接看结论，看第 7 章。原始数据展示（噪音文本对照、单样本特征值、原始 loss 曲线）都在第 8 章附录。
 几个值得先知道的结果：

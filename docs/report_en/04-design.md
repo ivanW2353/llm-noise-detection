@@ -42,7 +42,7 @@ This step is the shared data foundation for all three threads: the injected nois
 python3 cli.py train --tag dolly-ratio10 --dataset garbled --model hf-lora
 ```
 
-Qwen2.5-3B-Instruct + LoRA (r=32, alpha=64, dropout=0.05), 5 epochs, `micro_batch=1` + `grad_accum=16` (effective batch 16), lr=2e-4, `max_len=1024`. Single NVIDIA RTX PRO 6000 Blackwell GPU (~98GB), 9 datasets queued serially, roughly 1.5 hours each (Section 8.5 has the measured breakdown).
+Qwen2.5-3B-Instruct + LoRA (r=32, alpha=64, dropout=0.05), 5 epochs, `micro_batch=1` + `grad_accum=16` (effective batch 16), lr=2e-4, `max_len=1024`. A single GPU, datasets queued serially: dolly's 9 datasets took roughly 3.1 hours each on an NVIDIA RTX PRO 6000 Blackwell (~98GB) (Section 8.5 has the measured breakdown), while triviaqa's four datasets, on an RTX 4090 (~49GB), took about 6.4 hours per epoch — mainly because that dataset is 9.4× larger (see Section 3.3 for the hardware change).
 
 `micro_batch=1` is not a performance choice; it is **the precondition for per-sample gradient tracking** — only when a single sample makes up one entire forward-backward pass can gradient norm and cosine similarity to the reference direction be attributed to that sample. This is the data foundation the whole method rests on, and the reason it is slower than ordinary fine-tuning.
 

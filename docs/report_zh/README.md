@@ -1,7 +1,7 @@
 # 噪声检测实验分析报告
 
 **日期**：2026-09-16
-**范围**：`dolly-ratio10`（10% 噪音，9 个数据集，训练 + 分析 + 下游评测全部完成）、`dolly-ratio5`（5% 噪音，交叉验证，同样全部完成）
+**范围**：四个 tag。`dolly-ratio10`（10% 噪音，9 个数据集，训练 + 分析 + 下游评测全部完成）、`dolly-ratio5`（5% 噪音，交叉验证，同样全部完成）、`oasst-wild`（天然噪音，含闭环清洗）、`triviaqa-ratio10`（QA 任务域，4 个数据集：clean / wrong_answer / refusal / confusable_wrong）
 **图表**：`results/charts/*.png`（由 `scripts/make_report_charts.py` 生成；脚本本身不纳入 git 跟踪，产出的 PNG 纳入跟踪）
 **英文版**：[`../report_en/`](../report_en/README.md)
 

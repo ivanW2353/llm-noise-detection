@@ -30,7 +30,7 @@
 ### 1.2 训练配置
 
 - 模型：Qwen2.5-3B-Instruct，LoRA（r=32）微调，5 epochs，逐样本梯度/loss 追踪。
-- GPU：NVIDIA RTX PRO 6000 Blackwell Server Edition（~98GB），单卡，所有训练/评测任务串行排队执行。
+- GPU：单卡，所有训练/评测任务串行排队执行。**项目中途更换过显卡**：`dolly-ratio10` / `dolly-ratio5` / `oasst-wild` 在 NVIDIA RTX PRO 6000 Blackwell Server Edition（~98GB）上完成，`triviaqa-ratio10` 的全部四个数据集在 NVIDIA GeForce RTX 4090（~49GB）上完成（换卡早于该 tag 的第一次训练，没有任何单次训练跨卡，详见第 3.3 节）。凡涉及耗时/显存/GPU 利用率的数字都按产出它的那张卡标注。
 - 每个数据集训练完成后落盘 `runs/{tag}/{dataset}/metrics/per_sample.jsonl`，包含每个样本每个 epoch 的 loss、梯度范数、余弦相似度等指标，所有后续分析均由此重算，不需要重新训练。
 
 ### 1.3 报告结构

@@ -30,7 +30,7 @@ Two experiment tags correspond to two noise ratios:
 ### 1.2 Training Configuration
 
 - Model: Qwen2.5-3B-Instruct, LoRA (r=32) fine-tuning, 5 epochs, per-sample gradient/loss tracking.
-- GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition (~98GB), single GPU — all training/evaluation jobs are queued and run sequentially.
+- GPU: a single GPU — all training/evaluation jobs are queued and run sequentially. **The GPU changed partway through the project**: `dolly-ratio10` / `dolly-ratio5` / `oasst-wild` ran on an NVIDIA RTX PRO 6000 Blackwell Server Edition (~98GB), and all four `triviaqa-ratio10` datasets ran on an NVIDIA GeForce RTX 4090 (~49GB) — the card changed before this tag's first training run, so no single run spans two cards (see Section 3.3). Every timing, VRAM, and GPU-utilisation figure is labelled with the card that produced it.
 - After each dataset finishes training, `runs/{tag}/{dataset}/metrics/per_sample.jsonl` is written with per-sample, per-epoch loss/gradient-norm/cosine-similarity metrics; all downstream analysis is recomputed from these files without ever retraining.
 
 ### 1.3 Report Structure
