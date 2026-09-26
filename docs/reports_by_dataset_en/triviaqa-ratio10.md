@@ -352,8 +352,11 @@ higher on noisy rows):
 evidence.** The injected unrelated-entity noise is **not harder to learn but easier** —
 median loss 1.677 against 3.849 for the clean rows beside it.
 
-(`features.csv` lists `loss_rank` as 0.941 by taking the symmetric |AUC-0.5| value; this
-report consistently records direction as "is the feature higher on noisy rows".)
+(`features.csv` pools all four datasets, so its values differ from the per-dataset table
+above: pooled, the strongest single feature is `text_nn_sim` at 0.845, followed by
+`grad_norm_last` 0.761 and `update_contrib_mean` 0.755, while `loss_rank` is only 0.609. The
+per-dataset tables here record direction as "is the feature higher on noisy rows", so a
+reversed signal is not misread as a positive one.)
 
 ![wrong_answer per-feature separability](../../results/charts/datasets/en/triviaqa-ratio10/feature_auc_wrong_answer.png)
 ![refusal per-feature separability](../../results/charts/datasets/en/triviaqa-ratio10/feature_auc_refusal.png)
@@ -549,7 +552,8 @@ rows", neither of which was done.
 7. **Downstream harm must therefore be read against the clean baseline of the same task
    domain**; comparing absolute scores across domains would misattribute the task's own
    forgetting to the noise.
-8. **The label-free signal is strong** (the best single feature reaches |AUC-0.5| ≈ 0.44),
+8. **The label-free signal is strong** (each noise type's best single feature reaches
+   |AUC-0.5| of 0.467 / 0.421 / 0.409 respectively),
    and with answer length and target diversity both verified comparable, that strength is not
    explained away by any confounder checked.
 
@@ -558,7 +562,7 @@ rows", neither of which was done.
 1. **The step from "detectable" to "cleaning pays off" is entirely unvalidated on QA.** This
    group has only a feature table and a per-sample metrics table
    (`results/triviaqa-ratio10/` holds 2 CSVs), with no cross-type transfer, closed-loop
-   cleaning or feature ablation. A high AUC such as `loss_rank` 0.941 **cannot be used to
+   cleaning or feature ablation. A label-free AUC in the 0.83-0.88 range **cannot be used to
    infer downstream cleaning gains** — a high AUC says only that rows can be *ranked*, not
    that removing them improves training, which requires an actual remove-and-retrain
    experiment that was not run here.
