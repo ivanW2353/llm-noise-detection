@@ -109,6 +109,15 @@
 提示而非官方 leaderboard 设定,**绝对分数不可与 leaderboard 对比**,只能在本 tag 内部
 横向比较。`abstain_rate`/`hallucination_rate` 是本项目自加指标,不属于官方评测。
 
+**两套评测的分布属性不同,必须分开读。** `qa_correctness` 是**同分布评测**:训练用官方
+train split、评测用官方 validation split,实测问题**零重叠**(76523 vs 9961,交集 0 条),
+任务形式一致。而 **7 项通用 benchmark 对本 tag 的模型是 OOD 评测**——模型被 13.8 万条
+"问题→1-3 词实体"训练 5 epoch 后,已偏离"在选项间打分"这种格式:`clean`(0% 噪音)的 MMLU
+只有 0.3316(dolly 是 0.6332),且 `wrong_answer` 的 MMLU margin 塌缩到 0.369(clean 2.170),
+接近无法区分选项。**因此下表的 7 项平均主要反映"通用能力被遗忘了多少",不宜直接当噪音
+危害读**(遗忘既来自噪音、也来自同质任务微调本身);本节的危害结论以 `qa_correctness`
+为准。
+
 **原始数据**(数据来自 `results/eval/eval_triviaqa-ratio10_{dataset}.json`):
 
 | benchmark | 样本量 n | clean | wrong_answer | Δ | refusal | Δ | confusable_wrong | Δ |

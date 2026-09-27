@@ -168,6 +168,40 @@ answer factual questions — precisely the ability this task's noise is likelies
 Additionally, `abstain_rate` and `hallucination_rate` are **metrics added by this project and
 are not part of the official evaluation** (which reports only EM and F1).
 
+### 2.4 The two evaluations sit in different distributions and must be read separately
+
+Relative to the fine-tuned model, the two evaluation suites occupy **different distributional
+positions**, which determines what each can answer.
+
+**`qa_correctness` is an in-distribution evaluation.** Training uses the official train split
+and evaluation the official validation split, with **zero question overlap** measured (76523
+unique training questions, 9961 validation, intersection **0**), and the task form is
+identical ("ask a fact, emit a short entity"). So it directly measures whether the model can
+still answer factual questions, and is this experiment's **primary harm metric**.
+
+**The 7 general benchmarks are out-of-distribution for this model.** It was trained for 5
+epochs on 138k "question → 1-3 word entity" rows, whereas MMLU/ARC require scoring among
+given options — a different task format entirely. Two pieces of evidence:
+
+- **The clean baseline itself is anomalously low**: this experiment's `clean` (0% noise)
+  scores only 0.3316 on MMLU and 0.4804 on ARC, far below normal for a 3B instruct model.
+- **Margins show the model has left that format's distribution**: MMLU is scored by option
+  NLL, and the margin (NLL gap between runner-up and best) is 2.170 on `clean` but collapses
+  to **0.369** on `wrong_answer` — close to being unable to separate options at all.
+
+**Two reading disciplines follow:**
+
+1. **The 7-benchmark average must not be read as a noise-harm metric.** It mostly reflects how
+   much general capability was forgotten, and that forgetting comes both from the noise and
+   from homogeneous-task fine-tuning itself (`clean` alone loses 30pp). Section 4.4's "avg7
+   is 4.18pp above baseline" for `refusal` must be read as "forgot less", not "less harmful" —
+   **the denominator is itself out-of-distribution**.
+2. **Comparing absolute scores across task domains is meaningless.** Only deltas against this
+   experiment's own `clean` baseline carry meaning.
+
+`qa_correctness` is unaffected by this, which is why this report's core conclusions (the harm
+ranking in Section 4.1) all rest on it.
+
 **And EM alone is not enough**, so two more rates are recorded:
 
 - `abstain_rate`: the share with EM=0 whose prediction is judged a refusal

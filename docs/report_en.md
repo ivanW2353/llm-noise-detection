@@ -638,6 +638,18 @@ than the official leaderboard setting, so **absolute scores are not comparable w
 leaderboard** and are only comparable within this tag. `abstain_rate` /
 `hallucination_rate` are metrics added by this project, not part of the official evaluation.
 
+**The two evaluation suites sit in different distributions and must be read separately.**
+`qa_correctness` is **in-distribution**: training uses the official train split and evaluation
+the official validation split, with **zero question overlap** measured (76523 vs 9961,
+intersection 0), and the task form is identical. The **7 general benchmarks, by contrast, are
+out-of-distribution for this tag's models** — after 5 epochs on 138k "question → 1-3 word
+entity" rows the model has left the "score among options" format: `clean` (0% noise) scores
+only 0.3316 on MMLU (dolly's is 0.6332), and `wrong_answer`'s MMLU margin collapses to 0.369
+(clean 2.170), close to being unable to separate options. **So the 7-benchmark average below
+mainly reflects how much general capability was forgotten and should not be read directly as
+noise harm** (the forgetting comes both from the noise and from homogeneous-task fine-tuning
+itself); this section's harm conclusions rest on `qa_correctness`.
+
 **Raw data** (from `results/eval/eval_triviaqa-ratio10_{dataset}.json`):
 
 | Benchmark | n | clean | wrong_answer | Δ | refusal | Δ | confusable_wrong | Δ |
