@@ -61,6 +61,29 @@ for this regressing a third time.
 - `experiment_tag` defaults to `dolly-ratio10` in `config.yaml`; every `cli.py` subcommand takes `--tag`.
 - GPU: **NVIDIA GeForce RTX 4090, ~49GB**. torch 2.8.0+cu128, transformers 5.13.1, peft 0.19.1. **Single GPU** — only one training/eval job can run at a time; queue others (see tmux convention below).
 
+### Storage split: `/` is small, `/root/autodl-tmp` is the large volume
+
+The system disk `/` is only 30G and runs near-full; `/root/autodl-tmp` (70G) holds
+everything bulky. Two consequences worth knowing before touching files:
+
+- **Gitignored run artifacts live on the large volume behind symlinks**: every
+  `runs/{tag}/{dataset}/{lora,tb}` and every `metrics/layer_norms.jsonl` is a symlink into
+  `/root/autodl-tmp/noisedetect_runs/`, as are `results/eval/eval_raw_*.jsonl`. Git-tracked
+  files (`metrics/*.jsonl` except layer_norms, `summary.json`, everything under `results/`
+  and `datasets/`) **must stay as real files in the repo** — git cannot read through a
+  directory symlink (`git add` fails with `pathspec ... is beyond a symbolic link`).
+- **The LFS object store is NOT inside `.git`.** `.git/config` sets
+  `lfs.storage = /root/autodl-tmp/noisedetect_lfs` (~2.5G, 398 objects). Migrating the repo,
+  moving to another instance, or saving an image **must carry that directory too**, or the
+  local LFS objects are gone. Recovery is `git lfs fetch --all` from the remote (~2.5G
+  download). Note AutoDL does not include `/root/autodl-tmp` in saved images, so a
+  new instance from an image will need that fetch. The setting is local and is never
+  inherited by anyone cloning the repo.
+
+When freeing space on `/`, only gitignored artifacts and the LFS store can move; pushing to
+the remote and then `git lfs prune` is the other lever, and prune only reclaims objects that
+have already been pushed.
+
 ## Commands
 
 ```bash
