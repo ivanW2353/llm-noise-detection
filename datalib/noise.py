@@ -137,6 +137,40 @@ def _confusable_wrong_batch(rows, ids):
         out[row_pos]=Sample(src.id,m,'confusable_wrong',src.meta)
     return out
 
+def _llm_plausible_wrong_batch(rows, ids, map_path):
+    """Swap in an LLM-authored plausible-but-wrong answer, read from a pre-generated
+    {sample_id: answer} map.
+
+    `confusable_wrong` borrows the answer of the nearest-neighbour *question*, so how
+    on-topic the substitution is depends on how good that neighbour happens to be. Here an
+    LLM authors an answer for the specific question instead -- same entity type, same
+    topic, a real entity, but factually wrong (Ganges->Yamuna, Northanger Abbey->Mansfield
+    Park). That should be harder to detect while remaining well-formed.
+
+    Generation is expensive (~138 API calls), so it is done ahead of time by
+    scripts/gen_llm_plausible_wrong.py and only looked up here. Ids missing from the map
+    are left clean rather than silently falling back to another corruption, so the actual
+    injected ratio can come out below the requested one -- the caller should check the
+    emitted noise_type counts instead of assuming.
+    """
+    import json, pathlib
+    path = pathlib.Path(map_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f'{map_path} not found; run scripts/gen_llm_plausible_wrong.py first')
+    amap = json.loads(path.read_text(encoding='utf-8'))
+    out = list(rows)
+    for i in sorted(ids):
+        src = rows[i]
+        w = amap.get(str(src.id))
+        if not w:
+            continue
+        m = [dict(d) for d in src.messages]
+        if m:
+            m[-1]['content'] = w
+        out[i] = Sample(src.id, m, 'llm_plausible_wrong', src.meta)
+    return out
+
 _FINAL_NUM_RE = re.compile(r'####\s*(-?[\d,]+(?:\.\d+)?)')
 
 def _wrong_final_answer(text,rng):
@@ -164,21 +198,25 @@ TRANSFORMS = {
     'wrong_final_answer': lambda s,rng,rows: _edit(s,'wrong_final_answer',lambda t: _wrong_final_answer(t,rng)),
     'refusal': lambda s,rng,rows: _edit(s,'refusal',lambda t: _refusal(t,rng)),
 }
-NOISE_TYPES = list(TRANSFORMS)+['duplicate','confusable_wrong']
+NOISE_TYPES = list(TRANSFORMS)+['duplicate','confusable_wrong','llm_plausible_wrong']
 
-def apply(rows,kind,ratio,seed,mixed_types=None):
+LLM_WRONG_MAP_DEFAULT='datasets/triviaqa-ratio10/llm_wrong_map.json'
+
+def apply(rows,kind,ratio,seed,mixed_types=None,llm_wrong_map=None):
     if not 0<=ratio<=1: raise ValueError(f'ratio must be in [0,1], got {ratio}')
     rows=list(rows)
     if kind=='mixed':
         types=mixed_types or NOISE_TYPES
         out=list(rows)
-        for offset,child in enumerate(types): out=apply(out,child,ratio/len(types),seed+offset,mixed_types=mixed_types)
+        for offset,child in enumerate(types): out=apply(out,child,ratio/len(types),seed+offset,mixed_types=mixed_types,llm_wrong_map=llm_wrong_map)
         return out
     rng=np.random.default_rng(seed); n=int(len(rows)*ratio); ids={int(i) for i in rng.choice(len(rows),min(n,len(rows)),replace=False)}
     if kind=='duplicate':
         return rows+[_duplicate_copy(rows[i],k) for k,i in enumerate(sorted(ids))]
     if kind=='confusable_wrong':
         return _confusable_wrong_batch(rows,ids)
+    if kind=='llm_plausible_wrong':
+        return _llm_plausible_wrong_batch(rows,ids,llm_wrong_map or LLM_WRONG_MAP_DEFAULT)
     fn=TRANSFORMS.get(kind)
     if fn is None: raise ValueError(f'Unknown noise kind: {kind}')
     return [fn(r,rng,rows) if i in ids else r for i,r in enumerate(rows)]
